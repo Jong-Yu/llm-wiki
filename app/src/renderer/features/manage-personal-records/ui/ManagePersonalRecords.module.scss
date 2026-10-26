@@ -1,0 +1,587 @@
+.workspace {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: var(--wiki-layout-workspace-toolbar-height) minmax(0, 1fr);
+  color: var(--wiki-color-text-primary);
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-font-line-height-body);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-16);
+  padding: var(--wiki-space-10) var(--wiki-space-24);
+  border-bottom: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-canvas);
+}
+.toolbar h1 {
+  margin: 0;
+  font-size: var(--wiki-font-size-17);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.toolbar p {
+  margin: 0;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+}
+.panels {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--wiki-layout-documents-index-width) minmax(
+      360px,
+      1fr
+    ) var(--wiki-layout-documents-inspector-width);
+}
+.index,
+.inspector {
+  min-height: 0;
+  min-width: 0;
+  background: var(--wiki-color-surface-panel);
+  display: flex;
+  flex-direction: column;
+}
+.index {
+  border-right: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+.inspector {
+  border-left: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+.panelHeader {
+  padding: var(--wiki-space-18) var(--wiki-space-20);
+  border-bottom: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+.panelHeader h2 {
+  margin: 0;
+  font-size: var(--wiki-font-size-14);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.panelHeader span,
+.panelHeader small {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+}
+.recordList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.record,
+.selectedRecord {
+  display: grid;
+  gap: var(--wiki-space-5);
+  padding: var(--wiki-space-17) var(--wiki-space-20);
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  border: 0;
+  border-bottom: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  cursor: pointer;
+}
+.record strong,
+.selectedRecord strong {
+  font-weight: var(--wiki-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+.record small,
+.record span,
+.selectedRecord small,
+.selectedRecord span {
+  font-size: var(--wiki-font-size-11);
+  color: var(--wiki-color-text-secondary);
+}
+.selectedRecord {
+  background: var(--wiki-color-action-surface);
+  box-shadow: inset 3px 0 var(--wiki-color-action-primary);
+}
+.record:hover {
+  background: var(--wiki-color-surface-subtle);
+}
+.record:disabled,
+.selectedRecord:disabled {
+  cursor: default;
+}
+.pinnedRecord {
+  padding: var(--wiki-space-16);
+  background: var(--wiki-color-action-surface);
+  overflow-wrap: anywhere;
+}
+.pinnedRecord small {
+  display: block;
+  color: var(--wiki-color-text-secondary);
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+  border-top: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+.center {
+  container-type: inline-size;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--wiki-color-surface-canvas);
+}
+.center > [role='status'],
+.center > [role='alert'] {
+  margin: var(--wiki-space-12) var(--wiki-space-20);
+}
+.inspectorBody {
+  overflow: auto;
+  padding: var(--wiki-space-18) var(--wiki-space-20);
+  min-height: 0;
+}
+.inspector h3 {
+  font-size: var(--wiki-font-size-13);
+  overflow-wrap: anywhere;
+}
+.inspector pre,
+.editor pre,
+.collision pre,
+.messages pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  font-family: var(--wiki-font-family-mono);
+  font-size: var(--wiki-font-size-11);
+  line-height: var(--wiki-font-line-height-body);
+}
+.inspector dd {
+  margin-left: 0;
+  overflow-wrap: anywhere;
+  color: var(--wiki-color-text-secondary);
+  font-family: var(--wiki-font-family-mono);
+  font-size: var(--wiki-font-size-11);
+}
+.inspector dt {
+  margin-top: var(--wiki-space-8);
+}
+.inspector summary,
+.editor summary,
+.messages summary,
+.form summary {
+  cursor: pointer;
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+}
+.inspector details,
+.editor details,
+.messages details {
+  margin-top: var(--wiki-space-14);
+}
+.pills,
+.actions {
+  display: flex;
+  gap: var(--wiki-space-8);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.actions {
+  margin-top: var(--wiki-space-12);
+}
+.toolbar .actions {
+  margin: 0;
+  flex-wrap: nowrap;
+}
+.pills button {
+  font-size: var(--wiki-font-size-11);
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.pills button[aria-pressed='true'] {
+  background: var(--wiki-color-action-surface);
+  color: var(--wiki-color-action-primary);
+}
+.empty,
+.muted {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.empty {
+  padding: var(--wiki-space-24) var(--wiki-space-20);
+}
+.chatEmpty {
+  padding: var(--wiki-space-40) var(--wiki-space-32);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  min-height: 280px;
+  color: var(--wiki-color-text-secondary);
+}
+.chatEmpty strong {
+  font-size: var(--wiki-font-size-21);
+  font-weight: var(--wiki-font-weight-medium);
+  color: var(--wiki-color-text-primary);
+}
+.chatEmpty p {
+  max-width: 430px;
+  font-size: var(--wiki-font-size-13);
+}
+.chatEmpty span {
+  font-size: var(--wiki-font-size-11);
+}
+.editor {
+  max-width: var(--wiki-layout-reading-max-width);
+  margin-inline: auto;
+  padding: var(--wiki-space-25) var(--wiki-space-28);
+}
+.editor h2 {
+  margin: 0 0 var(--wiki-space-16);
+  font-size: var(--wiki-font-size-20);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.editor h3 {
+  font-size: var(--wiki-font-size-14);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.form,
+.mappingForm {
+  display: grid;
+  gap: var(--wiki-space-10);
+  min-width: 0;
+}
+.form label,
+.mappingForm label {
+  display: grid;
+  gap: var(--wiki-space-5);
+  font-size: var(--wiki-font-size-12);
+}
+.form input:not([type='checkbox']),
+.form textarea,
+.form select,
+.mappingForm textarea,
+.mappingForm select {
+  font: inherit;
+  color: var(--wiki-color-text-primary);
+  padding: var(--wiki-space-10) var(--wiki-space-12);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  background: var(--wiki-color-surface-canvas);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.form textarea {
+  resize: vertical;
+  line-height: var(--wiki-font-line-height-body);
+}
+.form input:focus-visible,
+.form textarea:focus-visible,
+.form select:focus-visible,
+.mappingForm textarea:focus-visible,
+.mappingForm select:focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
+}
+.form > button,
+.mappingForm > button {
+  justify-self: start;
+}
+.form p,
+.mappingForm p {
+  margin: 0;
+}
+.form small,
+.preparation small {
+  font-size: var(--wiki-font-size-11);
+  color: var(--wiki-color-text-secondary);
+}
+.error {
+  color: var(--wiki-color-status-danger);
+  font-size: var(--wiki-font-size-12);
+}
+.error:empty {
+  display: none;
+}
+.warning {
+  color: var(--wiki-color-status-warning);
+  font-size: var(--wiki-font-size-12);
+}
+.success {
+  color: var(--wiki-color-status-success);
+  font-size: var(--wiki-font-size-12);
+}
+.notice {
+  padding: var(--wiki-space-10) var(--wiki-space-12);
+  background: var(--wiki-color-action-surface);
+  border-radius: var(--wiki-radius-5);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.eyebrow {
+  color: var(--wiki-color-action-primary);
+  font-size: var(--wiki-font-size-12);
+}
+.contextPicker {
+  margin: 0;
+  padding: var(--wiki-space-12);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  min-width: 0;
+}
+.contextPicker legend {
+  padding: 0 var(--wiki-space-5);
+  font-size: var(--wiki-font-size-12);
+}
+.contextPicker legend span {
+  color: var(--wiki-color-text-secondary);
+}
+.documentOptions {
+  max-height: 170px;
+  overflow: auto;
+  margin-top: var(--wiki-space-10);
+}
+.documentOptions label,
+.form .check {
+  display: flex;
+  gap: var(--wiki-space-8);
+  align-items: flex-start;
+  padding: var(--wiki-space-6) 0;
+  overflow-wrap: anywhere;
+}
+.documentOptions input,
+.check input {
+  accent-color: var(--wiki-color-action-primary);
+  flex-shrink: 0;
+  margin-top: var(--wiki-space-4);
+}
+.selectedDocuments {
+  display: flex;
+  gap: var(--wiki-space-5);
+  flex-wrap: wrap;
+  margin-top: var(--wiki-space-8);
+}
+.selectedDocuments button {
+  background: var(--wiki-color-action-surface);
+  color: var(--wiki-color-action-primary);
+  border: 0;
+  border-radius: var(--wiki-radius-4);
+  padding: var(--wiki-space-5) var(--wiki-space-8);
+  font: inherit;
+  font-size: var(--wiki-font-size-11);
+  cursor: pointer;
+}
+.preparation {
+  display: flex;
+  gap: var(--wiki-space-10);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.preparation small {
+  flex: 1 0 220px;
+}
+.conversation {
+  max-width: var(--wiki-layout-reading-max-width);
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.messages {
+  padding: var(--wiki-space-24) var(--wiki-space-28);
+  flex: 1;
+}
+.question,
+.answer {
+  padding: var(--wiki-space-16) var(--wiki-space-20);
+  border-radius: var(--wiki-radius-10);
+  margin-bottom: var(--wiki-space-24);
+  min-width: 0;
+}
+.question {
+  background: var(--wiki-color-action-surface);
+  margin-left: 8%;
+}
+.answer {
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  margin-right: 3%;
+}
+.question header,
+.answer header {
+  display: flex;
+  gap: var(--wiki-space-12);
+  justify-content: space-between;
+  align-items: baseline;
+}
+.question strong,
+.answer strong {
+  font-weight: var(--wiki-font-weight-medium);
+}
+.question small,
+.answer small {
+  font-size: var(--wiki-font-size-11);
+  color: var(--wiki-color-text-secondary);
+}
+.composer {
+  padding: var(--wiki-space-18) var(--wiki-space-28);
+  border-top: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-canvas);
+}
+.composer .form {
+  padding-top: var(--wiki-space-16);
+}
+.markdown {
+  overflow-wrap: anywhere;
+  line-height: var(--wiki-font-line-height-reading);
+}
+.markdown p {
+  white-space: pre-wrap;
+}
+.markdown table {
+  display: block;
+  overflow: auto;
+  border-collapse: collapse;
+}
+.markdown td,
+.markdown th {
+  padding: var(--wiki-space-8);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+.markdown blockquote {
+  margin: var(--wiki-space-12) 0;
+  padding-left: var(--wiki-space-12);
+  border-left: 3px solid var(--wiki-color-border-default);
+  color: var(--wiki-color-text-secondary);
+}
+.storedLink {
+  color: var(--wiki-color-action-primary);
+  text-decoration: underline;
+}
+.sideBySide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  overflow: hidden;
+}
+.sideBySide > div {
+  min-width: 0;
+  padding: var(--wiki-space-14);
+  overflow-wrap: anywhere;
+}
+.sideBySide > div + div {
+  border-left: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-panel);
+}
+.mappingForm {
+  padding: var(--wiki-space-16);
+  margin-top: var(--wiki-space-24);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+}
+.mappingCards {
+  display: grid;
+  gap: var(--wiki-space-14);
+  margin: var(--wiki-space-20) 0;
+}
+.mapping {
+  min-width: 0;
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  padding: var(--wiki-space-14);
+}
+.mapping > header {
+  display: flex;
+  gap: var(--wiki-space-10);
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: var(--wiki-space-12);
+}
+.mapping > header strong {
+  color: var(--wiki-color-action-primary);
+}
+.mapping > header span {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+  flex: 1;
+}
+.mapping small,
+.claim small {
+  display: block;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+}
+.mapping p {
+  font-size: var(--wiki-font-size-12);
+}
+.history {
+  border-top: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  padding-top: var(--wiki-space-16);
+  margin-bottom: var(--wiki-space-24);
+}
+.history article,
+.claim {
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-canvas);
+  border-radius: var(--wiki-radius-5);
+  padding: var(--wiki-space-12);
+  margin: var(--wiki-space-10) 0;
+}
+.history small {
+  display: block;
+  color: var(--wiki-color-text-secondary);
+}
+.collision {
+  padding: var(--wiki-space-16);
+  margin: var(--wiki-space-16);
+  background: var(--wiki-color-status-warning-surface);
+}
+@media (max-width: 1250px) {
+  .panels {
+    grid-template-columns: 260px minmax(360px, 1fr) 290px;
+  }
+  .editor,
+  .messages,
+  .composer {
+    padding: var(--wiki-space-20);
+  }
+}
+
+@container (max-width: 620px) {
+  .sideBySide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sideBySide > div + div {
+    border-left: 0;
+    border-top: var(--wiki-border-width-default) solid
+      var(--wiki-color-border-default);
+  }
+  .question,
+  .answer {
+    margin-inline: 0;
+    padding: var(--wiki-space-12);
+  }
+  .question header,
+  .answer header {
+    flex-wrap: wrap;
+  }
+  .editor,
+  .messages,
+  .composer {
+    padding: var(--wiki-space-16);
+  }
+}

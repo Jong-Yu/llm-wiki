@@ -1,0 +1,48 @@
+.dialog {
+  width: min(72rem, calc(100vw - 2 * var(--wiki-space-24)));
+}
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: var(--wiki-space-24);
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-font-line-height-body);
+}
+.basis,
+.results {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.basis dl {
+  display: grid;
+  gap: var(--wiki-space-8);
+}
+.basis dt {
+  color: var(--wiki-color-text-secondary);
+}
+.basis dd {
+  margin: 0;
+}
+.basis pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 18rem;
+  overflow: auto;
+  font-size: var(--wiki-font-size-12);
+}
+.caption,
+.identifier {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+  margin-block: var(--wiki-space-16);
+}
+@media (max-width: 800px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

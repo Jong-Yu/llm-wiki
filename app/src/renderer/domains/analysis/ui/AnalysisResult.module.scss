@@ -1,0 +1,145 @@
+.results {
+  display: grid;
+  gap: var(--wiki-space-16);
+  min-width: 0;
+}
+.caption {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  line-height: var(--wiki-font-line-height-body);
+}
+.receipt {
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  padding: var(--wiki-space-16);
+  overflow-wrap: anywhere;
+}
+.receipt header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--wiki-space-12);
+}
+.document {
+  font-weight: var(--wiki-font-weight-medium);
+}
+.current {
+  border-top: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  margin-top: var(--wiki-space-16);
+  padding-top: var(--wiki-space-12);
+}
+.results details {
+  font-size: var(--wiki-font-size-12);
+}
+.results summary {
+  cursor: pointer;
+}
+.results dl {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: var(--wiki-space-8);
+  font-size: var(--wiki-font-size-12);
+}
+.results dt {
+  color: var(--wiki-color-text-secondary);
+}
+.results dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.identifier {
+  display: block;
+  color: var(--wiki-color-text-secondary);
+  margin-top: var(--wiki-space-12);
+  overflow-wrap: anywhere;
+}
+.diagnostics {
+  border-top: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  margin-top: var(--wiki-space-16);
+  padding-top: var(--wiki-space-16);
+  min-width: 0;
+}
+.diagnostics h4,
+.diagnostics h5 {
+  margin: 0;
+  font-size: var(--wiki-font-size-13);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.diagnostics > header span,
+.finding > header span {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+}
+.diagnosticSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--wiki-space-10);
+  margin: var(--wiki-space-12) 0;
+}
+.diagnosticMessages {
+  min-width: 0;
+  background: var(--wiki-color-surface-panel);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-5);
+  padding: var(--wiki-space-12);
+}
+.diagnosticMessages h5 span {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+}
+.diagnosticMessages ul {
+  margin: var(--wiki-space-8) 0 0;
+  padding-left: var(--wiki-space-16);
+  font-size: var(--wiki-font-size-12);
+}
+.diagnosticMessages li + li {
+  margin-top: var(--wiki-space-5);
+}
+.diagnosticMessages p {
+  margin-bottom: 0;
+}
+.findings {
+  margin-top: var(--wiki-space-12);
+}
+.finding {
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-5);
+  padding: var(--wiki-space-14);
+  margin-top: var(--wiki-space-12);
+}
+.finding > header {
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.finding dd {
+  white-space: pre-wrap;
+}
+.diagnosticQuote {
+  white-space: pre-wrap;
+  border-left: 3px solid var(--wiki-color-action-primary);
+  background: var(--wiki-color-action-surface);
+  margin: var(--wiki-space-12) 0;
+  padding: var(--wiki-space-10) var(--wiki-space-12);
+  font-size: var(--wiki-font-size-12);
+  line-height: var(--wiki-font-line-height-reading);
+}
+.diagnosticOriginal {
+  margin-top: var(--wiki-space-14);
+}
+.diagnosticOriginal pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 28rem;
+  overflow: auto;
+  font: var(--wiki-font-size-11) / var(--wiki-font-line-height-body)
+    var(--wiki-font-family-mono);
+}
+@media (max-width: 1250px) {
+  .diagnosticSummary {
+    grid-template-columns: 1fr;
+  }
+}

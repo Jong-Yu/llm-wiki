@@ -1,0 +1,335 @@
+.knowledge {
+  min-width: 0;
+  color: var(--wiki-color-text-primary);
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-font-line-height-body);
+}
+.knowledge > * + * {
+  margin-top: var(--wiki-space-20);
+}
+.heading,
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-16);
+}
+.heading h2 {
+  margin: var(--wiki-space-6) 0 0;
+  font-size: var(--wiki-font-size-20);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.heading button {
+  font-size: var(--wiki-font-size-12);
+  flex-shrink: 0;
+}
+.eyebrow {
+  margin: 0;
+  color: var(--wiki-color-action-primary);
+  font-size: var(--wiki-font-size-12);
+}
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  overflow: hidden;
+}
+.summary > div {
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--wiki-space-8);
+  background: var(--wiki-color-surface-panel);
+}
+.summary > div + div {
+  border-left: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+.summary span {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+}
+.summary strong {
+  font-weight: var(--wiki-font-weight-medium);
+  font-size: var(--wiki-font-size-20);
+}
+.layerNote,
+.muted,
+.empty {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.layerNote {
+  margin: 0 0 var(--wiki-space-14);
+}
+.empty {
+  margin: 0;
+  padding: var(--wiki-space-24) var(--wiki-space-14);
+  background: var(--wiki-color-surface-panel);
+  border-radius: var(--wiki-radius-5);
+}
+.entries {
+  min-width: 0;
+}
+.entities {
+  margin: var(--wiki-space-14) 0;
+  padding: var(--wiki-space-10) var(--wiki-space-12);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-5);
+}
+.entities > summary {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.entityGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--wiki-space-10);
+  margin-top: var(--wiki-space-12);
+}
+.entityGrid > details {
+  min-width: 0;
+  padding: var(--wiki-space-10);
+  border-radius: var(--wiki-radius-4);
+  background: var(--wiki-color-surface-panel);
+}
+.entityGrid summary span {
+  margin-left: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+}
+.entryLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 0.9fr);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  overflow: hidden;
+  align-items: start;
+}
+.claimList {
+  min-width: 0;
+  max-height: 38rem;
+  overflow: auto;
+}
+.claim {
+  width: 100%;
+  display: grid;
+  gap: var(--wiki-space-5);
+  background: var(--wiki-color-surface-canvas);
+  border: 0;
+  border-bottom: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  padding: var(--wiki-space-12) var(--wiki-space-14);
+  color: var(--wiki-color-text-primary);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.claim:hover {
+  background: var(--wiki-color-surface-panel);
+}
+.claim[aria-pressed='true'] {
+  background: var(--wiki-color-action-surface);
+  box-shadow: inset var(--wiki-space-3) 0 var(--wiki-color-action-primary);
+}
+.claim:focus-visible {
+  outline: var(--wiki-space-2) solid var(--wiki-color-action-primary);
+  outline-offset: calc(-1 * var(--wiki-space-2));
+}
+.claim strong {
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-font-line-height-body);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.claimKind {
+  font-size: var(--wiki-font-size-11);
+  color: var(--wiki-color-action-primary);
+}
+.claimMeta {
+  font-size: var(--wiki-font-size-11);
+  color: var(--wiki-color-text-secondary);
+}
+.inspector {
+  min-width: 0;
+  padding: var(--wiki-space-16);
+  border-left: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-panel);
+  align-self: stretch;
+  overflow-wrap: anywhere;
+}
+.inspector h3 {
+  margin: var(--wiki-space-8) 0 var(--wiki-space-12);
+  font-size: var(--wiki-font-size-15);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.badges {
+  display: flex;
+  gap: var(--wiki-space-5);
+  flex-wrap: wrap;
+}
+.badge {
+  font-size: var(--wiki-font-size-11);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-4);
+  padding: var(--wiki-space-2) var(--wiki-space-5);
+  background: var(--wiki-color-surface-canvas);
+}
+.evidence {
+  margin-top: var(--wiki-space-20);
+}
+.evidence h4,
+.qualifiers h4 {
+  font-weight: var(--wiki-font-weight-medium);
+  font-size: var(--wiki-font-size-12);
+  margin: 0 0 var(--wiki-space-8);
+}
+.evidence p {
+  margin: var(--wiki-space-6) 0;
+}
+.evidence blockquote {
+  white-space: pre-wrap;
+  margin: 0;
+  padding: var(--wiki-space-10) var(--wiki-space-12);
+  border-left: var(--wiki-space-2) solid var(--wiki-color-relation-machine);
+  background: var(--wiki-color-surface-canvas);
+  font-size: var(--wiki-font-size-13);
+}
+.evidence summary {
+  font-size: var(--wiki-font-size-11);
+  color: var(--wiki-color-text-secondary);
+  cursor: pointer;
+}
+.qualifiers {
+  margin-top: var(--wiki-space-20);
+}
+.storedFields {
+  margin: var(--wiki-space-8) 0 0;
+  font-size: var(--wiki-font-size-12);
+}
+.storedFields > div {
+  display: grid;
+  grid-template-columns: minmax(65px, 0.6fr) minmax(0, 1.4fr);
+  gap: var(--wiki-space-8);
+  padding: var(--wiki-space-5) 0;
+}
+.storedFields dt {
+  color: var(--wiki-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.storedFields dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.storedFields .storedFields {
+  margin-top: 0;
+}
+.storedFields .storedFields > div {
+  display: block;
+}
+.storedFields .storedFields dt {
+  margin-bottom: var(--wiki-space-3);
+}
+.storedText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.storedList {
+  padding-left: var(--wiki-space-16);
+  margin: 0;
+}
+.storedList li + li {
+  margin-top: var(--wiki-space-5);
+}
+.details,
+.revisionDetails {
+  margin-top: var(--wiki-space-16);
+  padding-top: var(--wiki-space-12);
+  border-top: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+.details summary,
+.revisionDetails summary {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-action-primary);
+  cursor: pointer;
+}
+.revisions {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: var(--wiki-space-8);
+  font-size: var(--wiki-font-size-11);
+}
+.revisions dt {
+  color: var(--wiki-color-text-secondary);
+}
+.revisions dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--wiki-font-family-mono);
+}
+.records {
+  display: grid;
+  gap: var(--wiki-space-24);
+}
+.sectionHeading h3 {
+  margin: 0;
+  font-size: var(--wiki-font-size-15);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.sectionHeading span {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+}
+.record {
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-5);
+  padding: var(--wiki-space-12) var(--wiki-space-14);
+  margin-top: var(--wiki-space-10);
+}
+.record summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.record summary strong {
+  font-size: var(--wiki-font-size-13);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.record summary span {
+  display: block;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-11);
+  margin-top: var(--wiki-space-4);
+}
+.pending {
+  background: var(--wiki-color-status-warning-surface);
+  color: var(--wiki-color-status-warning);
+  padding: var(--wiki-space-10);
+  font-size: var(--wiki-font-size-12);
+  border-radius: var(--wiki-radius-5);
+}
+@media (max-width: 1380px) {
+  .entryLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inspector {
+    border-left: 0;
+    border-top: var(--wiki-border-width-default) solid
+      var(--wiki-color-border-default);
+  }
+  .claimList {
+    max-height: 22rem;
+  }
+  .entityGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

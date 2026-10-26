@@ -1,0 +1,27 @@
+.field {
+  display: grid;
+  gap: var(--wiki-space-6);
+  min-width: 0;
+}
+
+.label {
+  color: var(--wiki-color-text-primary);
+  font-size: var(--wiki-font-size-13);
+  font-weight: var(--wiki-font-weight-medium);
+}
+
+.description,
+.error {
+  font-size: var(--wiki-font-size-12);
+  line-height: var(--wiki-font-line-height-body);
+  overflow-wrap: anywhere;
+}
+
+.description {
+  color: var(--wiki-color-text-secondary);
+}
+
+.error,
+.required {
+  color: var(--wiki-color-status-danger);
+}

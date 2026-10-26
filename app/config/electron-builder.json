@@ -1,0 +1,45 @@
+{
+  "appId": "local.llm-wiki.desktop",
+  "productName": "LLM Wiki",
+  "directories": {
+    "output": "release"
+  },
+  "files": ["out/**/*", "package.json"],
+  "asar": true,
+  "npmRebuild": false,
+  "publish": null,
+  "mac": {
+    "target": ["dmg", "zip"],
+    "identity": null,
+    "category": "public.app-category.productivity"
+  },
+  "win": {
+    "target": ["nsis"],
+    "signExecutable": false
+  },
+  "linux": {
+    "target": "tar.gz",
+    "category": "Office"
+  },
+  "dmg": {
+    "title": "LLM Wiki ${version}",
+    "contents": [
+      {
+        "x": 130,
+        "y": 180
+      },
+      {
+        "x": 410,
+        "y": 180,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  }
+}

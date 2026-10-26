@@ -1,0 +1,123 @@
+.root {
+  min-width: 0;
+  display: grid;
+  gap: var(--wiki-space-16);
+  font-size: var(--wiki-font-size-13);
+}
+.header,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-12);
+}
+.header h2 {
+  margin: 0;
+  font-size: var(--wiki-font-size-16);
+}
+.root h3 {
+  font-size: var(--wiki-font-size-14);
+  font-weight: var(--wiki-font-weight-medium);
+}
+.root p {
+  line-height: var(--wiki-font-line-height-body);
+}
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(0, 3fr);
+  gap: var(--wiki-space-24);
+}
+.history {
+  min-width: 0;
+  border-right: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  padding-right: var(--wiki-space-16);
+}
+.history ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 26rem;
+  overflow: auto;
+}
+.history button {
+  display: grid;
+  gap: var(--wiki-space-6);
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  padding: var(--wiki-space-12);
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.history button[aria-pressed='true'] {
+  background: var(--wiki-color-surface-panel);
+  box-shadow: inset 3px 0 var(--wiki-color-action-primary);
+}
+.answer {
+  min-width: 0;
+  width: 100%;
+  max-width: 72rem;
+  display: grid;
+  align-content: start;
+  gap: var(--wiki-space-16);
+}
+.content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.notice,
+.evidence {
+  display: grid;
+  gap: var(--wiki-space-8);
+  background: var(--wiki-color-surface-panel);
+  border-radius: var(--wiki-radius-6);
+  padding: var(--wiki-space-12);
+  overflow-wrap: anywhere;
+}
+.caption,
+.history small {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.preview,
+.saved {
+  padding: var(--wiki-space-16);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+}
+.root blockquote {
+  margin: 0;
+  padding: var(--wiki-space-12);
+  border-left: 3px solid var(--wiki-color-action-primary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.root pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24rem;
+  overflow: auto;
+  font-size: var(--wiki-font-size-12);
+}
+.root code {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 800px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history {
+    border-right: 0;
+    padding-right: 0;
+  }
+  .history ul {
+    max-height: 10rem;
+  }
+}

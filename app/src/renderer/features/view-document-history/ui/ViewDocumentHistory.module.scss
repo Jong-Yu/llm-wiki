@@ -1,0 +1,99 @@
+.workspace {
+  display: grid;
+  gap: var(--wiki-space-16);
+  min-width: 0;
+  font-size: var(--wiki-font-size-13);
+}
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wiki-space-16);
+}
+.heading h2 {
+  margin: 0;
+  font-size: var(--wiki-font-size-16);
+}
+.heading p,
+.caption {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+}
+.revision {
+  margin: 0;
+  font-size: var(--wiki-font-size-11);
+  color: var(--wiki-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.versions {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.versions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-16);
+  padding: var(--wiki-space-16) 0;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.versions li > div {
+  min-width: 0;
+}
+.versions li p {
+  margin: var(--wiki-space-8) 0;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  overflow-wrap: anywhere;
+}
+.versions button,
+.heading button {
+  flex-shrink: 0;
+}
+.pagination,
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+}
+.pagination span {
+  margin-right: auto;
+  color: var(--wiki-color-text-secondary);
+}
+.comparisonSection {
+  border-top: 1px solid var(--wiki-color-border-default);
+  padding-top: var(--wiki-space-16);
+}
+.comparisonSection h3 {
+  font-size: var(--wiki-font-size-16);
+}
+.comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--wiki-space-24);
+}
+.comparison section {
+  min-width: 0;
+}
+.comparison h4 {
+  font-size: var(--wiki-font-size-13);
+  margin: 0 0 var(--wiki-space-8);
+}
+.comparison pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 430px;
+  overflow: auto;
+  background: var(--wiki-color-surface-panel);
+  padding: var(--wiki-space-16);
+  font: var(--wiki-font-size-13) var(--wiki-font-family-mono);
+  border-radius: var(--wiki-radius-4);
+}
+@media (max-width: 800px) {
+  .comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

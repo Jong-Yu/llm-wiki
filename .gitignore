@@ -1,0 +1,56 @@
+# Local data, credentials, and machine-specific connections
+.local/
+/data/
+/.codex/config.toml
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.*.sample
+!.env.template
+!.env.*.template
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+
+# OS metadata and editor temporary files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# Python environments, bytecode, and tool caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+/.runtime-install.lock
+.publication.lock
+
+# JavaScript dependencies, builds, installers, and test reports
+node_modules/
+/app/out/
+/app/release/
+/app/test-results*/
+/app/playwright-report/
+/app/coverage/
+*.tsbuildinfo
+npm-debug.log*
+
+# Local evaluation records and generated PDF/PPTX artifacts
+/evals/
+/output/
+
+# Keep dependency lockfiles and docs/history/.

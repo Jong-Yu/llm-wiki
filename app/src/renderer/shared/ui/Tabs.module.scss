@@ -1,0 +1,54 @@
+.tabs {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tabList {
+  display: flex;
+  gap: var(--wiki-space-4);
+  overflow-x: auto;
+  border-bottom: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+}
+
+.tab {
+  flex: none;
+  padding: var(--wiki-space-8) var(--wiki-space-12);
+  border: 0;
+  border-bottom: var(--wiki-border-width-selected) solid transparent;
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.tab[aria-selected='true'] {
+  border-bottom-color: var(--wiki-color-action-primary);
+  color: var(--wiki-color-action-primary);
+}
+
+.tab:enabled:hover {
+  background: var(--wiki-color-surface-subtle);
+}
+
+.tab:focus-visible,
+.panel:focus-visible {
+  outline: var(--wiki-border-width-selected) solid
+    var(--wiki-color-action-primary);
+  outline-offset: calc(-1 * var(--wiki-space-2));
+}
+
+.tab:disabled {
+  opacity: var(--wiki-opacity-disabled);
+  cursor: not-allowed;
+}
+
+.panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding-top: var(--wiki-space-16);
+}

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "paths": {
+      "@contracts/*": ["../../src/shared/contracts/*"],
+      "@main/*": ["../../src/main/*"]
+    }
+  },
+  "include": ["../../src/main/**/*.ts", "../../src/shared/contracts/**/*.ts"]
+}

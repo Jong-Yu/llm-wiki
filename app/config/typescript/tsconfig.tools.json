@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@contracts/*": ["../../src/shared/contracts/*"],
+      "@renderer/*": ["../../src/renderer/*"],
+      "@main/*": ["../../src/main/*"]
+    }
+  },
+  "include": [
+    "../*.config.ts",
+    "../../tests/**/*.ts",
+    "../../tests/**/*.tsx",
+    "../../src/renderer/env.d.ts"
+  ]
+}

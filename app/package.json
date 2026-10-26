@@ -1,0 +1,58 @@
+{
+  "name": "llm-wiki-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LLM Wiki desktop application",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "electron:install": "install-electron",
+    "dev": "electron-vite dev --watch --config config/electron.vite.config.ts",
+    "build": "npm run check && electron-vite build --config config/electron.vite.config.ts",
+    "start": "electron-vite preview --config config/electron.vite.config.ts",
+    "typecheck": "tsc -p config/typescript/tsconfig.main.json && tsc -p config/typescript/tsconfig.preload.json && tsc -p config/typescript/tsconfig.renderer.json && tsc -p config/typescript/tsconfig.tools.json",
+    "lint": "oxlint --config config/oxlint.config.ts --tsconfig config/typescript/tsconfig.tools.json --deny-warnings src config tests",
+    "format": "oxfmt --config config/oxfmt.json --write src config tests package.json tsconfig.json README.md \"!src/renderer/shared/theme/tokens.*\"",
+    "format:check": "oxfmt --config config/oxfmt.json --check src config tests package.json tsconfig.json README.md \"!src/renderer/shared/theme/tokens.*\"",
+    "tokens:check": "node scripts/build-design-tokens.mjs --check",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run tokens:check && npm run test:tooling",
+    "test:tooling": "node --test tests/tooling/*.test.mjs",
+    "test:e2e": "npm run build && playwright test --config config/playwright.config.ts",
+    "package:dir": "npm run build && electron-builder --config config/electron-builder.json --dir --publish never",
+    "package": "npm run build && electron-builder --config config/electron-builder.json --publish never",
+    "package:mac:unsigned": "npm run build && electron-builder --config config/electron-builder.json --mac --arm64 --publish never",
+    "package:mac:signed": "npm run build && electron-builder --config config/electron-builder.signed.cjs --mac --arm64 --publish never",
+    "package:win:unsigned": "npm run build && electron-builder --config config/electron-builder.json --win --x64 --publish never",
+    "package:runtime": "python3 scripts/package-personal-runtime.py"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "5.9.2",
+    "jotai": "3.0.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-hook-form": "7.91.0",
+    "react-markdown": "10.1.0",
+    "react-router": "8.5.0",
+    "remark-gfm": "4.0.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "oxfmt": "0.74.0",
+    "oxlint": "1.89.0",
+    "oxlint-tsgolint": "7.0.2005",
+    "sass-embedded": "1.106.1",
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  }
+}

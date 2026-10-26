@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>추출안 전용 격리 UI 검사</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+      #root {
+        height: 100vh;
+      }
+      .wiki-theme {
+        height: 100%;
+        color: var(--wiki-color-text-primary);
+        background: var(--wiki-color-surface-canvas);
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+      a {
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script
+      type="module"
+      src="/tests/analysis-proposals/ui-fixture.tsx"
+    ></script>
+  </body>
+</html>

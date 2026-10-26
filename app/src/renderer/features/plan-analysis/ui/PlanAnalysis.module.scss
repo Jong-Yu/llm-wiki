@@ -1,0 +1,289 @@
+.workspace {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: var(--wiki-layout-workspace-toolbar-height) minmax(0, 1fr);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-16);
+  padding: var(--wiki-space-10) var(--wiki-space-22);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.toolbar h1 {
+  font-size: var(--wiki-font-size-16);
+  margin: 0;
+}
+.toolbar span {
+  margin-right: auto;
+}
+.toolbar span,
+.toolbar a {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+}
+.layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--wiki-layout-documents-index-width) minmax(
+      0,
+      1fr
+    ) var(--wiki-layout-documents-inspector-width);
+}
+.materials {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border-right: 1px solid var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-panel);
+}
+.materials > header,
+.materials > footer {
+  padding: var(--wiki-space-16);
+}
+.materials h2,
+.inspector h2 {
+  font-size: var(--wiki-font-size-14);
+  margin: 0 0 var(--wiki-space-12);
+}
+.materials p,
+.inspector p {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  line-height: var(--wiki-font-line-height-body);
+}
+.materials ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.materials li button {
+  display: grid;
+  gap: var(--wiki-space-8);
+  width: 100%;
+  padding: var(--wiki-space-16);
+  border: 0;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  background: transparent;
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.materials li button[aria-pressed='true'] {
+  background: var(--wiki-color-action-surface);
+  box-shadow: inset 3px 0 var(--wiki-color-action-primary);
+}
+.materials span,
+.materials small {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+}
+.materials footer {
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.scroll {
+  min-height: 0;
+  overflow: auto;
+}
+.editor {
+  container-type: inline-size;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.editor > header {
+  padding: var(--wiki-space-24) var(--wiki-space-30);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.editor h1 {
+  margin: 0;
+  font-size: var(--wiki-font-size-20);
+}
+.editor > .scroll {
+  padding: var(--wiki-space-24) var(--wiki-space-30);
+}
+.editor h2 {
+  font-size: var(--wiki-font-size-16);
+  margin: 0 0 var(--wiki-space-12);
+}
+.editor h3,
+.editor h4,
+.inspector h3 {
+  font-size: var(--wiki-font-size-14);
+  margin: 0;
+}
+.editor p {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+  line-height: var(--wiki-font-line-height-body);
+}
+.editor form label {
+  display: grid;
+  gap: var(--wiki-space-8);
+  margin: var(--wiki-space-12) 0;
+  font-size: var(--wiki-font-size-12);
+}
+.editor input:not([type='checkbox']),
+.editor select,
+.editor textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--wiki-space-10) var(--wiki-space-12);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-6);
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+}
+.editor input:disabled,
+.editor select:disabled,
+.editor textarea:disabled {
+  opacity: var(--wiki-opacity-disabled);
+}
+.editor textarea {
+  resize: vertical;
+}
+.editor .check {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+}
+.planForm > section,
+.stored {
+  border-top: 1px solid var(--wiki-color-border-default);
+  padding: var(--wiki-space-24) 0;
+}
+.unit,
+.output {
+  padding: var(--wiki-space-16) 0;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.unit header,
+.output header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-12);
+}
+.range {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--wiki-space-12);
+}
+.planForm footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-12);
+  padding: var(--wiki-space-16) 0;
+}
+.editor fieldset {
+  border: 1px solid var(--wiki-color-border-default);
+  padding: var(--wiki-space-12);
+  margin: var(--wiki-space-12) 0;
+  font-size: var(--wiki-font-size-12);
+}
+.conversion {
+  margin: var(--wiki-space-16) 0;
+  padding: var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-panel);
+}
+.lookup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--wiki-space-12);
+  margin: var(--wiki-space-16) 0;
+}
+.lookup label {
+  flex: 1;
+}
+.lookup p {
+  width: 100%;
+  color: var(--wiki-color-status-danger);
+}
+.inspector {
+  min-width: 0;
+  overflow: auto;
+  padding: var(--wiki-space-24) var(--wiki-space-16);
+  border-left: 1px solid var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-panel);
+}
+.inspector > section {
+  display: grid;
+  gap: var(--wiki-space-12);
+  margin-top: var(--wiki-space-24);
+  padding-top: var(--wiki-space-16);
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.handoffJobs {
+  display: grid;
+  gap: var(--wiki-space-12);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.handoffJobs > li {
+  display: grid;
+  gap: var(--wiki-space-8);
+  padding: var(--wiki-space-12);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  font-size: var(--wiki-font-size-12);
+  overflow-wrap: anywhere;
+}
+.workspace dl {
+  display: grid;
+  gap: var(--wiki-space-8);
+  font-size: var(--wiki-font-size-12);
+}
+.workspace dt {
+  color: var(--wiki-color-text-secondary);
+}
+.workspace dd {
+  margin: 0 0 var(--wiki-space-8);
+  overflow-wrap: anywhere;
+}
+.workspace details {
+  font-size: var(--wiki-font-size-12);
+  margin: var(--wiki-space-12) 0;
+}
+.workspace summary {
+  cursor: pointer;
+}
+.workspace pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30rem;
+  overflow: auto;
+  font-size: var(--wiki-font-size-12);
+  line-height: var(--wiki-font-line-height-body);
+}
+.empty,
+.invalid {
+  display: grid;
+  place-content: center;
+  padding: var(--wiki-space-30);
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+}
+
+@container (max-width: 560px) {
+  .range {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .unit header,
+  .output header {
+    flex-wrap: wrap;
+  }
+  .editor > .scroll,
+  .editor > header {
+    padding: var(--wiki-space-16);
+  }
+}

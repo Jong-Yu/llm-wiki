@@ -1,0 +1,18 @@
+# Official Model Context Protocol Python SDK; requires Python >=3.10.
+mcp==2.3.0
+# Parse document links with CommonMark syntax, excluding code and images.
+markdown-it-py==4.2.0
+# General read API; resolved transitive versions are in requirements.lock.
+fastapi==0.162.0
+# Bounded multipart original uploads (also pinned in requirements.lock).
+python-multipart==0.0.32
+# Validate raw analysis submissions against the published schema (already locked).
+jsonschema==4.26.0
+# Native Windows personal runner: protected ACL files and owned process jobs.
+pywin32==311; sys_platform == "win32"
+# Personal-PC conversion (server does not invoke converters).
+pypdf==6.21.2
+pypdfium2==5.14.0
+openpyxl==3.1.5
+python-docx==1.2.0
+Pillow==12.3.0

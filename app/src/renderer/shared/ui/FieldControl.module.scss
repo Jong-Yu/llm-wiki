@@ -1,0 +1,37 @@
+.control {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: var(--wiki-space-8) var(--wiki-space-12);
+  border: var(--wiki-border-width-default) solid
+    var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-5);
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+  -webkit-app-region: no-drag;
+}
+
+.control::placeholder {
+  color: var(--wiki-color-text-secondary);
+}
+
+.control:focus-visible {
+  outline: var(--wiki-border-width-selected) solid
+    var(--wiki-color-action-primary);
+  outline-offset: var(--wiki-space-2);
+}
+
+.control[aria-invalid='true'] {
+  border-color: var(--wiki-color-status-danger);
+}
+
+.control:disabled {
+  opacity: var(--wiki-opacity-disabled);
+  cursor: not-allowed;
+}
+
+.textarea {
+  resize: vertical;
+  overflow-wrap: anywhere;
+}

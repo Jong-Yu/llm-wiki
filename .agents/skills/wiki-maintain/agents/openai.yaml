@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki 수정·검토 반영"
+  short_description: "위키 본문과 검토·정책·문서 대응을 버전과 근거에 맞춰 수정"
+  default_prompt: "$wiki-maintain을 사용해 요청한 위키 수정을 현재 내용과 판단 이력에 맞춰 반영해줘."
