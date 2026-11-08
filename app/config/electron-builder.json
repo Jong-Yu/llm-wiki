@@ -11,6 +11,7 @@
     "provider": "github",
     "owner": "Jong-Yu",
     "repo": "llm-wiki-releases",
+    "tagNamePrefix": "app-",
     "releaseType": "release"
   },
   "mac": {

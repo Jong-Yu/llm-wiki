@@ -8,6 +8,9 @@
 - 보완 후 세 번째 실제 명령은 Mac/Windows 빌드와 초안8파일 업로드까지 성공했지만 마지막 공개에서 `tag_name was used by an immutable release`로 중단됐습니다. 앞선 빈 공개 릴리스의 삭제가 변경 불가 태그 예약을 해제하지 않는다는 [GitHub 정책](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)을 삭제 전에 확인하지 못했습니다. 재사용 제한을 우회하거나 보호 정책을 바꾸지 않고, 앱0.1.0 유지/새 게시 태그 또는 앱0.1.1 중 사용자 선택을 요청했습니다. 현재 초안 ID438477024와8파일을 보존하고 실제 실패 로그·[초안 무결성](../../../.local/releases/v0.1.0-feed-20261109/draft-integrity.json)을 남깁니다.
 - 실제 publisher는 ZIP 블록맵의 공백을 점으로 바꿔 본체 URL에서 기대하는 파일명과 다르게 올렸습니다. 이후 모든 Mac/Windows 산출물이 공백 없는 이름을 사용하도록 공통 패키징 설정을 정정했습니다. 새 버전/태그 선택 후 재패키징과 공개 피드 검증을 진행해야 합니다.
 - 처음 소스 저장소에 잘못 게시한 릴리스 ID438409307은 파일11개·태그를 그대로 보존하고 정정 안내와 사전 릴리스 표시를 적용했습니다. 안정 버전 자동 업데이트에서 제외했으며 삭제하거나 태그를 변경하지 않았습니다. [정정 영수증](../../../.local/releases/v0.1.0-feed-20261109/source-release-superseded.json)을 보존합니다.
+- 사용자가 앱 버전0.1.0 유지·새 게시 태그 `app-0.1.0`을 명시 선택했습니다. 설치 앱과 publisher의 공통 `tagNamePrefix`를 `app-`로 맞추고 같은 규칙을 릴리스 명령에 연결해 재패키징합니다. 기존 `v0.1.0` 태그와 보호 정책은 변경하지 않습니다. 실제 공개 결과는 이어서 기록합니다.
+- 배포 저장소에 운영체제별 설치 방법도 작성해 달라는 후속 요청을 반영합니다. Windows EXE의 포함 실행기와 Mac의 별도 Python/개인 실행기·OCR, 첫 로그인과 AI CLI 준비·업데이트 조건을 구분한 README/릴리스 설명을 준비했습니다. Mac 설치에 필요한 기존 runtime ZIP 포장도 릴리스 초안 단계에 연결하며 새 외부 의존성은 추가하지 않습니다.
+- 게시 태그는 publisher/updater와 같은 설치 라이브러리의 `githubTagPrefix`로 계산합니다. [격리22묶음과 원시 로그](../../../.local/releases/v0.1.0-feed-20261109/release-script-runtime-checks.json)에서 app-/기본 접두어·초안/공개 순서·runtime 준비/첨부·실패 보존·dry-run·기존 버전 보호를 통과했고 구문/Oxc/형식 검사도 통과했습니다.
 - 현재 PC의 `security find-identity -v -p codesigning`은 유효한 코드 서명 identity0개를 반환했습니다. 서명/공증 환경변수도 제공되지 않아 macOS 자동 설치 검증으로 확대하지 않습니다.
 - 동일 `0.1.0`은 새 업데이트로 인식하지 않으므로 이전 주소를 내장한 설치본은 한 번 수동 교체해야 합니다. macOS 미서명 배포는 자동 설치 성공으로 표시하지 않으며 Windows 실제 업데이트 설치도 별도 실기기 검증으로 남깁니다. 전역 설정·사용자 자료·설치 앱·서버는 변경하지 않습니다.
 

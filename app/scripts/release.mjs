@@ -1,9 +1,10 @@
 // 사용: npm run release -- [patch|minor|major|x.y.z] [--mac] [--win] [--dry-run]
-// package.json 버전으로 빌드하고 GitHub Release(v<버전>)에 설치 파일과 latest*.yml을 올립니다.
+// package.json 버전과 배포 설정의 태그 접두어로 GitHub Release에 설치 파일과 latest*.yml을 올립니다.
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { build, Platform, Arch } from 'electron-builder';
+import { githubTagPrefix } from 'builder-util-runtime';
 
 const appRoot = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
@@ -92,7 +93,7 @@ if (bump) {
   run('npm', ['version', bump, '--no-git-tag-version']);
 }
 const version = await readVersion();
-const tag = `v${version}`;
+const tag = `${githubTagPrefix(repository)}${version}`;
 
 if (
   run('gh', ['release', 'view', tag, '--repo', releaseRepository], {
@@ -107,6 +108,15 @@ if (
 console.log(`릴리스 ${tag}${dryRun ? ' (dry-run: 업로드 안 함)' : ''}`);
 
 run('npm', ['run', 'build']);
+
+const runtimeOutput = resolve(appRoot, config.directories?.output ?? 'release');
+const runtimeArchive = join(
+  runtimeOutput,
+  `llm-wiki-personal-runtime-${version}.zip`,
+);
+if (targets.includes('mac')) {
+  run('npm', ['run', 'package:runtime', '--', '--output-dir', runtimeOutput]);
+}
 
 // 여러 플랫폼의 publisher가 같은 초안에 업로드하고 모두 성공한 뒤에만 공개합니다.
 if (!dryRun) {
@@ -150,6 +160,17 @@ if (targets.includes('win')) {
   ]);
 }
 if (!dryRun) {
+  if (targets.includes('mac')) {
+    run('gh', [
+      'release',
+      'upload',
+      tag,
+      runtimeArchive,
+      `${runtimeArchive}.sha256`,
+      '--repo',
+      releaseRepository,
+    ]);
+  }
   run('gh', [
     'release',
     'edit',
