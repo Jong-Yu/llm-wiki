@@ -1,5 +1,5 @@
-import { useId, useRef } from 'react';
-import type { JSX, KeyboardEvent, ReactNode } from 'react';
+import { useId, useRef, useState } from 'react';
+import type { FocusEvent, JSX, KeyboardEvent, ReactNode } from 'react';
 import styles from './Tabs.module.scss';
 
 export type TabItem = {
@@ -15,6 +15,7 @@ export type TabsProps = {
   onValueChange: (value: string) => void;
   items: readonly TabItem[];
   className?: string;
+  activationMode?: 'manual' | 'automatic';
 };
 
 /** 선택은 호출자가 소유하며 숨긴 패널도 유지해 입력·초안의 수명을 보존합니다. */
@@ -24,19 +25,24 @@ export function Tabs({
   onValueChange,
   items,
   className,
+  activationMode = 'manual',
 }: TabsProps): JSX.Element {
   const groupId = useId();
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const [focused, setFocused] = useState({ selection: value, id: value });
+  if (focused.selection !== value) setFocused({ selection: value, id: value });
   const enabled = items.filter((item: TabItem): boolean => !item.disabled);
-  const focusId = enabled.some((item: TabItem): boolean => item.id === value)
-    ? value
+  const focusId = enabled.some(
+    (item: TabItem): boolean => item.id === focused.id,
+  )
+    ? focused.id
     : enabled[0]?.id;
   const tabId = (id: string): string =>
     `${groupId}-tab-${encodeURIComponent(id)}`;
   const panelId = (id: string): string =>
     `${groupId}-panel-${encodeURIComponent(id)}`;
 
-  /** 방향키·Home·End로 활성 탭을 선택하고 초점을 함께 이동합니다. */
+  /** 방향키는 초점만 이동하며 지연 조회 탭은 Enter/Space로 명시 선택합니다. */
   const handleKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
     id: string,
@@ -62,7 +68,8 @@ export function Tabs({
     const next = enabled[nextIndex];
     if (!next) return;
     event.preventDefault();
-    if (next.id !== value) onValueChange(next.id);
+    if (activationMode === 'automatic' && next.id !== value)
+      onValueChange(next.id);
     buttons.current.get(next.id)?.focus();
   };
 
@@ -73,6 +80,10 @@ export function Tabs({
         role="tablist"
         aria-label={label}
         aria-orientation="horizontal"
+        onBlur={(event: FocusEvent<HTMLDivElement>): void => {
+          if (!event.currentTarget.contains(event.relatedTarget))
+            setFocused({ selection: value, id: value });
+        }}
       >
         {items.map((item: TabItem): JSX.Element => (
           <button
@@ -89,6 +100,7 @@ export function Tabs({
             aria-controls={panelId(item.id)}
             disabled={item.disabled}
             tabIndex={item.id === focusId ? 0 : -1}
+            onFocus={(): void => setFocused({ selection: value, id: item.id })}
             onClick={(): void => {
               if (item.id !== value) onValueChange(item.id);
             }}

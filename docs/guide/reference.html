@@ -1,0 +1,1362 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Wiki 소개와 사용자 가이드</title>
+<style>
+*{box-sizing:border-box}html{scroll-padding-top:80px}body{margin:0;background:#f5f8f7;color:#182b34;font:16px/1.85 -apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif}header{position:sticky;top:0;padding:14px 24px;background:#fffffff5;border-bottom:1px solid #dce4e4;z-index:1}header a{font-weight:600}main{max-width:1050px;margin:24px auto;padding:24px 38px 60px;background:white;border:1px solid #dce4e4;border-radius:10px}a{color:#205b4e;text-underline-offset:3px}h1{font-size:32px;letter-spacing:-.04em}h2{margin-top:48px;padding-top:18px;border-top:1px solid #dce4e4;font-size:25px}h3{margin-top:28px;font-size:19px}p,li,td{overflow-wrap:anywhere}table{width:100%;border-collapse:collapse;font-size:14px;margin:20px 0}td,th{padding:10px 12px;border:1px solid #dce4e4;text-align:left;vertical-align:top}th{background:#edf4ef}pre{overflow:auto;padding:18px;background:#f1f5f3;border-radius:6px;font-size:14px}img{max-width:100%}:focus-visible{outline:3px solid #2863ac;outline-offset:4px}@media(max-width:650px){main{margin:0;padding:16px;border:0;border-radius:0}h1{font-size:26px}h2{font-size:22px}table{font-size:12px}td,th{padding:7px}header{padding:12px 16px}}
+</style></head><body><header><a href="index.html">← 화면 가이드로 돌아가기</a> · <a href="#llm-wiki-이해하기">LLM Wiki 이해하기</a> · <a href="#llm-wiki-사용자-가이드">상세 사용법</a></header><main><h1 id="llm-wiki-이해하기">LLM Wiki 이해하기</h1>
+<p>LLM Wiki는 <strong>문서와 문서에서 추출한 지식, 사람이 남긴 판단을 함께 관리하고 업무에 활용하는 공동 지식 공간</strong>입니다. 자료를 찾아 읽는 일부터 질문의 근거 확인, 필요한 내용의 수정, 바뀐 지식의 재검토까지 이어지도록 만드는 것을 목표로 합니다.</p>
+<p>이름의 LLM은 글을 읽고 질문에 답하는 언어 모델을, Wiki는 기록을 함께 축적하고 계속 고쳐 나가는 문서 공간을 뜻합니다. LLM Wiki에서는 문서 본문에 담긴 대상·관계·조건을 구조화해 문서 읽기와 AI 대화에 연결합니다.</p>
+<p>처음 접하는 사용자와 도입을 검토하는 팀을 위한 소개입니다. 아래의 현재 기능은 2026년 11월 7일 개발본을 기준으로 설명합니다.</p>
+<h2 id="전체-흐름을-한눈에-보기">전체 흐름을 한눈에 보기</h2>
+<p><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDY4MCIgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjgwIiByb2xlPSJpbWciIGFyaWEtbGFiZWxsZWRieT0ia25vd2xlZGdlLXRpdGxlIGtub3dsZWRnZS1kZXNjIj4KICA8dGl0bGUgaWQ9Imtub3dsZWRnZS10aXRsZSI+TExNIFdpa2nsl5DshJwg7J6Q66OM66W8IOyngOyLneycvOuhnCDtmZzsmqntlZjqs6Ag6rCx7Iug7ZWY64qUIOqzvOyglTwvdGl0bGU+CiAgPGRlc2MgaWQ9Imtub3dsZWRnZS1kZXNjIj7snpDro4wg7JuQ67O47J2EIO2MkOuzuOuzhOuhnCDrs7TqtIDtlZjqs6Ag7Y647KeRIOqwgOuKpe2VnCBXaWtpIOusuOyEnOulvCDrp4zrk63ri4jri6QuIOqwnOyduCBBSeuKlCDrs7jrrLjsl5DshJwg6rCc64WQ6rO8IOq0gOqzhCwg7KGw6rG06rO8IOybkOusuCDqt7zqsbDrpbwg7LaU7Lac7ZWp64uI64ukLiDsgqzrnozqs7wg6rCc7J24IEFJ64qUIOusuOyEnOyZgCDqtIDqs4Trpbwg7LC46rOg7ZW0IOyniOusuO2VmOqzoCDqsJzsnbgg6rKw6rO866y8IOy0iOyViOydhCDrp4zrk63ri4jri6QuIOyCrOuejOydgCDtlYTsmpTtlZwg67aA67aE7J2YIOybkOusuCDtlbTshJ3qs7wg7JeF66y0IO2MkOuLqOydhCDqsoDthqDtlbQg7J207Jyg66W8IOq4sOuhne2VqeuLiOuLpC4g67O466y47J20IOuwlOuAjOuptCDsg4gg6rSA6rOEIO2bhOuztOulvCDtmZXsnbjtlZjqs6Ag67CY7JiB7ZWcIOuSpCDtlYTsmpTtlZwg67aA67aE7J2EIOuLpOyLnCDqsoDthqDtlanri4jri6QuIOybkOuzuOqzvCDsnbTsoIQg6riw66Gd7J2AIOuztOyhtO2VmOupsCDstpTstpzsnbTrgpgg7LSI7JWIIOyDneyEsSDsnpDssrTqsIAg7IKs656M7J2YIOyKueyduOydtOuCmCDsnpDrj5kgV2lraSDrsJjsmIHsnYQg65y77ZWY7KeA64qUIOyViuyKteuLiOuLpC48L2Rlc2M+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJmbG93LWFycm93IiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjgiIHJlZlk9IjUiIG1hcmtlcldpZHRoPSI4IiBtYXJrZXJIZWlnaHQ9IjgiIG9yaWVudD0iYXV0by1zdGFydC1yZXZlcnNlIj4KICAgICAgPHBhdGggZD0iTSAxIDEgTCA4IDUgTCAxIDkiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzUyNmE2MyIgc3Ryb2tlLXdpZHRoPSIxLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogICAgPC9tYXJrZXI+CiAgICA8bWFya2VyIGlkPSJyZXZpZXctYXJyb3ciIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOCIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPgogICAgICA8cGF0aCBkPSJNIDEgMSBMIDggNSBMIDEgOSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMjA1YjRlIiBzdHJva2Utd2lkdGg9IjEuNiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgICA8L21hcmtlcj4KICAgIDxzdHlsZT4KICAgICAgdGV4dCB7IGZvbnQtZmFtaWx5OiAtYXBwbGUtc3lzdGVtLCBCbGlua01hY1N5c3RlbUZvbnQsICJTZWdvZSBVSSIsICJBcHBsZSBTRCBHb3RoaWMgTmVvIiwgIk1hbGd1biBHb3RoaWMiLCBzYW5zLXNlcmlmOyBmaWxsOiAjMTgyYjM0OyB9CiAgICAgIC50aXRsZSB7IGZvbnQtc2l6ZTogMjdweDsgZm9udC13ZWlnaHQ6IDcwMDsgbGV0dGVyLXNwYWNpbmc6IC0uN3B4OyB9CiAgICAgIC5zdWJ0aXRsZSB7IGZvbnQtc2l6ZTogMTdweDsgZmlsbDogIzUzNjU2ZTsgfQogICAgICAuc3RlcCB7IGZvbnQtc2l6ZTogMTVweDsgZm9udC13ZWlnaHQ6IDYwMDsgZmlsbDogIzIwNWI0ZTsgfQogICAgICAuaGVhZGluZyB7IGZvbnQtc2l6ZTogMjNweDsgZm9udC13ZWlnaHQ6IDcwMDsgbGV0dGVyLXNwYWNpbmc6IC0uNXB4OyB9CiAgICAgIC5jb3B5IHsgZm9udC1zaXplOiAxN3B4OyBmaWxsOiAjNDI1OTUwOyB9CiAgICAgIC5zbWFsbCB7IGZvbnQtc2l6ZTogMTZweDsgZmlsbDogIzUzNjU2ZTsgfQogICAgICAuZmxvdyB7IGZpbGw6IG5vbmU7IHN0cm9rZTogIzUyNmE2Mzsgc3Ryb2tlLXdpZHRoOiAyOyBtYXJrZXItZW5kOiB1cmwoI2Zsb3ctYXJyb3cpOyB9CiAgICAgIC5yZXZpZXctZmxvdyB7IGZpbGw6IG5vbmU7IHN0cm9rZTogIzIwNWI0ZTsgc3Ryb2tlLXdpZHRoOiAyOyBzdHJva2UtZGFzaGFycmF5OiA1IDU7IG1hcmtlci1zdGFydDogdXJsKCNyZXZpZXctYXJyb3cpOyBtYXJrZXItZW5kOiB1cmwoI3Jldmlldy1hcnJvdyk7IH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgoKICA8cmVjdCB3aWR0aD0iMTIwMCIgaGVpZ2h0PSI2ODAiIHJ4PSIxNiIgZmlsbD0iI2Y3ZjlmOCIvPgogIDx0ZXh0IHg9IjQwIiB5PSI0OSIgY2xhc3M9InRpdGxlIj7snpDro4zrpbwg7IyT6rOgLCDqt7zqsbDroZwg7Zmc7Jqp7ZWY6rOgLCDrsJTrgIzrqbQg64uk7IucIO2ZleyduO2VqeuLiOuLpDwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iODAiIGNsYXNzPSJzdWJ0aXRsZSI+7JuQ67O4IMK3IOusuOyEnCDCtyDqtIDqs4Qgwrcg7IKs656M7J2YIO2MkOuLqOydhCDsl7DqsrDtlbQg7KeA7Iud7J2EIOqzhOyGjSDsgqzsmqntlaAg7IiYIOyeiOqyjCDtlanri4jri6QuPC90ZXh0PgoKICA8ZyBhcmlhLWxhYmVsPSLsnpDro4zrpbwg7KeA7Iud7Jy866GcIO2ZnOyaqe2VmOuKlCDrhKQg64uo6rOEIj4KICAgIDxyZWN0IHg9IjQwIiB5PSIxMjYiIHdpZHRoPSIyNjIiIGhlaWdodD0iMTc1IiByeD0iMTIiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NiZDhkMiIvPgogICAgPHRleHQgeD0iNjAiIHk9IjE1OSIgY2xhc3M9InN0ZXAiPjAxICDsnpDro4wg65Ox66GdPC90ZXh0PgogICAgPHRleHQgeD0iNjAiIHk9IjE5OSIgY2xhc3M9ImhlYWRpbmciPuyekOujjCDsm5Drs7gg67O06rSAPC90ZXh0PgogICAgPHRleHQgeD0iNjAiIHk9IjIzNCIgY2xhc3M9ImNvcHkiPu2MjOydvOqzvCDstZzstIgg7J6F66Cl7J2EPC90ZXh0PgogICAgPHRleHQgeD0iNjAiIHk9IjI2MCIgY2xhc3M9ImNvcHkiPu2MkOuzuOuzhOuhnCDrs7TsobTtlanri4jri6QuPC90ZXh0PgoKICAgIDxwYXRoIGQ9Ik0gMzA3IDIxMyBIIDMyMSIgY2xhc3M9ImZsb3ciLz4KICAgIDxyZWN0IHg9IjMyNiIgeT0iMTI2IiB3aWR0aD0iMjYyIiBoZWlnaHQ9IjE3NSIgcng9IjEyIiBmaWxsPSIjZmZmIiBzdHJva2U9IiNjYmQ4ZDIiLz4KICAgIDx0ZXh0IHg9IjM0NiIgeT0iMTU5IiBjbGFzcz0ic3RlcCI+MDIgIOydveq4sOyZgCDtjrjsp5E8L3RleHQ+CiAgICA8dGV4dCB4PSIzNDYiIHk9IjE5OSIgY2xhc3M9ImhlYWRpbmciPu2OuOynkSDqsIDriqXtlZwg66y47IScPC90ZXh0PgogICAgPHRleHQgeD0iMzQ2IiB5PSIyMzQiIGNsYXNzPSJjb3B5Ij7sm5Drs7jsl5DshJwg7KSA67mE7ZWcIFdpa2kg67O466y46rO8PC90ZXh0PgogICAgPHRleHQgeD0iMzQ2IiB5PSIyNjAiIGNsYXNzPSJjb3B5Ij7snbTsoIQg66y47IScIOydtOugpeydhCDrs7TqtIDtlanri4jri6QuPC90ZXh0PgoKICAgIDxwYXRoIGQ9Ik0gNTkzIDIxMyBIIDYwNyIgY2xhc3M9ImZsb3ciLz4KICAgIDxyZWN0IHg9IjYxMiIgeT0iMTI2IiB3aWR0aD0iMjYyIiBoZWlnaHQ9IjE3NSIgcng9IjEyIiBmaWxsPSIjZWRmNGVmIiBzdHJva2U9IiNiOWNmYzQiLz4KICAgIDx0ZXh0IHg9IjYzMiIgeT0iMTU5IiBjbGFzcz0ic3RlcCI+MDMgIOqwnOyduCBBSeydmCDstpTstpw8L3RleHQ+CiAgICA8dGV4dCB4PSI2MzIiIHk9IjE5OSIgY2xhc3M9ImhlYWRpbmciPuqwnOuFkMK36rSA6rOEIOq1rOyhsO2ZlDwvdGV4dD4KICAgIDx0ZXh0IHg9IjYzMiIgeT0iMjM0IiBjbGFzcz0iY29weSI+64yA7IOBwrfqtIDqs4TCt+yhsOqxtOqzvDwvdGV4dD4KICAgIDx0ZXh0IHg9IjYzMiIgeT0iMjYwIiBjbGFzcz0iY29weSI+7JuQ66y4IOq3vOqxsOulvCDtlajqu5gg7Jew6rKw7ZWp64uI64ukLjwvdGV4dD4KCiAgICA8cGF0aCBkPSJNIDg3OSAyMTMgSCA4OTMiIGNsYXNzPSJmbG93Ii8+CiAgICA8cmVjdCB4PSI4OTgiIHk9IjEyNiIgd2lkdGg9IjI2MiIgaGVpZ2h0PSIxNzUiIHJ4PSIxMiIgZmlsbD0iI2ZmZiIgc3Ryb2tlPSIjY2JkOGQyIi8+CiAgICA8dGV4dCB4PSI5MTgiIHk9IjE1OSIgY2xhc3M9InN0ZXAiPjA0ICDsgqzrnozqs7wg6rCc7J24IEFJ7J2YIO2ZnOyaqTwvdGV4dD4KICAgIDx0ZXh0IHg9IjkxOCIgeT0iMTk5IiBjbGFzcz0iaGVhZGluZyI+6re86rGw66GcIOyniOusuMK37Zmc7JqpPC90ZXh0PgogICAgPHRleHQgeD0iOTE4IiB5PSIyMzQiIGNsYXNzPSJjb3B5Ij7rrLjshJzsmYAg6rSA6rOE66W8IOywuOqzoO2VtDwvdGV4dD4KICAgIDx0ZXh0IHg9IjkxOCIgeT0iMjYwIiBjbGFzcz0iY29weSI+64u167OAwrfqsJzsnbgg7LSI7JWI7J2EIOunjOuTreuLiOuLpC48L3RleHQ+CiAgPC9nPgoKICA8ZyBhcmlhLWxhYmVsPSLtlYTsmpTtlZwg64yA7IOB66eMIOyCrOuejOydtCDqsoDthqDtlZjripQg7ISg7YOdIOqygO2GoCI+CiAgICA8cGF0aCBkPSJNIDc0MyAzMDYgViAzMzgiIGNsYXNzPSJyZXZpZXctZmxvdyIvPgogICAgPHRleHQgeD0iNzY2IiB5PSIzMjgiIGNsYXNzPSJzbWFsbCI+7ZWE7JqU7ZWcIOu2gOu2hOydhCDshKDtg53tlbQg6rKA7YagPC90ZXh0PgogICAgPHJlY3QgeD0iNjEyIiB5PSIzNDUiIHdpZHRoPSI1NDgiIGhlaWdodD0iOTEiIHJ4PSIxMCIgZmlsbD0iI2ZmZiIgc3Ryb2tlPSIjYjljZmM0IiBzdHJva2UtZGFzaGFycmF5PSI1IDQiLz4KICAgIDx0ZXh0IHg9IjYzNCIgeT0iMzc5IiBjbGFzcz0iaGVhZGluZyI+7IKs656M7J20IOq3vOqxsOyZgCDtjJDri6jsnYQg7ZmV7J247ZWp64uI64ukPC90ZXh0PgogICAgPHRleHQgeD0iNjM0IiB5PSI0MTAiIGNsYXNzPSJjb3B5Ij7sm5DrrLgg7ZW07ISdIO2ZleyduMK37KCV7KCVIMK3IOyghOusuOqwgCDtjJDri6jqs7wg7J207JygIOq4sOuhnTwvdGV4dD4KICA8L2c+CgogIDx0ZXh0IHg9IjQwIiB5PSIzNjEiIGNsYXNzPSJoZWFkaW5nIj7rrLjshJzsmYAg6rSA6rOE7J2YIOq3vOqxsOulvCDtlajqu5gg7J297Iq164uI64ukPC90ZXh0PgogIDx0ZXh0IHg9IjQwIiB5PSIzOTIiIGNsYXNzPSJzbWFsbCI+QUkg7LaU7Lac6rO8IOyCrOuejOydmCDtjJDri6jsnYAg7Lac7LKY66W8IOq1rOuzhO2VtCDrgqjquYHri4jri6QuPC90ZXh0PgogIDx0ZXh0IHg9IjQwIiB5PSI0MjAiIGNsYXNzPSJzbWFsbCI+6rKA7Yag6rCAIO2VhOyalO2VnCDrjIDsg4HrtoDthLAg7ZmV7J247ZWgIOyImCDsnojsirXri4jri6QuPC90ZXh0PgoKICA8ZyBhcmlhLWxhYmVsPSLrs7jrrLgg67OA6rK9IO2bhCDsp4Dsi53snYQg6rCx7Iug7ZWY64qUIOuwmOuztSDqs7zsoJUiPgogICAgPHJlY3QgeD0iNDAiIHk9IjQ3NiIgd2lkdGg9IjExMjAiIGhlaWdodD0iMTQ5IiByeD0iMTIiIGZpbGw9IiNlYWYxZWUiLz4KICAgIDx0ZXh0IHg9IjYyIiB5PSI1MTAiIGNsYXNzPSJzdGVwIj7rgrTsmqnsnbQg64us65287KeA66m0IOyngOyLneuPhCDqsLHsi6Dtlanri4jri6Q8L3RleHQ+CiAgICA8dGV4dCB4PSIxNzEiIHk9IjU1MyIgY2xhc3M9ImhlYWRpbmciIHRleHQtYW5jaG9yPSJtaWRkbGUiPuuzuOusuCDsiJjsoJU8L3RleHQ+CiAgICA8cGF0aCBkPSJNIDI4NCA1NDYgSCA0MDciIGNsYXNzPSJmbG93Ii8+CiAgICA8dGV4dCB4PSI2MDAiIHk9IjU1MyIgY2xhc3M9ImhlYWRpbmciIHRleHQtYW5jaG9yPSJtaWRkbGUiPuq0gOqzhCDsnqzstpTstpzCt+2bhOuztCDtmZXsnbjCt+uwmOyYgTwvdGV4dD4KICAgIDxwYXRoIGQ9Ik0gNzk1IDU0NiBIIDkxOCIgY2xhc3M9ImZsb3ciLz4KICAgIDx0ZXh0IHg9IjEwNDAiIHk9IjU1MyIgY2xhc3M9ImhlYWRpbmciIHRleHQtYW5jaG9yPSJtaWRkbGUiPu2VhOyalO2VnCDsnqzqsoDthqA8L3RleHQ+CiAgICA8cGF0aCBkPSJNIDEwNDAgNTY4IFYgNTk4IEggMTcxIFYgNTY4IiBjbGFzcz0iZmxvdyIvPgogICAgPHJlY3QgeD0iNDY4IiB5PSI1ODUiIHdpZHRoPSIyNjQiIGhlaWdodD0iMjUiIGZpbGw9IiNlYWYxZWUiLz4KICAgIDx0ZXh0IHg9IjYwMCIgeT0iNjA0IiBjbGFzcz0ic21hbGwiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuuLpOydjCDrs4Dqsr3sl5Drj4Qg6rCZ7J2AIO2ZleyduOydhCDrsJjrs7U8L3RleHQ+CiAgPC9nPgoKICA8dGV4dCB4PSI0MCIgeT0iNjU4IiBjbGFzcz0ic21hbGwiPuy2lOy2nOqzvCDstIjslYgg7IOd7ISx7J2AIOyCrOuejOydmCDsirnsnbjqs7wg64uk66aF64uI64ukLiBXaWtp7JeQIOuwmOyYge2VoCDrgrTsmqnsnYAg7IKs7Jqp7J6Q6rCAIO2ZleyduO2VtCDsoIDsnqXtlanri4jri6QuPC90ZXh0Pgo8L3N2Zz4K" alt="자료 원본을 보관하고 Wiki 문서와 개념·관계를 준비한 뒤, 필요한 검토와 근거 확인을 거쳐 질문에 활용하고 본문 변경 후 다시 갱신하는 흐름"></p>
+<p>핵심 흐름은 <strong>자료 축적 → 지식 구조화 → 근거 확인과 활용 → 명시적인 수정과 갱신</strong>입니다. 원본 보관, 문서 저장, 관계 추출, 사람의 검토는 각각 자신의 상태를 가집니다.</p>
+<h2 id="왜-이런-지식-공간이-필요한가">왜 이런 지식 공간이 필요한가</h2>
+<p>업무 자료에는 절차, 정의, 조건, 예외, 담당자의 판단이 함께 들어 있습니다. 시간이 지나면 같은 주제의 문서가 늘고 내용이 바뀌며, 누군가에게 물어 확인한 설명도 대화 속에 흩어집니다.</p>
+<p>다음과 같은 질문에 답하려면 문서를 찾는 것에 더해 근거와 맥락을 살펴야 합니다.</p>
+<ul>
+<li>이 절차는 어떤 조건에서 적용되는가?</li>
+<li>이 용어는 이 문서에서 어떤 뜻으로 쓰였는가?</li>
+<li>AI의 설명은 어느 문장의 어떤 내용을 근거로 했는가?</li>
+<li>이 의견은 원문에 있는 내용인가, 담당자가 별도로 정한 업무 판단인가?</li>
+<li>본문을 수정한 뒤에도 예전 관계와 판단을 그대로 사용해도 되는가?</li>
+</ul>
+<p>LLM Wiki는 이런 확인을 도우면서, 확인한 내용을 다음 업무와 다음 대화에서 다시 활용하는 흐름을 지향합니다. 축적한 자료를 누가 어떤 범위에서 읽고 고칠 수 있는지도 작업 공간의 권한으로 관리합니다.</p>
+<h2 id="무엇을-함께-관리하는가">무엇을 함께 관리하는가</h2>
+<h3 id="자료의-출발점인-원본">자료의 출발점인 원본</h3>
+<p>원본은 업로드한 파일이나 처음 붙여넣은 텍스트입니다. 어떤 자료에서 지식이 시작되었는지 확인할 수 있도록 원본과 그 판본을 보관합니다.</p>
+<p>예를 들어 PDF를 등록한 뒤 Wiki 문장을 고쳐도 처음 등록한 PDF는 그대로 남습니다. 원래 파일의 표나 배치를 확인해야 할 때 원본과 대조할 수 있습니다.</p>
+<h3 id="읽고-고치는-wiki-문서">읽고 고치는 Wiki 문서</h3>
+<p>Wiki 문서는 앱에서 읽고 편집하는 Markdown 본문입니다. Markdown은 제목·목록·표 등을 글로 표현하는 문서 형식이며, 사용자는 앱에서 본문을 읽고 수정할 수 있습니다.</p>
+<p>파일의 문자를 읽어 본문을 준비하고, 이 본문이 지식 추출의 근거가 됩니다. 문서를 저장할 때는 수정 전 전체 문서를 이력으로 남깁니다. 파일 변환에서 읽지 못한 부분이 있으면 그 범위를 확인해야 합니다.</p>
+<h3 id="대상과-의미를-연결하는-온톨로지">대상과 의미를 연결하는 온톨로지</h3>
+<p>온톨로지는 문서에 등장하는 대상과 그 관계를 이름·속성·조건·근거와 함께 정리한 구조입니다. 앱의 지도는 이 구조를 탐색하는 한 가지 방법입니다.</p>
+<p>아래의 연습용 문장을 보겠습니다.</p>
+<blockquote>
+<p>요청을 접수하면 담당자가 내용을 확인한다. 필수 정보가 없으면 담당자가 보완을 요청한다.</p>
+</blockquote>
+<p>이 문장을 구조화할 때 보존해야 할 의미는 다음과 같습니다.</p>
+<table>
+<thead>
+<tr>
+<th>살펴볼 요소</th>
+<th>예시에서 읽을 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>대상</td>
+<td>요청, 담당자, 필수 정보</td>
+</tr>
+<tr>
+<td>행동과 관계</td>
+<td>요청 접수, 내용 확인, 보완 요청</td>
+</tr>
+<tr>
+<td>조건</td>
+<td>필수 정보가 없는 경우</td>
+</tr>
+<tr>
+<td>순서와 맥락</td>
+<td>접수한 내용을 확인하고, 필요한 정보가 빠졌을 때 보완 요청</td>
+</tr>
+<tr>
+<td>근거</td>
+<td>이 내용을 말하는 원문과 그 문서 판본</td>
+</tr>
+</tbody>
+</table>
+<p>“담당자가 보완을 요청한다”만 남기면 언제 요청하는지 빠집니다. 조건과 근거까지 함께 보관해야 이후 질문에서도 의미를 확인할 수 있습니다. AI가 만든 관계는 원문을 해석한 결과이므로 중요한 부분은 실제 인용과 대조합니다.</p>
+<h3 id="사람이-확인한-해석과-업무-판단">사람이 확인한 해석과 업무 판단</h3>
+<p>사람은 AI의 해석이 원문에 맞는지 검토하고, 잘못 읽은 관계나 조건을 바로잡을 수 있습니다. 필요하면 별도의 업무 의견도 이유와 함께 기록합니다.</p>
+<table>
+<thead>
+<tr>
+<th>구분</th>
+<th>예시</th>
+<th>지식에 남겨야 할 것</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>원문 내용</td>
+<td>“필수 정보가 없으면 보완을 요청한다.”</td>
+<td>원문 위치와 판본</td>
+</tr>
+<tr>
+<td>원문 해석 정정</td>
+<td>AI가 빠뜨린 “필수 정보 없음” 조건을 복원</td>
+<td>대상 주장, 원문 근거, 정정 이유</td>
+</tr>
+<tr>
+<td>별도의 업무 판단</td>
+<td>“이 업무에서는 보완 요청 전에 담당자가 연락한다.”라는 의견</td>
+<td>전문가 의견이라는 출처와 이유·적용 범위</td>
+</tr>
+</tbody>
+</table>
+<p>이 구별을 유지해야 다음 사용자가 문서에 적힌 내용과 사람이 추가한 의견을 이해할 수 있습니다. 검토는 필요한 대상에 수행합니다. 사람이 확인하기 전의 결과도 미검토 상태를 표시한 채 탐색할 수 있습니다.</p>
+<h2 id="실제로-어떤-방식으로-동작하는가">실제로 어떤 방식으로 동작하는가</h2>
+<h3 id="자료를-등록하고-본문을-준비한다">자료를 등록하고 본문을 준비한다</h3>
+<p>사용자가 파일을 선택하거나 텍스트를 붙여넣으면 원본을 보관합니다. 파일 형식에 맞춰 문자를 읽고 편집 가능한 Wiki 본문을 준비합니다. 스캔 자료에는 문자 인식이 필요할 수 있습니다.</p>
+<p>이 단계에서는 내용을 읽지 못한 부분과 저장한 결과를 확인합니다. 변환 완료는 자료의 모든 의미를 정확하게 읽었다는 판단과는 구별합니다.</p>
+<h3 id="ai가-문서의-개념과-관계를-추출한다">AI가 문서의 개념과 관계를 추출한다</h3>
+<p>선택한 개인 AI 실행기는 작업의 원문과 추출 규칙을 받아 대상·관계·속성·조건을 정리합니다. 결과에는 어떤 본문을 읽었는지와 원문 근거를 연결합니다.</p>
+<p>저장 조건과 인용·구조를 검사한 뒤 결과를 보관합니다. 이 검사는 저장할 수 있는 결과인지 확인하는 절차이며, 해석의 의미가 모두 정확하다는 승인을 대신하지 않습니다.</p>
+<h3 id="필요한-부분을-사람이-확인한다">필요한 부분을 사람이 확인한다</h3>
+<p>사용자는 문서를 읽거나 지도를 탐색하며 원문 인용과 조건을 살펴봅니다. 중요한 주장은 검토함에서 승인·수정·보류·반려하고 이유를 남길 수 있습니다.</p>
+<p>기존 지식과의 관련성도 후보로 확인할 수 있습니다. 같은 이름이나 AI의 관련 제안만으로 개체가 자동 병합되거나 전문가 판단으로 확정되지는 않습니다.</p>
+<h3 id="질문에-필요한-근거를-읽고-답변한다">질문에 필요한 근거를 읽고 답변한다</h3>
+<p>사용자가 질문하면 AI는 허용된 문서와 지식에서 필요한 근거를 찾아 답변에 활용합니다. 사용자는 답변의 근거를 열어 인용, 원문 위치, 사용한 자료를 확인합니다.</p>
+<p>예를 들어 “예시 운영 안내에서 보완을 요청하는 조건은 무엇인가?”라고 물으면 “필수 정보가 없는 경우”라는 답과 그 문장을 함께 확인하는 식입니다. 실제 답변에서는 무엇을 읽었는지, 일부만 읽었는지, 인용이 있는지를 살펴봅니다.</p>
+<h3 id="결과를-활용하고-필요한-내용을-갱신한다">결과를 활용하고 필요한 내용을 갱신한다</h3>
+<p>답변을 복사하거나 파일로 내려받고 개인 초안으로 다듬을 수 있습니다. 공유 문서를 바꾸려면 검토한 내용을 대상 문서의 본문 편집에서 명시적으로 저장합니다.</p>
+<p>본문을 바꾸면 기존 관계가 이전 본문을 근거로 한 상태가 될 수 있습니다. 현재 본문으로 관계를 다시 추출하고 새 후보와 이전 결과를 비교한 뒤 반영합니다. 과거 판단은 기록으로 보존하며 새 결과에 적용할지는 현재 근거에서 다시 확인합니다.</p>
+<h2 id="앱과-서버와-개인-ai는-무엇을-맡는가">앱과 서버와 개인 AI는 무엇을 맡는가</h2>
+<table>
+<thead>
+<tr>
+<th>구성</th>
+<th>맡는 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>데스크톱 앱</td>
+<td>문서·지도·근거를 보여 주고 편집·검토·질문을 시작하며 작업 상태를 표시합니다.</td>
+</tr>
+<tr>
+<td>공동 서버</td>
+<td>작업 공간의 자료·원본·문서 이력·추출 지식·검토 기록과 접근 권한을 관리합니다.</td>
+</tr>
+<tr>
+<td>개인 AI 실행기</td>
+<td>사용자의 PC에 설치하고 로그인한 Codex CLI 또는 Claude Code CLI를 통해 AI 작업을 실행합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>앱은 자료를 읽고 저장할 때 서버의 업무 기능을 사용합니다. 개인 AI 실행기는 작업에 따라 서버 API와 MCP라는 도구 연결로 허용된 규칙·근거·저장 기능을 이용합니다. 사용자는 앱에서 작업을 시작하고 결과를 확인합니다.</p>
+<p>공동 서버에 로그인하는 계정과 개인 AI의 로그인은 별개입니다. AI를 사용할 PC에는 선택한 CLI를 먼저 설치해야 합니다. 실행기를 개인 PC에서 시작하더라도 필요한 입력이 선택한 AI 서비스에 전달될 수 있으므로, 이를 모델 전체가 오프라인에서 동작한다는 의미로 이해하지 않습니다.</p>
+<p>공유 Wiki와 개인 작업의 범위도 구별합니다. 문서에 접근할 수 있는 사람의 범위와 대화·개인 초안의 소유 범위는 같지 않을 수 있습니다. 개인 답변을 내려받았다고 공유 문서가 바뀌는 것은 아닙니다.</p>
+<h2 id="어떤-가치를-추구하는가">어떤 가치를 추구하는가</h2>
+<h3 id="설명과-근거를-함께-확인할-수-있는-지식">설명과 근거를 함께 확인할 수 있는 지식</h3>
+<p>어떤 결론을 사용할 때 그 결론이 어느 자료와 조건에서 나왔는지 확인할 수 있어야 합니다. LLM Wiki는 문서·판본·인용·판단 기록을 연결해 사용자가 그 이유를 살펴보도록 합니다.</p>
+<p>인용이 있다는 사실만으로 답변의 모든 결론이 맞다고 보장되지는 않습니다. 근거를 열어 실제 의미를 대조할 수 있는 것이 중요한 기준입니다.</p>
+<h3 id="사람의-판단이-출처와-함께-남는-협업">사람의 판단이 출처와 함께 남는 협업</h3>
+<p>업무에는 문서의 사실과 사람의 해석·정책 판단이 함께 필요합니다. 각각의 출처와 이유를 남겨 다음 사용자가 어떤 내용을 어떤 기준으로 적용했는지 이해하도록 합니다.</p>
+<h3 id="다음-업무에서-다시-찾을-수-있는-축적">다음 업무에서 다시 찾을 수 있는 축적</h3>
+<p>대화나 AI 세션이 바뀌어도 허용된 자료와 적용 가능한 판단을 다시 찾아 활용하는 경험을 지향합니다. 근거 있는 문서를 쌓고 고치는 활동이 다음 질문과 결과물의 출발점이 되도록 합니다.</p>
+<h3 id="바뀐-내용을-다시-확인할-수-있는-현재성">바뀐 내용을 다시 확인할 수 있는 현재성</h3>
+<p>문서가 바뀌면 이전 관계와 판단도 다시 살펴야 합니다. 본문·추출·검토가 어떤 기준에 연결되어 있는지 확인하고 필요한 재추출과 재검토로 이어지도록 합니다.</p>
+<p>화면의 “최신”은 현재 기준과의 일치를 뜻합니다. 사실의 정확성을 모두 검증했다는 뜻으로 사용하지 않습니다.</p>
+<h3 id="고치면서도-출발점과-이력이-남는-운영">고치면서도 출발점과 이력이 남는 운영</h3>
+<p>원본과 수정 전 문서, 과거 판단을 보존해 변경의 이유를 추적할 수 있도록 합니다. 여러 사용자가 같은 문서를 수정할 때도 최신 본문과 내 변경을 비교하며 반영합니다.</p>
+<h2 id="현재-어떤-기능을-제공하는가">현재 어떤 기능을 제공하는가</h2>
+<table>
+<thead>
+<tr>
+<th>필요한 일</th>
+<th>현재 앱에서 사용하는 기능</th>
+<th>함께 확인할 점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>자료를 모으고 찾기</td>
+<td>파일·텍스트 등록, 원본 보관, 이름·내용 검색</td>
+<td>변환의 미독 범위와 조회한 범위</td>
+</tr>
+<tr>
+<td>본문을 정리하고 고치기</td>
+<td>문서 읽기·편집, 변경 비교, 전체 이력과 판본 복원</td>
+<td>편집 대상은 Wiki 본문이며 원본 파일은 별도로 보관</td>
+</tr>
+<tr>
+<td>내용의 구조를 살펴보기</td>
+<td>개념·문서 검색, 온톨로지 지도, 관계·속성·조건과 원문 문맥</td>
+<td>처음 불러온 지도가 전체 관계를 포함하지 않을 수 있음</td>
+</tr>
+<tr>
+<td>해석과 의견을 관리하기</td>
+<td>검토함, 원문 근거 정정, 전문가 의견, 판단 이력과 되돌림</td>
+<td>원문에 따른 정정과 별도 업무 판단의 구별</td>
+</tr>
+<tr>
+<td>지식에 질문하고 결과 만들기</td>
+<td>근거 기반 대화, 자료 첨부, 선택한 공개 검색어의 웹 검색, 개인 초안</td>
+<td>첨부와 Wiki 등록, 개인 초안과 공유 문서 저장의 구별</td>
+</tr>
+<tr>
+<td>결과를 파일로 활용하기</td>
+<td>Markdown·텍스트·Word·PDF·Excel·PowerPoint 내보내기</td>
+<td>해당 환경에 표시되는 형식과 내려받은 파일의 내용</td>
+</tr>
+<tr>
+<td>작업을 이어서 확인하기</td>
+<td>AI 세션, 지난 기록, 개별 작업 중단, 연결·계정 사용량 확인</td>
+<td>실행 종료와 저장 완료, 창 숨김과 앱 종료의 구별</td>
+</tr>
+</tbody>
+</table>
+<p>현재 문서 간 대응과 변경 영향의 일부 기능은 서버 API와 MCP에 있으며, 별도 앱 메뉴로 제공하지 않습니다. 개인 결과물 화면에서도 Wiki 직접 반영 버튼은 제공하지 않으므로 검토한 내용을 문서 편집에서 저장합니다.</p>
+<h2 id="어떤-사용-경험으로-발전시키려는가">어떤 사용 경험으로 발전시키려는가</h2>
+<p>제품이 지향하는 방향은 <strong>한 번 확인한 업무 지식이 다음 질문·판단·문서 수정으로 이어지는 순환</strong>입니다.</p>
+<table>
+<thead>
+<tr>
+<th>지향하는 경험</th>
+<th>사용자가 얻고자 하는 가치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>필요한 자료와 관련 맥락을 함께 찾기</td>
+<td>여러 문서를 다시 읽으며 시작점을 찾는 부담 줄이기</td>
+</tr>
+<tr>
+<td>답변의 원문과 사람의 판단을 함께 살펴보기</td>
+<td>결과를 적용할 때 이유와 조건을 설명하기</td>
+</tr>
+<tr>
+<td>검토한 내용과 수정 기록을 다시 활용하기</td>
+<td>대화가 바뀌어도 확인한 지식에서 이어서 작업하기</td>
+</tr>
+<tr>
+<td>바뀐 본문과 이전 판단의 차이를 살펴보기</td>
+<td>오래된 기준을 그대로 적용할 가능성 줄이기</td>
+</tr>
+<tr>
+<td>결과물을 만들고 필요한 내용을 다시 축적하기</td>
+<td>일회성 답변이 문서와 지식의 개선으로 이어지게 하기</td>
+</tr>
+</tbody>
+</table>
+<p>이 방향은 위에서 설명한 현재 기능을 연결하고 개선해 가려는 목적입니다. 모든 자료의 자동 통합, 모든 판단의 자동 검증, 모든 변경의 무인 반영을 제공한다는 약속이나 확정된 개발 일정은 아닙니다.</p>
+<h2 id="이런-업무에서-활용할-수-있다">이런 업무에서 활용할 수 있다</h2>
+<ul>
+<li><strong>업무 인수인계:</strong> 절차와 조건을 읽고 질문하며 원문과 함께 설명을 확인합니다.</li>
+<li><strong>여러 자료의 비교:</strong> 문서별 용어와 적용 조건을 찾아 공통점·차이와 근거를 정리합니다.</li>
+<li><strong>보고서와 정리 자료 작성:</strong> 필요한 지식을 질문하고 답변의 근거를 확인한 뒤 파일로 활용합니다.</li>
+<li><strong>전문가 지식 정리:</strong> 원문 해석의 정정과 별도 업무 의견을 구별해 이유와 함께 남깁니다.</li>
+<li><strong>지속적인 문서 관리:</strong> 본문을 고치고 이전 판본을 비교하며 관계와 판단의 재확인으로 연결합니다.</li>
+</ul>
+<p>가장 먼저 해 볼 일은 작은 자료 하나로 이 흐름을 경험하는 것입니다. <strong>예시 운영 안내</strong>를 등록해 본문을 읽고, 관계의 조건을 살펴보고, 질문의 근거를 확인한 뒤 문장을 수정해 갱신 과정을 따라가 보세요.</p>
+<h2 id="사용을-시작하려면">사용을 시작하려면</h2>
+<p>화면에서 무엇을 눌러야 하는지는 <a href="index.html">화면 가이드</a>, 설치·연결·기능별 상세 절차는 <a href="#llm-wiki-사용자-가이드">사용자 가이드</a>에서 확인할 수 있습니다. 앱에서는 로그인 화면 또는 사이드바의 <strong>사용자 가이드</strong>를 엽니다.</p>
+<hr><h1 id="llm-wiki-사용자-가이드">LLM Wiki 사용자 가이드</h1>
+<p>기준일: 2026-11-07 · 저장소의 데스크톱 앱 기준</p>
+<p>LLM Wiki는 자료 원본을 보관하고, 읽고 고칠 수 있는 Wiki 문서를 만들며, 문서에서 추출한 개념과 관계를 AI 질문에 활용하는 지식 공간입니다. 이 가이드는 데스크톱 앱을 처음 연결하는 사람과 자료를 등록·검색·수정하며 업무에 활용하는 사람을 위한 안내입니다. 설치한 앱과 연결한 서버의 버전에 따라 제공되는 메뉴가 다를 수 있습니다.</p>
+<p>제품의 목적·동작 원리·추구하는 가치를 먼저 알고 싶다면 <a href="#llm-wiki-이해하기">LLM Wiki 이해하기</a>를 읽어 보세요.</p>
+<p>화면을 보며 따라 하려면 앱의 <strong>사용자 가이드</strong> 또는 <a href="index.html">화면 가이드</a>를 먼저 여세요. 실제 앱의 캡처에서 조작 위치를 확인하고, 화면을 확대하거나 12개 장면을 차례로 넘길 수 있습니다. 처음 시작·지식 활용·수정과 관리의 세 과정으로 나눴으며, 이 문서는 세부 조건과 오류 해결을 찾아볼 때 사용합니다. 캡처의 작업 공간명은 <strong>워크스페이스</strong>, 사용자 이름은 <strong>홍길동</strong>으로 통일한 연습용 예시이며, 자료와 AI 응답도 모의 예시입니다.</p>
+<h2 id="가이드-읽는-순서">가이드 읽는 순서</h2>
+<p>처음 사용한다면 시작 설정을 마친 뒤 작은 텍스트 자료 하나로 등록 → 문서 확인 → 관계 확인 → 질문 → 내려받기를 따라 해 보세요. 이미 연결한 사용자라면 필요한 작업의 절부터 읽어도 됩니다.</p>
+<table>
+<thead>
+<tr>
+<th>하고 싶은 일</th>
+<th>바로가기</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>원본·문서·관계의 차이 이해</td>
+<td><a href="#%EA%B8%B0%EB%B3%B8-%EA%B0%9C%EB%85%90-%EC%9D%B4%ED%95%B4%ED%95%98%EA%B8%B0">기본 개념</a></td>
+</tr>
+<tr>
+<td>설치, 서버 로그인, 개인 AI 연결</td>
+<td><a href="#%EC%8B%9C%EC%9E%91-%EC%84%A4%EC%A0%95%ED%95%98%EA%B8%B0">시작 설정</a></td>
+</tr>
+<tr>
+<td>메뉴와 작업 공간 확인</td>
+<td><a href="#%ED%99%94%EB%A9%B4-%EA%B5%AC%EC%84%B1%EA%B3%BC-%EC%9E%91%EC%97%85-%EA%B3%B5%EA%B0%84-%EC%9D%B4%ED%95%B4%ED%95%98%EA%B8%B0">화면 구성</a></td>
+</tr>
+<tr>
+<td>파일 업로드와 텍스트 등록</td>
+<td><a href="#%EC%9E%90%EB%A3%8C-%EB%93%B1%EB%A1%9D%ED%95%98%EA%B8%B0">자료 등록</a></td>
+</tr>
+<tr>
+<td>이름·내용으로 문서 검색</td>
+<td><a href="#%EB%AC%B8%EC%84%9C-%EC%B0%BE%EA%B3%A0-%EC%9D%BD%EA%B8%B0">문서 찾기</a></td>
+</tr>
+<tr>
+<td>본문 수정, 변경 비교, 과거 판본 복원</td>
+<td><a href="#%EB%AC%B8%EC%84%9C-%EB%B3%B8%EB%AC%B8-%EC%88%98%EC%A0%95%ED%95%98%EA%B3%A0-%ED%8C%90%EB%B3%B8-%EB%B3%B5%EC%9B%90%ED%95%98%EA%B8%B0">본문과 이력</a></td>
+</tr>
+<tr>
+<td>업로드한 파일과 원본 판본 확인</td>
+<td><a href="#%EB%93%B1%EB%A1%9D-%EC%9B%90%EB%B3%B8%EA%B3%BC-%EC%9B%90%EB%B3%B8-%ED%8C%90%EB%B3%B8-%ED%99%95%EC%9D%B8%ED%95%98%EA%B8%B0">등록 원본</a></td>
+</tr>
+<tr>
+<td>새 관계 추출, 후보 비교와 반영</td>
+<td><a href="#%EA%B4%80%EA%B3%84-%EC%9E%AC%EC%B6%94%EC%B6%9C%EA%B3%BC-%EA%B2%B0%EA%B3%BC-%EB%B0%98%EC%98%81%ED%95%98%EA%B8%B0">관계 재추출</a></td>
+</tr>
+<tr>
+<td>개념·관계·용어 문맥 탐색</td>
+<td><a href="#%EC%98%A8%ED%86%A8%EB%A1%9C%EC%A7%80%EC%97%90%EC%84%9C-%EA%B0%9C%EB%85%90%EA%B3%BC-%EA%B4%80%EA%B3%84-%ED%83%90%EC%83%89%ED%95%98%EA%B8%B0">온톨로지</a></td>
+</tr>
+<tr>
+<td>원문 해석 검토와 전문가 의견</td>
+<td><a href="#%EA%B4%80%EA%B3%84-%EA%B2%80%ED%86%A0%ED%95%98%EA%B3%A0-%EC%A0%84%EB%AC%B8%EA%B0%80-%EC%9D%98%EA%B2%AC-%EB%82%A8%EA%B8%B0%EA%B8%B0">관계 검토</a></td>
+</tr>
+<tr>
+<td>질문, 첨부, 웹 검색, 답변 근거 확인</td>
+<td><a href="#ai-%EC%B1%84%ED%8C%85%EC%9C%BC%EB%A1%9C-%EC%A7%88%EB%AC%B8%ED%95%98%EA%B8%B0">AI 채팅</a></td>
+</tr>
+<tr>
+<td>Word·PDF·Excel·PowerPoint 등으로 저장</td>
+<td><a href="#%EB%8B%B5%EB%B3%80%EA%B3%BC-%EA%B0%9C%EC%9D%B8-%EC%B4%88%EC%95%88%EC%9D%84-%ED%8C%8C%EC%9D%BC%EB%A1%9C-%EB%82%B4%EB%B3%B4%EB%82%B4%EA%B8%B0">파일 내보내기</a></td>
+</tr>
+<tr>
+<td>실행 중 작업 확인·중단, 지난 기록 찾기</td>
+<td><a href="#ai-%EC%9E%91%EC%97%85%EA%B3%BC-%EC%A7%80%EB%82%9C-%EC%8B%A4%ED%96%89-%EA%B8%B0%EB%A1%9D-%EA%B4%80%EB%A6%AC%ED%95%98%EA%B8%B0">AI 작업 관리</a></td>
+</tr>
+<tr>
+<td>로그아웃, 계정 한도, 테마, 업데이트</td>
+<td><a href="#%EA%B3%84%EC%A0%95%EA%B3%BC-%EC%95%B1-%EC%84%A4%EC%A0%95-%EA%B4%80%EB%A6%AC%ED%95%98%EA%B8%B0">설정 관리</a></td>
+</tr>
+<tr>
+<td>오류·누락·충돌 해결</td>
+<td><a href="#%EC%9E%90%EC%A3%BC-%EA%B2%AA%EB%8A%94-%EB%AC%B8%EC%A0%9C-%ED%95%B4%EA%B2%B0%ED%95%98%EA%B8%B0">문제 해결</a></td>
+</tr>
+<tr>
+<td>등록부터 활용·정정까지 따라 하기</td>
+<td><a href="#%EC%97%85%EB%AC%B4%EB%B3%84%EB%A1%9C-%EB%94%B0%EB%9D%BC-%ED%95%98%EA%B8%B0">업무별 예시</a></td>
+</tr>
+<tr>
+<td>앱 메뉴에서 제공하지 않는 기능 확인</td>
+<td><a href="#%ED%98%84%EC%9E%AC-%EC%95%B1%EC%9D%98-%EC%A0%9C%EA%B3%B5-%EB%B2%94%EC%9C%84-%EC%95%8C%EC%95%84%EB%91%90%EA%B8%B0">현재 제공 범위</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="처음-한-번-사용해-보기">처음 한 번 사용해 보기</h3>
+<ol>
+<li><a href="#%EC%8B%9C%EC%9E%91-%EC%84%A4%EC%A0%95%ED%95%98%EA%B8%B0">시작 설정</a>에서 서버 계정과 개인 AI를 연결합니다.</li>
+<li><strong>문서 → 문서 등록 → 텍스트 붙여넣기</strong>에서 <a href="#%ED%85%8D%EC%8A%A4%ED%8A%B8%EB%A5%BC-%EB%B6%99%EC%97%AC%EB%84%A3%EC%96%B4-%EB%93%B1%EB%A1%9D%ED%95%98%EA%B8%B0">연습용 텍스트</a>를 입력합니다.</li>
+<li><strong>등록하고 관계 추출</strong>을 누르고 각 단계의 결과를 확인합니다.</li>
+<li><strong>문서 열기</strong>로 입력한 내용이 저장되었는지 확인합니다.</li>
+<li><strong>관계 확인</strong>으로 조건과 관계가 원문에 맞게 읽혔는지 확인합니다.</li>
+<li><strong>AI 채팅</strong>에서 문서 이름과 질문을 적고 답변의 <strong>근거</strong>를 엽니다.</li>
+<li>답변 아래의 <strong>내려받기</strong>로 파일 하나를 저장해 열어 봅니다.</li>
+</ol>
+<h2 id="기본-개념-이해하기">기본 개념 이해하기</h2>
+<h3 id="자료가-지식이-되는-과정">자료가 지식이 되는 과정</h3>
+<p>자료를 등록하면 원본을 보관하고, 필요하면 문자를 읽어 Markdown 문서로 저장합니다. 개인 AI가 이 문서에서 대상과 관계를 추출합니다. 이후 문서와 관계를 탐색하거나 AI에게 질문할 수 있습니다.</p>
+<p>본문을 고치면 기존 관계는 이전 본문을 근거로 한 상태가 됩니다. 새 본문으로 관계를 다시 추출하고 변경 내용을 확인해야 문서와 관계를 함께 최신 상태로 유지할 수 있습니다.</p>
+<table>
+<thead>
+<tr>
+<th>용어</th>
+<th>뜻</th>
+<th>사용할 때 기억할 점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>작업 공간</td>
+<td>함께 접근할 수 있는 문서와 지식을 모아 놓은 공간</td>
+<td>같은 서버라도 권한과 작업 공간이 다르면 보이는 자료가 다릅니다.</td>
+</tr>
+<tr>
+<td>원본</td>
+<td>처음 등록한 파일이나 붙여넣은 텍스트</td>
+<td>이후 Wiki 본문을 수정해도 등록 원본은 바뀌지 않습니다.</td>
+</tr>
+<tr>
+<td>Wiki 문서</td>
+<td>앱에서 읽고 편집하는 Markdown 문서</td>
+<td>문서 저장과 관계 추출은 서로 다른 처리입니다.</td>
+</tr>
+<tr>
+<td>판본</td>
+<td>특정 시점의 원본 또는 문서 내용</td>
+<td>현재 본문과 관계가 어떤 판본에 근거하는지 확인합니다.</td>
+</tr>
+<tr>
+<td>개체</td>
+<td>문서에 등장하는 장치·조직·개념 등 관계의 대상</td>
+<td>이름이 같아도 문맥과 근거가 다를 수 있습니다.</td>
+</tr>
+<tr>
+<td>관계·주장</td>
+<td>대상 사이의 의미, 속성, 조건 등을 구조로 나타낸 내용</td>
+<td>AI가 만들었다는 사실만으로 원문에 맞는 해석이 확정되지는 않습니다.</td>
+</tr>
+<tr>
+<td>온톨로지</td>
+<td>개체·관계·속성과 근거를 함께 담은 지식 구조</td>
+<td>지도와 상세 정보를 통해 원문 근거까지 살펴봅니다.</td>
+</tr>
+<tr>
+<td>전문가 판단</td>
+<td>사람이 업무상 적용할 해석이나 정책을 이유와 함께 기록한 것</td>
+<td>원문에 적힌 사실과 사람이 정한 적용 판단을 구별합니다.</td>
+</tr>
+<tr>
+<td>후보</td>
+<td>기존 지식과의 관련성 등 추가 확인이 필요한 제안</td>
+<td>후보가 나왔다고 관계가 확정되거나 원문이 변경되지는 않습니다.</td>
+</tr>
+<tr>
+<td>개인 산출물</td>
+<td>AI 답변 등을 바탕으로 만든 개인 초안</td>
+<td>파일로 내보낼 수 있으며 생성만으로 Wiki 본문에 반영되지 않습니다.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="결과의-상태-읽기">결과의 상태 읽기</h3>
+<p>화면의 상태는 다음 행동을 판단하는 데 사용합니다.</p>
+<table>
+<thead>
+<tr>
+<th>표시되는 상황</th>
+<th>의미</th>
+<th>다음 행동</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>변환 완료</td>
+<td>파일에서 읽은 내용을 준비했습니다.</td>
+<td>변환 보고의 누락·미독 범위를 확인합니다.</td>
+</tr>
+<tr>
+<td>문서 저장 완료</td>
+<td>Wiki 문서를 저장했습니다.</td>
+<td>본문을 열어 제목·내용·표 등이 올바르게 들어왔는지 확인합니다.</td>
+</tr>
+<tr>
+<td>관계 추출 완료</td>
+<td>해당 본문을 기준으로 추출 결과를 저장했습니다.</td>
+<td>관계와 인용을 살펴봅니다. 최초 추출 결과는 사람의 검토 전 상태입니다.</td>
+</tr>
+<tr>
+<td>미검토</td>
+<td>사람이 해석을 확인하지 않은 내용입니다.</td>
+<td>중요한 업무에 사용할 부분의 근거를 확인합니다.</td>
+</tr>
+<tr>
+<td>오래됨·재검토 필요</td>
+<td>본문이나 판단의 기준이 달라졌습니다.</td>
+<td>현재 본문과 비교하고 재추출 또는 재검토합니다.</td>
+</tr>
+<tr>
+<td>일부만 처리됨·미독</td>
+<td>자료의 일부를 읽거나 처리하지 못했습니다.</td>
+<td>누락 범위를 확인하고 원본 대조 또는 다시 변환할 방법을 선택합니다.</td>
+</tr>
+<tr>
+<td>후보</td>
+<td>검색·대조 결과로 제안된 내용입니다.</td>
+<td>근거와 차이를 살펴보고 실제 반영 여부를 판단합니다.</td>
+</tr>
+<tr>
+<td>오류·중단</td>
+<td>해당 처리가 완료되지 않았습니다.</td>
+<td>이미 보관·저장된 단계와 아직 끝나지 않은 단계를 구별해 복구합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>예를 들어 문서가 정상 저장된 뒤 관계 추출이 실패할 수 있습니다. 이때 자료 전체를 다시 등록하기 전에 저장된 문서를 열고 관계 추출만 다시 진행할 수 있는지 확인하세요.</p>
+<h2 id="시작-설정하기">시작 설정하기</h2>
+<h3 id="시작-전에-준비할-것">시작 전에 준비할 것</h3>
+<table>
+<thead>
+<tr>
+<th>준비물</th>
+<th>필요한 작업</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>배포받은 LLM Wiki 설치 파일</td>
+<td>데스크톱 앱 실행</td>
+</tr>
+<tr>
+<td>운영 담당자가 안내한 서버 주소</td>
+<td>계정 로그인, 문서와 지식 조회·저장</td>
+</tr>
+<tr>
+<td>서버에서 사용하는 계정 이름</td>
+<td>처음에는 회원가입, 이후 같은 이름으로 로그인</td>
+</tr>
+<tr>
+<td>이 PC에 별도로 내려받아 설치하고 로그인한 Codex CLI 또는 Claude Code CLI</td>
+<td>관계 추출, AI 질문 등 AI 작업</td>
+</tr>
+<tr>
+<td>문서 처리 환경</td>
+<td>PDF·DOCX·XLSX·이미지에서 문자 읽기와 OCR</td>
+</tr>
+</tbody>
+</table>
+<p>앱 계정 로그인과 개인 AI 로그인은 별개입니다. 앱 계정은 서버의 자료에 접근하는 데 사용하고, 개인 AI 계정은 이 PC에서 AI를 실행하는 데 사용합니다.</p>
+<p>Windows x64 설치판은 배포받은 EXE를 실행해 설치합니다. 개인 문서 처리에 필요한 Python 환경과 패키지, Tesseract 및 한국어·영어 OCR 데이터가 포함됩니다. Codex와 Claude Code는 별도로 설치하고 로그인해야 합니다. 이전에 별도 프로그램 위치를 저장했다면 포함된 환경으로 자동 교체되지 않습니다.</p>
+<p>macOS는 DMG를 열어 LLM Wiki를 응용 프로그램 폴더에 복사합니다. 개인 Python 문서 처리 환경과 OCR 환경은 별도로 준비합니다. 설치 파일의 서명·공증 상태에 따라 macOS에서 실행 허용 안내가 나올 수 있으므로 배포 담당자의 설치 안내를 확인하세요.</p>
+<p>일반 사용자는 앱을 사용하기 위해 저장소를 내려받거나 개발용 실행 환경을 준비할 필요가 없습니다. 서버를 새로 준비해야 하는 경우에는 운영 담당자의 설치 안내를 확인합니다.</p>
+<h3 id="앱-안에서-사용자-가이드-열기">앱 안에서 사용자 가이드 열기</h3>
+<p>로그인 전에는 로그인 화면의 <strong>사용자 가이드</strong>, 로그인 후에는 사이드바 아래의 <strong>사용자 가이드</strong>를 누릅니다. 앱 안에서 화면 가이드를 읽고 원래 작업 화면으로 돌아갈 수 있습니다. 가이드는 앱에 포함되어 서버에 연결하기 전에도 볼 수 있습니다.</p>
+<h3 id="서버에-가입하고-로그인하기">서버에 가입하고 로그인하기</h3>
+<ol>
+<li>앱을 실행합니다.</li>
+<li>이 서버를 처음 사용한다면 <strong>회원가입</strong>, 기존 계정이면 <strong>로그인</strong>을 선택합니다.</li>
+<li><strong>계정 이름</strong>과 <strong>서버 주소</strong>를 입력합니다.</li>
+<li><strong>가입하고 시작</strong> 또는 <strong>로그인</strong>을 누릅니다.</li>
+<li>로그인 후 선택된 작업 공간을 확인합니다.</li>
+</ol>
+<p>이전에 사용한 이름과 주소가 표시되면 바로 로그인할 수 있습니다. 다른 이름이나 주소를 사용하려면 <strong>변경</strong>을 누릅니다.</p>
+<p>일반 로그인 화면에서 인증 토큰을 직접 입력할 필요는 없습니다. 앱이 인증정보를 처리하고 OS의 보호 저장을 사용합니다. 이 PC에서 보호 저장을 사용할 수 없다는 안내가 나오면 다음 실행 때 다시 로그인해야 할 수 있습니다.</p>
+<p>서버 주소는 운영 담당자가 제공한 주소를 입력하세요. 원격 접속은 HTTPS 주소를 사용합니다. 같은 PC의 <code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code>에 접속할 때만 HTTP를 허용합니다. 주소에 계정·암호·검색 조건을 덧붙이지 않습니다.</p>
+<p>접속은 되었지만 작업 공간이 선택되지 않았다면 <strong>설정 → 서버·계정 → 작업 공간</strong>에서 공간을 고르고 <strong>선택 적용</strong>을 누릅니다.</p>
+<h3 id="ai-연결-전에-cli-설치하기">AI 연결 전에 CLI 설치하기</h3>
+<p><strong>AI를 연결하려면 사용할 Codex CLI 또는 Claude Code CLI가 이 PC에 먼저 설치되어 있어야 합니다.</strong> LLM Wiki 설치 파일에는 AI CLI가 포함되지 않습니다. 앱의 <strong>Codex 로그인 / Claude Code 로그인</strong>은 설치된 CLI의 로그인을 돕는 기능입니다.</p>
+<ol>
+<li>사용할 AI를 고릅니다.</li>
+<li>아래 공식 안내에서 이 PC의 운영체제에 맞는 설치 방법을 선택해 CLI를 내려받고 설치합니다.</li>
+<li>설치가 끝나면 새 터미널을 열어 해당 CLI의 버전이 표시되는지 확인합니다.</li>
+<li>같은 PC·OS 사용자로 개인 AI 계정에 로그인합니다. 설치를 마친 뒤 앱의 로그인 버튼을 사용해도 됩니다.</li>
+<li>LLM Wiki의 <strong>설정 → AI 실행</strong>으로 돌아와 연결 상태를 확인합니다.</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>사용할 AI</th>
+<th>공식 설치 안내</th>
+<th>설치 확인</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Codex CLI</td>
+<td><a href="https://learn.chatgpt.com/docs/codex/cli" target="_blank" rel="noopener noreferrer">OpenAI 공식 Codex CLI 안내</a></td>
+<td><code>codex --version</code></td>
+</tr>
+<tr>
+<td>Claude Code CLI</td>
+<td><a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noopener noreferrer">Claude Code 공식 설치 안내</a></td>
+<td><code>claude --version</code></td>
+</tr>
+</tbody>
+</table>
+<p>설치 후 앱에서 프로그램을 찾지 못하면 <strong>AI 프로그램 자동으로 찾기</strong>를 사용합니다. 계속 찾지 못하면 <strong>프로그램 위치 · 문서 처리 진단</strong>에서 실제 실행 파일을 선택하고 <strong>변경한 위치 저장</strong> 후 앱을 종료·재실행합니다.</p>
+<h3 id="개인-ai-연결하기">개인 AI 연결하기</h3>
+<p>앞 절의 CLI 설치를 마친 뒤 진행합니다.</p>
+<ol>
+<li>사이드바 아래의 <strong>설정</strong>을 누르고 <strong>AI 실행</strong> 탭을 엽니다.</li>
+<li><strong>Claude Code</strong> 또는 <strong>Codex</strong>를 선택합니다.</li>
+<li>이미 이 PC의 같은 OS 사용자로 로그인했다면 앱이 로그인 상태를 확인합니다.</li>
+<li>로그인이 필요하면 <strong>Claude Code 로그인</strong> 또는 <strong>Codex 로그인</strong>을 누릅니다.</li>
+<li>열린 터미널이나 브라우저에서 로그인을 마칩니다.</li>
+<li>앱의 자동 확인을 기다리거나 <strong>로그인 완료 확인</strong>을 누릅니다. 이미 로그인했는데 확인되지 않으면 <strong>이미 로그인했다면 다시 확인</strong>을 사용합니다.</li>
+<li>필요하면 <strong>AI 호출 확인</strong>으로 실제 응답까지 시험합니다.</li>
+</ol>
+<p><strong>AI 호출 확인</strong>은 짧은 질문을 실제 AI에 보내는 작업이며 개인 계정의 사용량에 반영될 수 있습니다. 로그인 확인만 끝난 상태에서도 AI 작업을 시작할 수 있으므로 호출 시험을 매번 할 필요는 없습니다.</p>
+<table>
+<thead>
+<tr>
+<th>AI 상태</th>
+<th>뜻</th>
+<th>다음 행동</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>연결됨</strong></td>
+<td>실제 AI 응답까지 확인했습니다.</td>
+<td>사용할 작업으로 돌아갑니다.</td>
+</tr>
+<tr>
+<td><strong>로그인은 확인됐어요</strong></td>
+<td>프로그램의 로그인은 확인했으며 실제 응답 시험 전입니다.</td>
+<td>작업을 시작하거나 <strong>AI 호출 확인</strong>을 사용합니다.</td>
+</tr>
+<tr>
+<td><strong>연결이 필요해요</strong></td>
+<td>개인 AI 로그인이 필요합니다.</td>
+<td>선택한 AI의 로그인 버튼을 사용합니다.</td>
+</tr>
+<tr>
+<td><strong>로그인을 기다리고 있어요</strong></td>
+<td>터미널·브라우저에서 로그인 중입니다.</td>
+<td>로그인을 마치고 <strong>로그인 완료 확인</strong>을 누릅니다. 중단하려면 <strong>대기 취소</strong>를 사용합니다.</td>
+</tr>
+<tr>
+<td><strong>호출에 실패했어요</strong></td>
+<td>실제 호출이 실패했습니다.</td>
+<td>오류와 계정 한도를 확인한 뒤 다시 시도합니다.</td>
+</tr>
+<tr>
+<td><strong>연결에 문제가 있어요</strong></td>
+<td>실행 파일이나 로그인 확인에 문제가 있습니다.</td>
+<td><strong>설치 위치 변경</strong> 또는 프로그램 자동 찾기를 사용합니다.</td>
+</tr>
+<tr>
+<td><strong>상태 확인 필요</strong></td>
+<td>사용할 수 있는 확인 기록이 없습니다.</td>
+<td>로그인하거나 기존 로그인을 다시 확인합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>AI 제공자를 바꾸고 해당 AI의 로그인이 확인되면 선택이 자동 저장되어 다음 AI 실행부터 적용됩니다. 이미 진행 중인 작업은 시작 당시 AI를 계속 사용합니다. 프로그램 파일의 위치를 변경했을 때는 별도 저장과 앱 재시작이 필요합니다.</p>
+<h3 id="프로그램을-찾지-못할-때">프로그램을 찾지 못할 때</h3>
+<ol>
+<li><strong>설정 → AI 실행</strong>에서 <strong>프로그램 위치 · 문서 처리 진단</strong>을 펼칩니다.</li>
+<li><strong>AI 프로그램 자동으로 찾기</strong>를 눌러 설치 위치를 다시 찾습니다.</li>
+<li>필요한 경우 <strong>프로그램 위치 변경</strong> 영역에서 해당 항목의 <strong>파일 선택</strong> 또는 <strong>폴더 선택</strong>을 눌러 실제 설치 위치를 고릅니다.</li>
+<li><strong>문서 처리 환경 확인</strong>을 누르고 문제가 있는 항목을 확인합니다. 정상 항목은 <strong>확인된 프로그램</strong>에 접혀 있습니다.</li>
+<li>위치를 바꿨다면 <strong>변경한 위치 저장</strong>을 누릅니다.</li>
+<li>앱을 명시적으로 종료하고 다시 실행합니다. 창을 닫아 숨기기만 해서는 새 위치가 적용되지 않습니다.</li>
+</ol>
+<p>설정 가능한 위치는 AI 실행 파일, <strong>문서 처리 프로그램 폴더</strong>, <strong>Python 실행 파일</strong>, <strong>문자 인식 실행 파일 (선택)</strong>, **문자 인식 언어 폴더 (선택)**입니다. 경로를 모르면 운영 담당자에게 진단 결과와 함께 문의하세요.</p>
+<p>프로그램 자동 찾기와 문서 처리 진단은 AI 설치나 로그인을 대신하지 않습니다. <strong>문서 처리 환경 확인</strong>은 실제 모델을 호출하지 않습니다.</p>
+<h2 id="화면-구성과-작업-공간-이해하기">화면 구성과 작업 공간 이해하기</h2>
+<h3 id="주요-메뉴">주요 메뉴</h3>
+<table>
+<thead>
+<tr>
+<th>메뉴</th>
+<th>사용하는 때</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>문서</strong></td>
+<td>자료 등록, 이름·내용 검색, 문서 읽기·편집, 원본 확인</td>
+</tr>
+<tr>
+<td><strong>온톨로지</strong></td>
+<td>개념과 문서를 검색하고 관계·근거·용어 문맥 탐색</td>
+</tr>
+<tr>
+<td><strong>검토함</strong></td>
+<td>검토 대기·보류·재검토 항목을 확인하고 판단 기록</td>
+</tr>
+<tr>
+<td><strong>AI 채팅</strong></td>
+<td>지식에 질문, 자료 첨부, 웹 검색, 답변 내보내기</td>
+</tr>
+<tr>
+<td><strong>AI 세션</strong></td>
+<td>실행 중 작업, 최근 결과, 지난 실행 기록 확인</td>
+</tr>
+<tr>
+<td><strong>설정</strong></td>
+<td>서버·계정, AI 실행, 화면 테마 설정</td>
+</tr>
+</tbody>
+</table>
+<p>상단에는 <strong>뒤로가기</strong>, 현재 위치, 화면별 작업 버튼이 표시됩니다. 창이 좁아 버튼이 보이지 않으면 <strong>화면 메뉴</strong>를 확인하세요. 사이드바는 <strong>메뉴 접기 / 메뉴 펼치기</strong>로 조절합니다. 접힌 메뉴에 마우스를 올리거나 키보드 초점을 주면 임시로 펼쳐집니다.</p>
+<p>하단 상태바에서 연결, 현재 작업 공간, AI 실행 상태와 한도를 확인할 수 있습니다. 화면을 이동해도 이미 시작한 AI 작업은 계속될 수 있습니다.</p>
+<h3 id="작업-공간-바꾸기">작업 공간 바꾸기</h3>
+<p>접근할 수 있는 작업 공간이 여러 개이면 사이드바의 공간 이름에서 전환할 수 있습니다. 하나뿐이면 공간 이름만 표시됩니다. <strong>설정 → 서버·계정</strong>에서도 현재 공간과 연결 상태를 확인할 수 있습니다.</p>
+<p>다른 공간으로 옮겨도 작성 중인 초안이 새 공간으로 옮겨지지는 않습니다. 전환 확인창이 나오면 현재 작업을 확인한 뒤 <strong>전환</strong>하거나 <strong>취소</strong>합니다. 전환이 실패하면 기존 공간을 유지합니다.</p>
+<p>문서가 보이지 않으면 먼저 현재 서버·계정·작업 공간을 확인하세요. 권한이 없는 자료는 검색이나 화면을 바꾼다고 조회할 수 있는 것이 아닙니다.</p>
+<h2 id="자료-등록하기">자료 등록하기</h2>
+<h3 id="파일로-등록하기">파일로 등록하기</h3>
+<ol>
+<li>사이드바에서 <strong>문서</strong>를 엽니다.</li>
+<li><strong>문서 등록</strong>을 누릅니다.</li>
+<li><strong>파일 업로드</strong>를 선택하고 <strong>파일 선택</strong>을 누릅니다.</li>
+<li>이 컴퓨터에 있는 파일 한 개를 선택합니다. 제목과 저장 이름은 확장자를 뺀 파일명에서 정해집니다.</li>
+<li>선택한 파일을 확인하고 <strong>등록하고 관계 추출</strong>을 누릅니다.</li>
+<li>원본 보관, 문자 변환, 문서 저장, 관계 추출의 진행 상태를 확인합니다.</li>
+<li><strong>문서 열기</strong>로 저장된 본문을 읽고, <strong>관계 확인</strong>으로 추출 결과를 확인합니다.</li>
+</ol>
+<p>파일은 선택한 PC에서 읽어 서버에 보관합니다. 서버의 파일 경로를 입력하는 방식이 아닙니다. 현재 선택 창에서는 파일을 한 개씩 등록합니다.</p>
+<p>같은 저장 이름의 문서가 있으면 <strong>이름이 겹칩니다</strong> 안내가 나옵니다. <strong>번호를 붙여 등록</strong>을 선택하면 <code>이름-2</code>와 같은 새 이름으로 등록합니다. 기존 문서를 갱신하려는 경우에는 취소하고 해당 문서의 본문 편집 또는 관계 재추출을 이용하세요.</p>
+<p>문서 쓰기 권한이 없는 경우 버튼은 <strong>원본 보관</strong>으로 표시됩니다. 이 경우 원본 보관까지만 진행하므로 문서 생성·관계 추출까지 완료한 것으로 판단하지 않습니다.</p>
+<h3 id="텍스트를-붙여넣어-등록하기">텍스트를 붙여넣어 등록하기</h3>
+<ol>
+<li><strong>문서 → 문서 등록</strong>에서 <strong>텍스트 붙여넣기</strong>를 선택합니다.</li>
+<li><strong>문서 제목</strong>에 자료를 구별할 수 있는 이름을 입력합니다. 제목은 최대 200자입니다.</li>
+<li><strong>본문</strong>에 텍스트 또는 Markdown을 붙여넣습니다.</li>
+<li><strong>등록하고 관계 추출</strong>을 누릅니다.</li>
+<li>완료 후 저장된 문서와 관계를 각각 확인합니다.</li>
+</ol>
+<p>붙여넣은 최초 텍스트도 원본으로 보관합니다. 나중에 본문을 수정하더라도 최초 입력과 수정 후 문서를 구별할 수 있습니다.</p>
+<p>연습용으로는 다음처럼 짧고 관계가 분명한 자료를 사용할 수 있습니다. 아래 내용은 사용 방법을 익히기 위한 가상 예시입니다.</p>
+<pre><code class="language-text">제목: 예시 운영 안내
+
+요청을 접수하면 담당자가 내용을 확인한다.
+필수 정보가 없으면 담당자가 보완을 요청한다.
+처리가 완료되면 요청자에게 결과를 안내한다.
+</code></pre>
+<p>등록 후 “예시 운영 안내에서 보완을 요청하는 조건은 무엇인가?”라고 질문해 보면 본문, 추출한 관계, 답변의 근거를 연결해 확인할 수 있습니다.</p>
+<h3 id="지원-파일과-크기">지원 파일과 크기</h3>
+<table>
+<thead>
+<tr>
+<th>종류</th>
+<th>형식</th>
+<th>확인할 점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>일반 텍스트</td>
+<td>MD, TXT</td>
+<td>UTF-8 파일을 사용합니다. 등록 시 원문을 그대로 사용합니다.</td>
+</tr>
+<tr>
+<td>문서</td>
+<td>PDF, DOCX</td>
+<td>본문·표 등의 변환 결과와 미독 범위를 확인합니다.</td>
+</tr>
+<tr>
+<td>스프레드시트</td>
+<td>XLSX</td>
+<td>시트와 셀 위치를 기준으로 읽습니다. 원본의 화면 배치를 그대로 재현하지 않습니다.</td>
+</tr>
+<tr>
+<td>이미지</td>
+<td>PNG, JPG, JPEG, GIF, WebP, BMP, TIF, TIFF</td>
+<td>OCR 준비 상태와 글자 인식 결과를 확인합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>등록 원본 파일과 붙여넣기 입력의 상한은 20 MiB입니다. 저장하는 Wiki 문서는 UTF-8 기준 1 MiB 이하여야 합니다. 원본 등록이 가능해도 변환한 본문이 저장 제한을 넘을 수 있으므로, 오류 안내가 있으면 자료를 의미 있는 범위로 나누어 준비합니다.</p>
+<p>PPTX는 현재 등록 파일 형식에 포함되지 않습니다. PowerPoint 내보내기를 지원하는 것과 PowerPoint 원본을 읽는 것은 별개입니다.</p>
+<h3 id="변환-결과와-미독-확인하기">변환 결과와 미독 확인하기</h3>
+<p>등록 진행 화면의 <strong>처리 기록</strong>에서 <strong>최초 Markdown 변환 기록</strong>, <strong>변환한 본문과 미독 구간 확인</strong>을 펼쳐 보세요. 핵심 조건·표·수치가 자료에 들어 있다면 원본과 변환 본문을 대조합니다.</p>
+<table>
+<thead>
+<tr>
+<th>자료</th>
+<th>현재 읽는 방식과 주의할 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PDF·이미지</td>
+<td>문자 추출 또는 OCR을 사용합니다. 인식 성공만으로 글자·읽기 순서·표의 의미가 정확하다고 보장되지는 않습니다.</td>
+</tr>
+<tr>
+<td>DOCX</td>
+<td>문단과 표 셀을 읽습니다. 머리말·꼬리말·각주·미주·주석·변경 추적·텍스트 상자·이미지 내용·표 안의 표 등은 읽지 못한 범위로 알릴 수 있습니다.</td>
+</tr>
+<tr>
+<td>XLSX</td>
+<td>원본 구조, 시트·셀 위치, 수식과 저장된 계산값을 기록합니다. 수식을 재계산하지 않으며, 계산값이 없으면 미독으로 표시할 수 있습니다. 색이나 조건부 서식의 표시 의미도 직접 확인합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>변환에 필요한 프로그램이 준비되지 않았다면 <strong>설정 → AI 실행 → 프로그램 위치 · 문서 처리 진단 → 문서 처리 환경 확인</strong>에서 상태를 확인합니다. 원본이 보관된 뒤라면 새로 업로드하기 전에 <strong>본문 변환 다시 시도</strong>를 사용할 수 있는지 살펴보세요.</p>
+<h3 id="등록이-중간에-멈췄을-때">등록이 중간에 멈췄을 때</h3>
+<table>
+<thead>
+<tr>
+<th>안내 또는 상태</th>
+<th>할 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>파일 선택 실패</td>
+<td>지원 형식, 파일 크기, 실제 일반 파일인지 확인합니다. MD·TXT는 UTF-8인지 확인합니다.</td>
+</tr>
+<tr>
+<td>등록 결과 확인 필요</td>
+<td><strong>등록 결과 확인</strong>으로 원래 요청의 보관 결과부터 확인합니다.</td>
+</tr>
+<tr>
+<td>본문 변환 실패</td>
+<td><strong>본문 변환 다시 시도</strong>를 누릅니다. 이미 보관한 원본을 다시 올릴 필요는 없습니다.</td>
+</tr>
+<tr>
+<td>접수·저장 상태가 불확실함</td>
+<td><strong>진행·저장 상태 확인</strong>으로 기존 요청부터 확인합니다.</td>
+</tr>
+<tr>
+<td>본문만 저장됨</td>
+<td><strong>문서 열기</strong>로 본문을 보존한 상태를 확인하고, AI 설정과 추출 상태를 확인합니다.</td>
+</tr>
+<tr>
+<td>AI 연결 실패·사용 한도</td>
+<td>설정을 보완한 뒤 표시되는 <strong>관계 추출 다시 실행</strong> 또는 문서의 <strong>관계 재추출</strong>을 사용합니다.</td>
+</tr>
+<tr>
+<td>서버·계정·작업 공간이 바뀜</td>
+<td>원래 범위로 돌아와 <strong>원래 작업 범위 재확인</strong>을 사용합니다.</td>
+</tr>
+<tr>
+<td>저장 완료와 임시 파일 정리 경고가 함께 표시됨</td>
+<td>저장된 결과를 확인하고 정리 경고를 별도로 처리합니다. 같은 저장을 반복하지 않습니다.</td>
+</tr>
+</tbody>
+</table>
+<p>처리가 끝나면 <strong>등록 원본 열기</strong>, <strong>분석 작업 상세</strong>, <strong>문서 목록</strong>, <strong>다른 문서 등록</strong>으로 이어갈 수 있습니다. 최초 등록에서 저장한 관계는 검토 전 상태입니다. 중요한 관계는 원문 인용과 함께 확인하세요.</p>
+<h2 id="문서-찾고-읽기">문서 찾고 읽기</h2>
+<ol>
+<li><strong>문서</strong>를 엽니다.</li>
+<li><strong>문서 이름이나 내용으로 검색 (Enter)</strong> 입력창에 검색어를 넣고 Enter를 누릅니다.</li>
+<li>필요하면 <strong>전체 문서 / 추출 완료 / 재추출 필요 / 미추출</strong>로 범위를 좁힙니다.</li>
+<li>문서 행을 선택해 본문을 엽니다.</li>
+<li>관계 상태, <strong>문서 정보</strong>, 버전 칩을 확인합니다. 업로드한 파일 자체가 필요하면 <strong>원본 보기</strong>를 누릅니다.</li>
+</ol>
+<p>검색 결과가 여러 페이지이면 페이지 버튼으로 이동합니다. 조회 한도나 읽기 실패 안내가 있으면 현재 결과가 전체가 아닐 수 있습니다. 결과가 없을 때는 검색어·필터와 현재 작업 공간을 함께 확인하세요.</p>
+<p>문서 본문은 읽고 편집할 수 있는 Markdown입니다. 원본의 페이지·표 모양·글꼴과 같지 않을 수 있습니다. 중요한 원문 형식은 원본 파일을 내려받아 확인합니다.</p>
+<p>문서를 바탕으로 질문하려면 <strong>AI 채팅</strong>으로 이동해 문서 이름과 원하는 질문 범위를 구체적으로 적습니다.</p>
+<h2 id="문서-본문-수정하고-판본-복원하기">문서 본문 수정하고 판본 복원하기</h2>
+<h3 id="본문과-문서-정보-수정하기">본문과 문서 정보 수정하기</h3>
+<ol>
+<li>문서를 열고 <strong>본문 편집</strong>을 누릅니다.</li>
+<li>Markdown 본문을 수정합니다.</li>
+<li>필요하면 접힌 문서 정보를 열어 <strong>제목·태그·설명</strong>을 수정합니다. 일부 과거 문서는 이 정보의 편집을 지원하지 않을 수 있습니다.</li>
+<li><strong>변경 내용 확인</strong>으로 저장 전후를 비교합니다.</li>
+<li>보완할 부분이 있으면 <strong>계속 편집</strong>, 확정하려면 <strong>저장</strong>을 누릅니다.</li>
+<li>읽기 화면에서 수정한 내용과 관계의 현재 상태를 다시 확인합니다.</li>
+</ol>
+<p>문서 ID와 원본 연결은 읽기 전용입니다. 본문 편집으로 업로드 원본 파일을 바꾸지는 않습니다.</p>
+<p>저장할 때 수정 전 전체 문서를 이력으로 보존합니다. 메타정보를 포함한 저장 문서 전체는 UTF-8 기준 1 MiB 이하여야 합니다. 한도 오류가 나오면 중요한 내용을 임의로 잘라 버리지 말고 문서를 나눌 범위를 검토하세요.</p>
+<p><strong>취소</strong>는 읽기 화면으로 돌아가는 행동입니다. 작성한 초안을 명시적으로 폐기했다는 뜻은 아닙니다. 화면 이동 중에는 초안을 유지하지만 앱을 종료하면 저장하지 않은 초안은 사라집니다. 필요한 변경은 종료 전에 저장하세요.</p>
+<h3 id="다른-사람이-먼저-수정한-경우">다른 사람이 먼저 수정한 경우</h3>
+<p>같은 문서를 다른 사용자나 AI가 먼저 수정했다면 충돌이 표시될 수 있습니다.</p>
+<ol>
+<li>현재 서버의 최신 본문과 내 수정 내용을 비교합니다.</li>
+<li><strong>최신 본문을 기준으로 다시 작성할 내용</strong>에 필요한 변경을 재반영합니다.</li>
+<li><strong>검토한 본문으로 비교 계속</strong>을 누릅니다.</li>
+<li>변경 내용을 다시 확인한 뒤 저장합니다.</li>
+</ol>
+<p>오래된 본문을 다시 보내 최신 변경을 덮어쓰지 마세요. 잠시 저장이 혼잡하다는 안내와 문서 충돌은 다른 상태이므로 화면의 안내에 맞게 처리합니다.</p>
+<h3 id="이전-판본-비교하고-복원하기">이전 판본 비교하고 복원하기</h3>
+<ol>
+<li>문서의 버전 칩을 눌러 <strong>버전 선택</strong>을 엽니다.</li>
+<li>확인할 과거 버전을 선택합니다. 기본적으로 바로 앞 버전과의 차이를 보여 줍니다.</li>
+<li>현재 문서와 비교하려면 <strong>현재 본문과 비교</strong>를 선택합니다.</li>
+<li>복원할 내용을 확인한 뒤 <strong>이 버전으로 복원</strong>을 누릅니다.</li>
+<li>복원 후 본문과 관계의 상태를 확인합니다.</li>
+</ol>
+<p>복원은 선택한 과거 내용을 새 판본으로 저장합니다. 복원 직전의 현재 문서도 이력으로 남습니다. 과거 버전을 지우거나 과거 관계의 검토 승인을 되살리는 동작은 아닙니다.</p>
+<p>저장하지 않은 초안, 저장 결과가 확인되지 않은 상태, 읽기 전용 권한에서는 복원이 제한됩니다. 먼저 초안과 저장 상태를 정리하세요. 복원한 본문에 맞는 관계가 필요하면 관계 재추출을 진행합니다.</p>
+<h2 id="등록-원본과-원본-판본-확인하기">등록 원본과 원본 판본 확인하기</h2>
+<p>문서 목록에서 원본을 선택하거나 문서 상세의 <strong>원본 보기</strong>, 등록 결과의 <strong>등록 원본 열기</strong>를 사용합니다.</p>
+<ol>
+<li><strong>버전</strong> 선택 상자에서 확인할 원본 판본을 고릅니다. 등록 시각과 <strong>최신</strong> 표시로 구별합니다.</li>
+<li><strong>문서 정보</strong>에서 원본과 판본의 등록 정보를 확인합니다.</li>
+<li>텍스트 원본이면 표시된 내용을 읽습니다.</li>
+<li>다른 형식에서 <strong>이 형식은 미리보기를 지원하지 않습니다</strong>가 나오면 <strong>내려받기</strong>로 원본 파일을 열어 확인합니다.</li>
+<li><strong>생성된 문서</strong>를 누르면 연결된 Wiki 문서로 이동합니다. 연결 문서가 여러 개이고 다음 조회가 가능하면 <strong>다음 문서 범위 확인</strong>을 사용합니다.</li>
+</ol>
+<p>원본 상세의 <strong>내려받기</strong>는 선택한 원본 판본 자체를 받습니다. <strong>내보내기</strong>는 연결된 첫 Wiki 문서의 현재 본문을 지원 형식으로 바꿉니다. 원래 표·서식·그림이 필요한 경우에는 원본의 <strong>내려받기</strong>를 선택하세요.</p>
+<p>아직 분석하지 않은 원본은 <strong>분석 시작</strong>, 이미 작업이 연결된 원본은 <strong>작업 보기</strong>로 이어집니다. 같은 원본 판본에 기존 작업이 있다면 새 작업을 중복으로 접수하기 전에 그 작업을 확인합니다.</p>
+<h2 id="관계-재추출과-결과-반영하기">관계 재추출과 결과 반영하기</h2>
+<h3 id="최초-추출과-재추출의-차이">최초 추출과 재추출의 차이</h3>
+<p>최초 등록의 <strong>등록하고 관계 추출</strong>은 문서와 첫 관계의 저장 결과를 확인해 제공합니다. 이후 기존 문서에서 실행하는 <strong>관계 재추출</strong>은 새 후보를 만들고, 이전 결과와 비교한 뒤 명시적으로 반영하는 절차입니다.</p>
+<p>본문 저장만으로 관계가 다시 추출되지는 않습니다. 재추출 후보를 만들었다고 기존 관계가 곧바로 바뀌는 것도 아닙니다.</p>
+<h3 id="저장된-본문으로-새-후보-만들기">저장된 본문으로 새 후보 만들기</h3>
+<ol>
+<li>문서에서 현재 저장된 본문이 의도한 내용인지 확인합니다. 편집 중이라면 먼저 저장합니다.</li>
+<li><strong>관계 재추출</strong>을 누릅니다.</li>
+<li><strong>추출 중…</strong> 상태를 확인하고 완료를 기다립니다.</li>
+<li><strong>결과 비교·반영</strong>을 엽니다.</li>
+<li>이전 관계와 새 후보, 추가되거나 사라진 관계, 원문 인용, 진단 결과를 확인합니다.</li>
+</ol>
+<h3 id="사라진-관계-판단하기">사라진 관계 판단하기</h3>
+<p>새 후보에서 빠졌다고 이전 관계가 거짓이거나 삭제되어야 하는 것은 아닙니다. 원문에서 실제로 사라졌는지, 이번 추출에서 누락했는지 살펴보세요.</p>
+<p><strong>이번 비교의 판단</strong>에서 필요한 판단을 선택하고 <strong>미발견 판단 기록</strong>으로 저장합니다.</p>
+<table>
+<thead>
+<tr>
+<th>선택</th>
+<th>의미와 필요한 확인</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>전체 재추출 요청 기록</strong></td>
+<td>판단 이유와 현재 원문의 정확한 인용을 남깁니다. 기록만으로 AI가 실행되지는 않습니다.</td>
+</tr>
+<tr>
+<td><strong>현재 근거로 복구 초안</strong></td>
+<td>현재 근거와 복구할 전체 항목을 지정해 초안을 만듭니다. 전체 항목 JSON을 입력하는 고급 절차이며, 반영 후 새 버전에서 검토해야 합니다.</td>
+</tr>
+<tr>
+<td><strong>이번 비교에서 제외</strong></td>
+<td>원문 전체를 확인한 뒤 이번 비교에서 제외합니다. 과거 사실을 삭제하거나 부정한다는 뜻은 아닙니다.</td>
+</tr>
+</tbody>
+</table>
+<p>실제로 AI를 다시 실행하려면 <strong>개인 AI로 새 후보 만들기 → 명시 AI 재추출 실행</strong>을 사용합니다. 판단 기록과 실행 요청을 구별하세요.</p>
+<h3 id="검사하고-반영하기">검사하고 반영하기</h3>
+<ol>
+<li><strong>검사</strong>를 실행하고 진단을 확인합니다.</li>
+<li>추가·사라진 관계와 근거 전체를 실제로 살펴본 뒤 화면의 확인 항목을 선택합니다.</li>
+<li><strong>검사 후 반영</strong>을 누릅니다.</li>
+<li><strong>관계가 새 버전으로 바뀌었습니다. 추가된 관계를 검토해 주세요.</strong> 안내를 확인합니다.</li>
+<li>필요한 경우 <strong>현재 새 관계 검토 읽기</strong>로 현재 관계를 읽고, 실제 검토한 주장만 선택해 <strong>명시 범위 완료 기록</strong>을 남깁니다.</li>
+</ol>
+<p>검사 통과는 저장 조건을 확인한 결과입니다. 추출의 의미가 정확하다는 판단이나 문서 전체의 승인을 대신하지 않습니다. 명시 범위 완료 기록도 선택한 범위에만 적용됩니다.</p>
+<p>본문·검토·추출 규약이 도중에 달라져 입력 기준이 오래되었다면 최신 본문을 확인한 뒤 <strong>관계 재추출</strong>로 새 후보를 준비합니다. 고급 절차에서는 <strong>전체 원문·이전 추출 준비</strong>로 새 입력 기준을 준비할 수 있습니다. 오래된 초안을 그대로 밀어 넣지 않습니다.</p>
+<p>다른 기기 등에서 같은 추출안의 후보·판단 기록만 갱신되었다면 <strong>현재 추출 결과 다시 읽기 → 대조한 서버 후보로 새 편집 시작</strong>으로 서버 기록을 다시 확인할 수 있습니다. 이 동작만으로 오래된 본문·규약 기준이 갱신되지는 않습니다.</p>
+<p>응답을 받지 못한 경우에는 <strong>같은 요청 기록 조회</strong>, 실행 접수가 불확실하면 <strong>같은 실행·후보 확인 기록 조회</strong>로 원래 요청부터 확인합니다.</p>
+<h3 id="기존-지식과의-검색대조-읽기">기존 지식과의 검색·대조 읽기</h3>
+<p>분석 작업의 <strong>기존 지식 대조</strong>는 추출 저장 후 다른 지식과의 관련 후보를 찾은 결과입니다. 확정 관계나 자동 병합 결과가 아닙니다.</p>
+<ul>
+<li><strong>실행 기록</strong>에서 최신 결과와 이전 결과를 확인합니다.</li>
+<li><strong>최신 자료로 검색·대조 다시 실행</strong>은 검색과 대조를 다시 수행합니다. 이전 결과와 저장된 관계는 보존됩니다.</li>
+<li>진행 중인 대조는 <strong>이 대조 중단</strong>으로 멈춥니다.</li>
+<li>조회 누락, 조회 한도, 재확인 필요 안내가 있으면 후보 0개를 “관련 지식이 전혀 없음”으로 해석하지 않습니다.</li>
+</ul>
+<h2 id="온톨로지에서-개념과-관계-탐색하기">온톨로지에서 개념과 관계 탐색하기</h2>
+<h3 id="개념이나-문서를-시작점으로-찾기">개념이나 문서를 시작점으로 찾기</h3>
+<ol>
+<li>사이드바에서 <strong>온톨로지</strong>를 엽니다.</li>
+<li><strong>개념이나 문서 이름 검색</strong>에 검색어를 입력합니다.</li>
+<li>필요하면 검색 대상을 <strong>전체 / 개념 / 문서</strong>로 바꾸고 <strong>검색</strong>을 누릅니다.</li>
+<li>결과에서 살펴볼 개념을 시작점으로 추가합니다.</li>
+<li>같은 지도에서 비교할 개념이 있으면 시작점을 더 추가합니다.</li>
+</ol>
+<p>최근 변경 문서에서도 탐색을 시작할 수 있습니다. 같은 이름이 여러 문서에 등장해도 자동으로 하나의 개체로 합쳐지는 것은 아닙니다. 어떤 문서와 문맥에서 나온 개념인지 함께 확인하세요.</p>
+<h3 id="지도를-넓히고-상세-근거-읽기">지도를 넓히고 상세 근거 읽기</h3>
+<ul>
+<li>개념을 선택하면 <strong>개념 정보</strong>를 확인할 수 있습니다.</li>
+<li><strong>이 개념의 연결 불러오기</strong>, <strong>연결 N개 더 보기</strong>로 연결을 추가합니다.</li>
+<li>관계를 선택하면 <strong>관계 상세</strong>에서 주체·관계·대상과 조건 등을 읽습니다.</li>
+<li><strong>근거·검토 이력 보기</strong>로 원문과 사람의 판단을 확인합니다.</li>
+<li>문서 링크 또는 <strong>문서의 전체 온톨로지 보기</strong>로 해당 자료의 지식 구조를 살펴봅니다.</li>
+<li>자료가 바뀌었다면 <strong>이 개념의 연결 새로 불러오기</strong> 또는 <strong>다시 불러오기</strong>를 사용합니다.</li>
+</ul>
+<p>지도는 필요한 연결을 나누어 불러옵니다. 개념의 연결은 기본 20개씩 조회하므로 처음 보이는 지도가 모든 관계를 포함한다고 생각하지 마세요. 더 보기와 누락 안내를 확인합니다.</p>
+<h3 id="용어-설명과-문맥-확인하기">용어 설명과 문맥 확인하기</h3>
+<p>개념 상세의 용어 카드에서 <strong>원문에서의 설명</strong>을 읽고 <strong>앞뒤 원문 문맥 보기</strong>를 펼칩니다. 업무 영역, 서술 관점, 식별 범위가 있으면 함께 확인합니다.</p>
+<p>이 설명은 현재 원문에 연결된 내용입니다. 같은 단어라도 문서마다 뜻이 다를 수 있으므로 독립된 사전 정의처럼 사용하기 전에 근거 문맥을 살펴보세요.</p>
+<h2 id="관계-검토하고-전문가-의견-남기기">관계 검토하고 전문가 의견 남기기</h2>
+<h3 id="검토함에서-판단하기">검토함에서 판단하기</h3>
+<ol>
+<li><strong>검토함</strong>을 엽니다.</li>
+<li><strong>전체 / 검토 대기 / 보류 / 다시 검토</strong> 중 필요한 상태를 선택합니다.</li>
+<li>문서별로 묶인 항목을 선택합니다.</li>
+<li>원문과 판단 영역을 나란히 읽고 관계·속성·조건이 근거와 맞는지 확인합니다.</li>
+<li><strong>승인 / 수정 / 보류 / 반려</strong>를 선택합니다.</li>
+<li><strong>이유</strong>를 적고 <strong>저장</strong>을 누릅니다.</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>선택</th>
+<th>사용할 때</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>승인</strong></td>
+<td>대상 주장과 그 조건이 원문에 맞는지 확인한 경우</td>
+</tr>
+<tr>
+<td><strong>수정</strong></td>
+<td>원문에 맞게 관계·속성·조건을 바로잡을 수 있는 경우</td>
+</tr>
+<tr>
+<td><strong>보류</strong></td>
+<td>정보가 부족하거나 추가 확인이 필요한 경우</td>
+</tr>
+<tr>
+<td><strong>반려</strong></td>
+<td>현재 추출 내용을 받아들이기 어려운 경우</td>
+</tr>
+</tbody>
+</table>
+<p>반려는 해당 사실이 논리적으로 거짓이라고 새로 선언하는 동작이 아닙니다. 수정할 때는 원문에 없는 업무 판단을 원문 사실처럼 끼워 넣지 않습니다. 별도의 업무 의견은 전문가 의견으로 기록합니다.</p>
+<p><strong>더 불러오기</strong>가 있으면 아직 확인하지 않은 항목이 남아 있습니다. 조회 누락·한도 안내와도 구별하세요. 빈 목록이 작업 공간 전체에 검토할 내용이 없다는 보장은 아닙니다.</p>
+<h3 id="지도에서-관계-검토로-이어가기">지도에서 관계 검토로 이어가기</h3>
+<p>온톨로지의 <strong>관계 상세</strong>에서도 <strong>검토하기</strong>, <strong>원문 근거 정정</strong>, <strong>근거·검토 이력 보기</strong>로 이어갈 수 있습니다. 실제로 표시되는 행동은 현재 권한과 대상 상태에 따라 달라집니다.</p>
+<p><strong>이전 기준 판단</strong>은 과거 본문이나 추출 결과에 대한 기록입니다. 현재 관계에 자동 적용된 판단으로 보지 않습니다. <strong>추출 기준 변경</strong>, <strong>추출 상태 확인</strong> 안내가 나오면 현재 본문과 추출 상태를 확인하고 필요한 재추출·재검토를 진행합니다.</p>
+<h3 id="전문가-의견으로-관계-추가하기">전문가 의견으로 관계 추가하기</h3>
+<ol>
+<li>온톨로지 지도에서 항목을 선택하고 <strong>관계 추가</strong>를 누릅니다. 문서별 온톨로지에서는 <strong>새 관계</strong>를 누릅니다.</li>
+<li>같은 문서에 이미 존재하는 개체를 <strong>주체</strong>와 <strong>대상</strong>으로 선택합니다.</li>
+<li><strong>관계</strong>와 <strong>이유</strong>를 입력합니다.</li>
+<li>필요하면 **추가 속성 (극성 · 조건 · 적용 범위 · 시점)**을 펼쳐 입력합니다.</li>
+<li>내용을 확인하고 저장합니다.</li>
+</ol>
+<p>이 경로는 전문가 의견으로 저장하며 원문 인용을 새로 만들어 붙이지 않습니다. 새 개체를 만들거나 서로 다른 문서의 개체를 연결하는 기능은 아닙니다.</p>
+<h3 id="판단-기록-확인하고-되돌리기">판단 기록 확인하고 되돌리기</h3>
+<p>검토 이력에서 변경 전후 값, 작성자, 시각, 이유를 확인합니다. 되돌릴 수 있는 기록이면 <strong>되돌림 이유</strong>를 적고 <strong>선택 판단 되돌림 기록</strong>을 사용합니다.</p>
+<p>되돌림은 과거 기록을 삭제하는 방식이 아닙니다. 현재 적용 상태와 기준을 다시 확인한 기록이 남습니다. 본문 또는 추출 결과가 바뀌었다면 이전 승인을 그대로 복원하기보다 현재 근거에서 다시 검토해야 합니다.</p>
+<h2 id="ai-채팅으로-질문하기">AI 채팅으로 질문하기</h2>
+<h3 id="대화-시작하고-이어가기">대화 시작하고 이어가기</h3>
+<ol>
+<li><strong>AI 채팅</strong>을 엽니다.</li>
+<li>기존 대화를 찾으려면 <strong>대화 목록 열기</strong>, 새로 시작하려면 대화 목록의 <strong>새 대화</strong>를 사용합니다.</li>
+<li>질문을 입력합니다.</li>
+<li>Enter 또는 위쪽 화살표의 <strong>질문 보내기</strong>를 누릅니다. 줄바꿈은 Shift+Enter입니다.</li>
+<li>답변을 읽고 <strong>근거</strong>를 확인합니다.</li>
+<li>같은 주제를 이어서 묻고 싶으면 같은 대화에서 후속 질문을 보냅니다.</li>
+</ol>
+<p>질문에는 문서 이름, 알고 싶은 대상, 적용 조건과 원하는 답변 형태를 적으면 좋습니다.</p>
+<table>
+<thead>
+<tr>
+<th>목적</th>
+<th>질문 예시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>조건 확인</td>
+<td>“예시 운영 안내에서 보완을 요청하는 조건을 원문 인용과 함께 알려 줘.”</td>
+</tr>
+<tr>
+<td>문서 비교</td>
+<td>“문서 A와 문서 B의 점검 조건을 비교하고, 서로 다른 조건은 표로 정리해 줘.”</td>
+</tr>
+<tr>
+<td>불확실성 확인</td>
+<td>“이 설명에서 원문으로 확인되는 내용과 추가 확인이 필요한 내용을 나누어 줘.”</td>
+</tr>
+<tr>
+<td>수정안 작성</td>
+<td>“이 문단의 조건을 유지하면서 더 명확한 Markdown 수정안을 작성해 줘.”</td>
+</tr>
+</tbody>
+</table>
+<p>후속 질문에는 이전 대화가 문맥으로 사용됩니다. 다만 이전 AI 답변 자체가 새로운 사실의 출처나 사람의 승인으로 바뀌지는 않습니다. 주제가 크게 달라지면 새 대화로 나누는 것이 편리합니다.</p>
+<p>응답 생성을 멈추려면 <strong>응답 중단</strong>을 누릅니다. 다른 화면이나 대화로 이동하는 것만으로 실행이 중단되지는 않습니다.</p>
+<h3 id="답변-양식과-ai-모델-선택하기">답변 양식과 AI 모델 선택하기</h3>
+<p>입력창의 **＋**를 누르면 <strong>답변 양식</strong>, <strong>자료 붙여넣기</strong>, <strong>파일 첨부</strong>, 제공되는 경우 <strong>모델</strong>을 선택할 수 있습니다.</p>
+<p>답변 양식은 다음 중에서 고릅니다.</p>
+<ul>
+<li><strong>기본 답변</strong>: 일반 질문과 설명</li>
+<li><strong>비교 분석 보고서</strong>: 차이점·공통점과 비교 근거</li>
+<li><strong>항목 매핑표</strong>: 항목 사이의 대응을 표로 정리</li>
+<li><strong>타임라인·프로세스</strong>: 시간 순서나 처리 순서</li>
+<li><strong>요약 브리핑</strong>: 짧은 핵심 정리</li>
+</ul>
+<p>모델 선택지는 현재 AI에서 여러 후보를 제공할 때 표시됩니다. 선택한 모델은 저장되어 다음 AI 실행부터 적용됩니다. 이미 실행 중인 작업의 모델은 바뀌지 않습니다.</p>
+<h3 id="자료-붙여넣기와-파일-첨부">자료 붙여넣기와 파일 첨부</h3>
+<p><strong>＋ → 자료 붙여넣기</strong>로 긴 자료를 추가하거나 <strong>파일 첨부</strong>로 PC의 파일을 선택합니다. 지원 환경에서는 파일을 끌어다 놓을 수도 있습니다. 긴 글을 붙여 넣으면 첨부 칩으로 접히고, 짧은 글은 입력창에 그대로 들어갑니다.</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>한도와 처리</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>파일 형식</td>
+<td>DOCX, XLSX, PDF, MD, TXT, PNG, JPG, JPEG, GIF, BMP, TIF, TIFF, WebP</td>
+</tr>
+<tr>
+<td>파일 크기</td>
+<td>파일당 최대 20 MiB</td>
+</tr>
+<tr>
+<td>첨부 개수</td>
+<td>최대 20개</td>
+</tr>
+<tr>
+<td>첨부 하나에서 읽은 글</td>
+<td>최대 12,000자</td>
+</tr>
+<tr>
+<td>전체 첨부에서 읽은 글</td>
+<td>최대 40,000자</td>
+</tr>
+<tr>
+<td>긴 붙여넣기의 칩 전환</td>
+<td>300자 초과 또는 5줄 초과</td>
+</tr>
+</tbody>
+</table>
+<p>읽은 글이 한도를 넘으면 앞부분만 포함하고 일부만 담았다는 안내를 표시합니다. 질문의 핵심이 뒷부분에 있으면 해당 범위를 따로 준비하세요. 이미지·스캔 PDF는 OCR이 필요할 수 있으며, XLSX 수식은 새로 계산하지 않습니다. PPTX 첨부는 지원하지 않습니다.</p>
+<p>채팅 첨부와 <strong>문서 등록</strong>은 다릅니다. 첨부에서 읽은 텍스트는 질문에 포함되어 AI에 전달되고 대화 기록에도 포함됩니다. 지속적으로 함께 검색할 Wiki 자료로 만들려면 별도로 문서를 등록하세요.</p>
+<h3 id="공개-웹-자료를-함께-검색하기">공개 웹 자료를 함께 검색하기</h3>
+<ol>
+<li>입력창의 지구본 <strong>웹 검색</strong>을 누릅니다.</li>
+<li><strong>외부 검색어</strong>에 검색에 사용할 공개 검색어를 입력합니다. 최대 200자입니다.</li>
+<li><strong>적용</strong>을 누릅니다.</li>
+<li>웹 사용 여부와 검색어를 확인하고 질문을 보냅니다.</li>
+<li>이후 사용하지 않으려면 같은 설정에서 <strong>사용 안 함</strong>을 선택합니다.</li>
+</ol>
+<p>웹 조사에는 별도로 지정한 외부 검색어를 사용합니다. 질문, 첨부, 이전 대화, Wiki 문서 전체를 검색어에 자동으로 합치지 않습니다. 답변을 생성하는 개인 AI에는 질문과 필요한 근거가 전달되므로, 자료의 이용 범위에 맞게 질문과 첨부를 선택합니다.</p>
+<h3 id="답변의-근거-확인하기">답변의 근거 확인하기</h3>
+<p>답변의 <strong>근거</strong> 칩을 눌러 어떤 문서와 인용을 사용했는지, 원문의 어느 위치인지 확인합니다. 웹 자료는 출처 제목·링크·확인 시각 등으로 구별합니다.</p>
+<p>다음 상황에서는 확인 범위를 넓히거나 질문을 구체화하세요.</p>
+<ul>
+<li><strong>이 답변에는 저장된 인용이 없어요</strong>가 표시됩니다.</li>
+<li>검색 결과나 읽은 범위가 일부라는 안내가 있습니다.</li>
+<li>근거가 이전 본문에 연결되어 있거나 재검토가 필요합니다.</li>
+<li>첨부 내용이 일부만 포함되었습니다.</li>
+<li>답변의 조건·수치가 원문과 맞지 않습니다.</li>
+</ul>
+<p>질문할 때마다 모든 문서와 전체 이력을 한 번에 보내는 방식은 아닙니다. 현재 답변에서 실제로 읽고 인용한 근거를 기준으로 판단하세요. 인용이 있더라도 그 인용이 답변의 결론을 뒷받침하는지 확인해야 합니다.</p>
+<h2 id="답변과-개인-초안을-파일로-내보내기">답변과 개인 초안을 파일로 내보내기</h2>
+<h3 id="답변-바로-내려받기">답변 바로 내려받기</h3>
+<p>답변 아래에는 <strong>복사</strong>, <strong>다시 묻기</strong>, <strong>내려받기</strong>가 있습니다. 필요한 답변의 <strong>내려받기</strong>를 눌러 형식과 저장 위치를 선택합니다. 파일로 요청한 답변은 파일 카드의 <strong>내려받기</strong>, <strong>다른 형식으로</strong>를 사용할 수 있습니다.</p>
+<p>현재 지원 형식은 다음과 같습니다. 실행 환경에서 제공하는 형식만 선택 목록에 나타납니다.</p>
+<table>
+<thead>
+<tr>
+<th>형식</th>
+<th>용도와 결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Markdown (.md)</td>
+<td>제목·목록·표 등의 Markdown 본문을 보관하고 다시 편집</td>
+</tr>
+<tr>
+<td>텍스트 (.txt)</td>
+<td>글 중심의 단순한 파일</td>
+</tr>
+<tr>
+<td>Word (.docx)</td>
+<td>문서 형태로 읽고 편집할 보고서</td>
+</tr>
+<tr>
+<td>PDF (.pdf)</td>
+<td>고정된 형태로 읽고 공유할 문서</td>
+</tr>
+<tr>
+<td>Excel (.xlsx)</td>
+<td>답변의 Markdown 표 등을 바탕으로 만든 새 스프레드시트</td>
+</tr>
+<tr>
+<td>PowerPoint (.pptx)</td>
+<td>답변의 제목과 내용을 바탕으로 만든 새 발표 자료</td>
+</tr>
+</tbody>
+</table>
+<p>“Word 보고서로 만들어 줘”, “Excel 매핑표로 정리해 줘”, “PowerPoint 브리핑으로 만들어 줘”처럼 결과 형태를 질문에 적을 수 있습니다. 내려받은 파일은 전달 전에 열어 내용과 배치를 확인하세요.</p>
+<p>Excel·PowerPoint 내보내기는 답변을 새 파일로 만드는 기능입니다. 첨부한 원본 파일의 서식이나 배치를 그대로 되살리는 기능은 아닙니다. 그림·사진 파일 생성은 제공하지 않습니다.</p>
+<h3 id="개인-결과물-편집하기">개인 결과물 편집하기</h3>
+<p>답변을 내려받을 때 결과물 쓰기 권한이 있고 저장에 성공하면 해당 답변을 개인 결과물로 보관합니다. 모든 답변에 별도의 결과물 복사본을 자동으로 만드는 것은 아닙니다. 개인 보관이 실패한 경우에도 파일 내보내기는 가능할 수 있으므로 개인 보관 결과와 파일 저장 결과를 각각 확인하세요.</p>
+<p>결과물 화면을 열었다면 <strong>본문 편집</strong>으로 내용을 고치고 <strong>프리뷰 보기</strong>로 확인한 뒤 <strong>개인 초안 저장</strong>을 누릅니다. 파일로 사용할 때는 지원 형식과 <strong>내려받기</strong>를 선택합니다. 미저장 변경, 저장한 개인 초안, 저장된 AI 결과의 상태를 구별해 확인하세요.</p>
+<p>화면에 표시되는 <strong>개인 초안 · Wiki에는 반영되지 않음</strong>은 공유 문서와 별도로 관리된다는 뜻입니다. 개인 초안 저장이나 내려받기는 Wiki 본문을 바꾸지 않습니다.</p>
+<h3 id="검토한-결과를-wiki에-반영하기">검토한 결과를 Wiki에 반영하기</h3>
+<p>현재 개인 결과물 화면에는 Wiki 직접 반영 버튼이 없습니다. 문서를 수정하려면 다음 순서로 진행합니다.</p>
+<ol>
+<li>AI 결과에서 반영할 내용과 원문 근거를 검토합니다.</li>
+<li>대상 문서를 열고 <strong>본문 편집</strong>을 누릅니다.</li>
+<li>검토한 텍스트를 필요한 위치에 옮기고 기존 내용과 맞게 편집합니다.</li>
+<li><strong>변경 내용 확인 → 저장</strong>을 진행합니다.</li>
+<li>수정한 본문을 다시 읽고 필요한 경우 <strong>관계 재추출</strong>을 진행합니다.</li>
+</ol>
+<p>수정안 작성, 개인 초안 저장, 공유 문서 저장, 관계 재추출은 각각 별개의 단계입니다.</p>
+<h2 id="ai-작업과-지난-실행-기록-관리하기">AI 작업과 지난 실행 기록 관리하기</h2>
+<h3 id="실행-중-작업과-최근-결과-확인하기">실행 중 작업과 최근 결과 확인하기</h3>
+<ol>
+<li>사이드바 또는 하단 상태바에서 <strong>AI 세션</strong>을 엽니다.</li>
+<li><strong>돌고 있는 작업</strong>에서 대상과 현재 상태를 확인합니다.</li>
+<li><strong>열기</strong>로 해당 작업이나 대화로 이동합니다. 이 행동으로 AI를 새로 실행하지는 않습니다.</li>
+<li>특정 작업을 멈추려면 해당 행의 <strong>중단</strong>을 누릅니다.</li>
+<li><strong>최근 끝난 작업</strong>에서 <strong>열기</strong>로 결과를 확인합니다.</li>
+</ol>
+<p>최근 결과의 X 버튼인 <strong>확인하고 목록에서 지우기</strong>는 최근 목록의 확인 상태를 정리합니다. 저장된 결과와 실행 원장을 삭제하지 않습니다. 확인 상태는 이 기기의 사용자·작업 공간 단위로 관리되므로 다른 PC의 목록과 다를 수 있습니다.</p>
+<p>여러 질문·분석·관련 지식 찾기를 독립적으로 실행할 수 있습니다. 화면을 옮겨도 진행 중인 작업은 유지됩니다. 아직 실행하지 않은 준비 단계 작업은 기본 실행 목록에 표시되지 않을 수 있습니다.</p>
+<h3 id="지난-기록-찾기">지난 기록 찾기</h3>
+<p><strong>AI 세션 → 지난 기록</strong>을 열고 <strong>종류 필터</strong>에서 <strong>전체 / 문서 분석 / AI 질문 / 관련 지식 찾기</strong>를 고릅니다. <strong>더 불러오기</strong>가 있으면 추가 기록을 불러옵니다. 목록의 필터와 건수는 불러온 범위이므로 오래된 작업을 찾을 때는 조회 범위를 확인하세요.</p>
+<h3 id="분석-작업-상세에서-할-수-있는-일">분석 작업 상세에서 할 수 있는 일</h3>
+<table>
+<thead>
+<tr>
+<th>행동</th>
+<th>사용하는 때</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>새로고침</strong></td>
+<td>현재 진행 상태와 저장 결과를 다시 확인</td>
+</tr>
+<tr>
+<td><strong>실행 가능 여부 확인</strong></td>
+<td>시작·재개 조건을 확인</td>
+</tr>
+<tr>
+<td><strong>이 작업 실행 / 이 작업 이어서 실행</strong></td>
+<td>확인된 실행 방식으로 명시적으로 시작</td>
+</tr>
+<tr>
+<td><strong>이 기기의 실행 중단</strong></td>
+<td>현재 PC에서 실행 중인 처리를 중단</td>
+</tr>
+<tr>
+<td><strong>작업 취소 검토 → 이 작업 취소</strong></td>
+<td>분석 작업을 취소. 이미 저장한 문서와 결과는 유지</td>
+</tr>
+<tr>
+<td><strong>분석 당시 원본 버전 열기</strong></td>
+<td>최신 원본 대신 해당 분석이 실제로 사용한 원본을 확인</td>
+</tr>
+<tr>
+<td><strong>저장 결과</strong></td>
+<td>저장됨·저장되지 않음·저장 여부 미확인을 구별</td>
+</tr>
+<tr>
+<td><strong>작업 기준과 진행 이력</strong></td>
+<td>해당 작업의 입력 기준과 진행 기록 확인</td>
+</tr>
+</tbody>
+</table>
+<p>“실행이 끝났다”와 “결과가 저장되었다”는 다를 수 있습니다. 저장 여부 미확인이라면 먼저 새로고침과 기존 요청 조회로 결과를 확인하세요.</p>
+<h3 id="창-닫기와-앱-종료">창 닫기와 앱 종료</h3>
+<p>창의 닫기 버튼은 창을 숨깁니다. 연결과 진행 중인 AI 작업은 유지됩니다. macOS에서 앱을 다시 활성화하면 숨겨진 창이 나타납니다.</p>
+<p>앱 메뉴에서 명시적으로 종료할 때 진행 중인 작업이 있으면 <strong>진행 중인 AI 작업</strong> 확인창이 표시됩니다.</p>
+<ul>
+<li><strong>계속 실행</strong>: 앱을 종료하지 않고 작업을 유지합니다.</li>
+<li><strong>작업을 중단하고 종료</strong>: 실행을 멈추고 앱을 종료합니다.</li>
+</ul>
+<p>종료해도 이미 저장된 결과와 복구 기록은 보존합니다. 다시 실행했다고 중단된 AI 처리가 임의의 지점부터 자동으로 이어지는 것은 아닙니다. AI 세션이나 분석 작업 상세에서 상태와 이어서 실행 가능 여부를 확인하세요. 저장하지 않은 문서 편집 초안은 종료 전에 저장해야 합니다.</p>
+<h2 id="계정과-앱-설정-관리하기">계정과 앱 설정 관리하기</h2>
+<h3 id="서버-연결과-로그아웃">서버 연결과 로그아웃</h3>
+<p><strong>설정 → 서버·계정</strong>에서 현재 계정 이름, 서버 주소, 작업 공간을 확인합니다. <strong>연결 확인</strong>으로 연결 상태를 확인하고 다른 서버나 계정으로 바꾸려면 <strong>로그아웃</strong>한 뒤 다시 로그인합니다.</p>
+<p>로그아웃은 앱의 연결과 자동 복원을 해제합니다. 서버의 원본·문서 삭제나 서버 인증 토큰 회수와는 다릅니다. 서버가 오프라인인 경우에도 현재 앱의 연결 해제를 할 수 있습니다.</p>
+<h3 id="계정-사용량-확인하기">계정 사용량 확인하기</h3>
+<p>하단의 AI 상태·한도를 누르거나 **설정 → AI 실행 → 계정 사용량 (참고)**를 열고 <strong>사용량 새로고침</strong>을 누릅니다. 설정에 항목이 보이지 않으면 하단의 AI 상태·한도 링크를 사용하세요.</p>
+<p><strong>AI 계정 사용량</strong>은 여러 세션이 공유하는 개인 계정의 한도입니다. 확인 가능한 경우 잔여·사용 비율, 한도 기간, 초기화 시각, 마지막 확인 시각을 보여 줍니다. 개별 작업의 실행 횟수나 토큰 수와는 다릅니다.</p>
+<p>Claude는 현재 계정 한도 수치를 제공하지 않는다고 표시합니다. 미제공, 조회 실패, 이전 조회값은 실제 잔여량 0%와 다릅니다. 최신 확인 시각과 실제 AI 오류를 함께 살펴보세요.</p>
+<h3 id="화면-테마-바꾸기">화면 테마 바꾸기</h3>
+<p><strong>설정 → 화면 → 화면 테마</strong>에서 <strong>라이트 / 다크 / 시스템 설정 따르기</strong>를 선택합니다. 선택은 이 기기에 저장됩니다.</p>
+<h3 id="업데이트하기">업데이트하기</h3>
+<p>설치 앱에서 <strong>업데이트 준비 완료</strong>가 표시되면 <strong>지금 재시작</strong> 또는 <strong>나중에</strong>를 선택할 수 있습니다. 나중에 선택한 경우 사이드바의 <strong>업데이트</strong> 항목을 사용합니다. 준비된 업데이트는 앱 종료 시 설치할 수 있습니다.</p>
+<p>재시작 전에는 편집 중인 내용을 저장하고 진행 중인 AI 작업을 확인하세요. 업데이트 알림과 항목은 배포 채널에 실제 업데이트가 있을 때 나타납니다. 설치 파일을 따로 전달받은 경우에는 배포 담당자의 교체 안내를 따릅니다.</p>
+<h2 id="자주-겪는-문제-해결하기">자주 겪는 문제 해결하기</h2>
+<table>
+<thead>
+<tr>
+<th>문제</th>
+<th>먼저 확인할 것</th>
+<th>이어서 할 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>로그인되지 않음</td>
+<td>계정 이름, 서버 주소, 서버 실행 상태</td>
+<td>이름·주소를 수정하고 다시 로그인합니다. 원격 접속은 HTTPS 주소를 확인합니다.</td>
+</tr>
+<tr>
+<td>이전에 보던 문서가 없음</td>
+<td>서버·계정·작업 공간, 검색어·상태 필터</td>
+<td>올바른 공간에서 검색 조건을 풀고 다시 조회합니다.</td>
+</tr>
+<tr>
+<td>저장·검토 버튼이 없음</td>
+<td>현재 계정의 쓰기·검토 권한, 대상 상태</td>
+<td>설정과 안내를 확인하고 필요한 권한은 운영 담당자에게 문의합니다.</td>
+</tr>
+<tr>
+<td>AI 프로그램을 찾지 못함</td>
+<td>선택한 AI의 설치 여부와 실행 위치</td>
+<td><strong>AI 프로그램 자동으로 찾기</strong> 또는 <strong>프로그램 위치 변경</strong>을 사용합니다.</td>
+</tr>
+<tr>
+<td>로그인했는데 AI가 실행되지 않음</td>
+<td>같은 PC·OS 사용자로 로그인했는지, 선택한 AI, 계정 한도</td>
+<td>로그인 재확인과 오류 안내를 확인합니다. 필요하면 실제 호출 시험을 합니다.</td>
+</tr>
+<tr>
+<td>파일은 보관됐지만 문서가 없음</td>
+<td>문자 변환·문서 저장 단계의 오류</td>
+<td>등록 결과와 처리 기록을 읽고 <strong>본문 변환 다시 시도</strong> 등 해당 단계만 복구합니다.</td>
+</tr>
+<tr>
+<td>문서는 있으나 관계가 없음</td>
+<td>AI 실행 상태, 추출 실패, 문서 상태</td>
+<td>AI 세션과 분석 작업 상세를 확인하고 필요한 관계 추출만 실행합니다.</td>
+</tr>
+<tr>
+<td>OCR 내용이 이상함</td>
+<td>원본 화질, OCR 언어, 미독·부분 처리 안내</td>
+<td>원본과 대조하고 필요한 본문을 정정한 뒤 관계를 재추출합니다.</td>
+</tr>
+<tr>
+<td>Excel 계산값이 빠짐</td>
+<td>원본에 저장된 계산값이 있는지</td>
+<td>사용하던 스프레드시트 프로그램에서 계산·저장한 별도 원본을 준비해 등록 여부를 검토합니다. 기존 원본은 보존됩니다.</td>
+</tr>
+<tr>
+<td>본문 수정 후 관계가 오래됨</td>
+<td>현재 본문과 추출 기준의 차이</td>
+<td><strong>관계 재추출 → 결과 비교·반영</strong>을 진행합니다.</td>
+</tr>
+<tr>
+<td>저장 충돌</td>
+<td>다른 사용자 또는 AI의 최근 변경</td>
+<td>최신 본문을 읽고 내 변경을 재반영한 뒤 비교·저장합니다.</td>
+</tr>
+<tr>
+<td>저장 결과를 받지 못함</td>
+<td>서버 연결과 기존 요청 상태</td>
+<td>새 요청을 반복하기 전에 저장 결과·동일 요청 기록을 조회합니다.</td>
+</tr>
+<tr>
+<td>답변이 근거 없이 단정함</td>
+<td>저장된 인용, 읽은 범위, 첨부 누락</td>
+<td>근거를 열어 확인하고 원문 범위와 조건을 지정해 다시 질문합니다.</td>
+</tr>
+<tr>
+<td>내보내기에 원하는 형식이 없음</td>
+<td>해당 화면과 실행 환경의 형식 목록</td>
+<td>제공하는 형식으로 저장하거나 문서 처리 진단을 확인합니다.</td>
+</tr>
+<tr>
+<td>실행 기록 일부만 보임</td>
+<td>현재 공간, 종류 필터, 더 불러오기</td>
+<td>과거 기록을 추가 조회합니다.</td>
+</tr>
+<tr>
+<td>창을 닫았는데 AI가 계속 실행됨</td>
+<td>창 숨김 상태</td>
+<td><strong>AI 세션</strong>에서 해당 작업을 중단하거나 앱 메뉴로 명시 종료합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>문의를 보낼 때는 작업한 시각, 화면 이름, 오류 문구, 문서·작업 식별 정보, 어느 단계까지 저장됐는지를 함께 전달하면 원인을 찾기 쉽습니다. 인증 토큰이나 개인 로그인 정보는 보내지 않습니다.</p>
+<h2 id="업무별로-따라-하기">업무별로 따라 하기</h2>
+<h3 id="새-자료를-팀-지식으로-활용하기">새 자료를 팀 지식으로 활용하기</h3>
+<ol>
+<li>문서 등록에서 자료를 올립니다.</li>
+<li>변환 보고와 저장된 본문을 원본과 대조합니다.</li>
+<li>관계를 열어 핵심 조건과 근거를 확인합니다.</li>
+<li>필요한 관계만 검토함에서 판단합니다.</li>
+<li>AI 채팅에서 문서 이름과 질문 범위를 지정합니다.</li>
+<li>답변의 근거를 확인하고 필요한 파일 형식으로 내려받습니다.</li>
+</ol>
+<h3 id="잘못된-내용을-바로잡기">잘못된 내용을 바로잡기</h3>
+<p>먼저 무엇이 잘못됐는지 구별합니다.</p>
+<table>
+<thead>
+<tr>
+<th>잘못된 대상</th>
+<th>수정할 곳</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wiki 본문 자체</td>
+<td><strong>본문 편집 → 변경 내용 확인 → 저장</strong></td>
+</tr>
+<tr>
+<td>본문은 맞지만 추출한 관계가 잘못됨</td>
+<td>관계의 <strong>원문 근거 정정</strong> 또는 검토함의 <strong>수정</strong></td>
+</tr>
+<tr>
+<td>원문 밖의 별도 업무 의견이 필요함</td>
+<td><strong>전문가 의견으로 추가</strong></td>
+</tr>
+<tr>
+<td>AI 답변의 해석이나 표현</td>
+<td>근거를 확인하고 같은 대화에서 정정 질문. 공유 문서 수정이 필요하면 별도로 본문 저장</td>
+</tr>
+</tbody>
+</table>
+<p>본문을 바꿨다면 관계 재추출을 검토합니다. 중요한 판단은 이유를 남겨 다음 사용자가 원문과 업무 의견을 구별할 수 있도록 합니다.</p>
+<h3 id="자료를-수정한-뒤-결과를-다시-확인하기">자료를 수정한 뒤 결과를 다시 확인하기</h3>
+<ol>
+<li>현재 본문과 이력을 비교해 바뀐 내용을 확인합니다.</li>
+<li>저장된 본문으로 관계를 재추출합니다.</li>
+<li>추가·사라진 관계와 현재 원문 근거를 비교합니다.</li>
+<li>검사 후 반영하고 필요한 새 관계를 검토합니다.</li>
+<li>이전 기준의 판단과 현재 판단을 구별합니다.</li>
+<li>기존 질문을 다시 할 때는 변경된 조건과 현재 근거를 확인하도록 요청합니다.</li>
+</ol>
+<h2 id="현재-앱의-제공-범위-알아두기">현재 앱의 제공 범위 알아두기</h2>
+<ul>
+<li><strong>문서 간 대응·변경 영향 조회</strong>는 서버 API와 MCP에 있는 기능이며 별도 앱 메뉴로 제공하지 않습니다. 검토함에 관련 건수가 포함되어도 직접 처리할 버튼이 없을 수 있습니다.</li>
+<li><strong>Clean Up과 문서별 별도 관계 검토 화면</strong>은 현재 일반 메뉴에서 진입하는 기능이 아닙니다. Clean Up은 원문이나 판단 이력 삭제, 미검토 관계 자동 제거, 같은 이름의 개체 자동 병합을 뜻하지 않습니다.</li>
+<li>개인 결과물의 <strong>Wiki 자동 반영</strong>, 원본 파일 자체의 편집·재작성, PPTX 등록·채팅 첨부, 그림·사진 파일 생성은 현재 안내한 앱 기능에 포함되지 않습니다.</li>
+<li>목록·지도·근거 조회에서 더 보기, 일부 조회, 미독, 건너뜀 등의 안내가 있으면 결과의 범위를 함께 해석합니다.</li>
+</ul>
+</main></body></html>

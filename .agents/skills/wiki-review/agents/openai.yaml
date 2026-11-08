@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki 판단·관계 검토"
+  short_description: "원문 검토·전문가 판단·관계 추가와 표시 정리·되돌림을 처리"
+  default_prompt: "$wiki-review를 사용해 요청한 판단을 현재 근거·권한·검토 이력에 맞춰 처리해줘."

@@ -13,7 +13,11 @@ from pathlib import Path
 import stat
 from uuid import uuid4
 
+from core.common.storage_layout import knowledge_root
+from core.modules.documents.metadata import parse_document
+from .storage import document_path, source_fields
 from core.common.cleanup import cleanup_details
+from core.common.read_changes import before_change
 from core.common.json_codec import canonical_json_bytes
 from core.modules.documents.store import CleanupFailure, RevisionConflictError, WikiStore
 from . import constants
@@ -35,13 +39,11 @@ class OntologyStore:
 
     def __init__(self, store: WikiStore):
         self.store = store
-        self.ontology_dir = store.data_dir / "_ontology"
+        self.ontology_dir = knowledge_root(store.data_dir, "graphs")
+        self.legacy_ontology_dir = store.data_dir / "_ontology"
 
     def _path(self, document: str) -> Path:
-        self.store._document_path(self.store.wiki_dir, document)
-        path = self.ontology_dir / (sha256(document.encode("utf-8")).hexdigest() + ".json")
-        self.store._check_path(path)
-        return path
+        return document_path(self.store, document, "graphs", max_bytes=constants.MAX_ONTOLOGY_BYTES)
 
     def _read_source(self, document: str):
         path = self.store._document_path(self.store.wiki_dir, document)
@@ -52,6 +54,17 @@ class OntologyStore:
     def _read_bytes(self, path: Path):
         """호출자가 가진 잠금 안에서 전체 그래프 바이트를 읽는다."""
         return read_graph_bytes(self, path)
+
+    def validate_draft(self, document: str, expected_revision: str, submission, *, schema, max_errors=20) -> dict:
+        """Read one source snapshot and validate without creating a lock or graph.
+
+        This snapshot does not certify later source/review CAS or write access.
+        Actual publication must still pass generate's independent guards.
+        """
+        from .draft import validate_draft
+        source = self._read_source(document)
+        return validate_draft(source.content, submission, document=document,
+                              expected_revision=expected_revision, schema=schema, max_errors=max_errors)
 
     def generate(self, document: str, expected_revision: str, entities: list, relations: list,
                  relation_candidates=None, *, attributes=None, schema_version=3,
@@ -83,7 +96,10 @@ class OntologyStore:
                 from core.modules.reviews.store import ReviewStore
                 ReviewStore(self.store).guard_generation(document, expected_state_revision)
                 graph = _graph(document, source.revision, entities, relations, source.content,
-                               relation_candidates, attributes=attributes, schema_version=schema_version)
+                               relation_candidates, attributes=attributes, schema_version=schema_version, body_only=True)
+                parsed = parse_document(source.content)
+                graph.update(document_id=parsed.document_id, body_revision=parsed.body_revision,
+                             body_start_line=parsed.body_start_line, evidence_coordinates="full_file")
                 # 기존 그래프 인코더의 옵션까지 보존한다. 이 옵션은 입력 검증을 대신하지 않는다.
                 encoded = canonical_json_bytes(graph, allow_nan=True)
                 if len(encoded) > constants.MAX_ONTOLOGY_BYTES:
@@ -114,8 +130,9 @@ class OntologyStore:
                 if before_commit is not None:
                     before_commit()
                 if changed:
-                    self.store._mkdir(self.ontology_dir)
-                    with self.store._staged_file(self.ontology_dir, encoded, cleanup_failures) as staged:
+                    before_change(self.store, "wiki", path.relative_to(self.store.data_dir).as_posix())
+                    self.store._mkdir(path.parent)
+                    with self.store._staged_file(path.parent, encoded, cleanup_failures) as staged:
                         os.replace(staged.path, path)
                         staged.consumed = True
         except Exception as error:
@@ -124,6 +141,7 @@ class OntologyStore:
             raise
         return {
             "document": document, "source_revision": source.revision, "status": "ready",
+            **source_fields(source.content),
             "entity_count": len(graph["entities"]), "relation_count": len(graph["relations"]),
             "candidate_count": len(graph.get("relation_candidates", [])),
             "attribute_count": len(graph.get("attributes", [])),
@@ -164,8 +182,10 @@ class OntologyStore:
     def _connection_documents(self, skipped: list) -> tuple:
         return connection_documents(self, skipped)
 
-    def _connections_snapshot_locked(self, document: str, limit: int = 20) -> tuple:
+    def _connections_snapshot_locked(self, document: str, limit: int = 20, *, capture_validated=False) -> tuple:
         """영향 조회와 공유하는 캡처 결과; 호출자가 가진 잠금을 다시 얻지 않는다."""
+        if capture_validated:
+            return connections_snapshot_locked(self, document, limit, capture_validated=True)
         return connections_snapshot_locked(self, document, limit)
 
     def connections(self, document: str, limit: int = 20) -> dict:

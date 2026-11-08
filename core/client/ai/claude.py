@@ -12,6 +12,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from uuid import UUID
 
 from jsonschema import Draft202012Validator
 
@@ -60,9 +61,13 @@ def _check_argument_size(arguments, env):
 class _Events:
     """공개 답변만 미리 보여 주고 원시 추론/오류/계정 정보는 보존하지 않는다."""
 
-    def __init__(self):
+    def __init__(self, *, web_search=False):
         self.trace, self.structured_ids = [], set()
         self.result, self.model = None, None
+        self.token_usage = None
+        self.session_id = None
+        self.web_search = web_search
+        self.web_tool_ids, self.web_completed_ids = set(), set()
 
     def __call__(self, line, callback):
         if not line.strip():
@@ -73,16 +78,26 @@ class _Events:
             if self.result is not None or kind not in {"system", "assistant", "user", "result", "rate_limit_event"}:
                 raise AIAdapterError("ai_invalid_events")
             self.trace.append({"type": kind})
+            if event.get("session_id") is not None:
+                observed_id = str(UUID(event["session_id"]))
+                if self.session_id is not None and observed_id != self.session_id:
+                    raise AIAdapterError("ai_session_mismatch")
+                self.session_id = observed_id
             if kind == "system":
                 # Hooks are not part of a frozen-input analysis. Do not accept their output as an answer.
-                if event.get("subtype") not in {"init", "status", "api_retry", "compact_boundary"}:
+                # thinking_tokens는 추론 토큰 수 추정치만 담은 진행 알림이며 답변이나 도구 출력이 아니다.
+                if event.get("subtype") not in {"init", "status", "api_retry", "compact_boundary", "thinking_tokens"}:
                     raise AIAdapterError("ai_unexpected_tool_activity")
                 if isinstance(event.get("model"), str):
                     self.model = event["model"][:200]
             elif kind == "assistant":
                 message = event["message"]
                 if event.get("error"):
-                    raise AIAdapterError("ai_execution_failed")
+                    # 제공자의 고정 오류 종류만 기록하고 원시 계정/오류 본문은 내보내지 않는다.
+                    error_type = event["error"]
+                    if isinstance(error_type, str) and error_type in {"rate_limit", "authentication_failed", "billing_error", "invalid_request", "server_error"}:
+                        self.trace[-1]["error_type"] = error_type
+                    raise AIAdapterError("ai_rate_limited" if error_type == "rate_limit" else "ai_execution_failed")
                 if isinstance(message.get("model"), str):
                     self.model = message["model"][:200]
                 for block in message["content"]:
@@ -98,12 +113,21 @@ class _Events:
                         self.structured_ids.add(block["id"])
                         callback({"type": "agent_message", "text": canonical_json_bytes(block["input"]).decode(),
                                   "event": "item.completed", "item_id": block["id"]})
+                    elif block["type"] == "tool_use" and block.get("name") == "WebSearch" and self.web_search:
+                        if not isinstance(block.get("id"), str) or not isinstance(block.get("input"), dict):
+                            raise AIAdapterError("ai_invalid_events")
+                        self.web_tool_ids.add(block["id"])
                     elif block["type"] not in {"thinking", "redacted_thinking"}:
                         raise AIAdapterError("ai_unexpected_tool_activity")
             elif kind == "user":
                 # Only the result of the output-format carrier may be emitted back by the CLI.
                 for block in event["message"]["content"]:
-                    if block["type"] != "tool_result" or block.get("tool_use_id") not in self.structured_ids:
+                    if (block["type"] == "tool_result" and self.web_search
+                            and block.get("tool_use_id") in self.web_tool_ids):
+                        if block.get("is_error"):
+                            raise AIAdapterError("ai_web_search_failed")
+                        self.web_completed_ids.add(block["tool_use_id"])
+                    elif block["type"] != "tool_result" or block.get("tool_use_id") not in self.structured_ids:
                         raise AIAdapterError("ai_unexpected_tool_activity")
             elif kind == "result":
                 if event.get("subtype") != "success" or event.get("is_error") is not False:
@@ -113,6 +137,8 @@ class _Events:
                 if not isinstance(event.get("structured_output"), dict):
                     raise AIAdapterError("ai_invalid_result")
                 self.result = event["structured_output"]
+                from .observations import reported_usage
+                self.token_usage = reported_usage(event.get("usage"))
         except (ValueError, TypeError, KeyError, AttributeError, UnicodeError) as error:
             raise AIAdapterError("ai_invalid_events") from error
 
@@ -150,9 +176,10 @@ class ClaudeAdapter(CodexAdapter):
         return {"provider": "claude", "cli_version": version, "requested_model": self.model,
                 "capabilities_checked": True, "login_checked": False}
 
-    async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None):
+    async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None, web_search=False):
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
-                or output_schema is not None and not isinstance(output_schema, dict)):
+                or output_schema is not None and not isinstance(output_schema, dict)
+                or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)):
             raise AIAdapterError("ai_invalid_input")
         prompt_bytes, original_schema = prompt.encode("utf-8"), canonical_json_bytes(schema)
         effective_schema = schema if output_schema is None else output_schema
@@ -163,9 +190,19 @@ class ClaudeAdapter(CodexAdapter):
         await self.preflight()
         executable, version = self._capabilities
         arguments = [*executable, "--print", "--output-format", "stream-json", "--verbose", *_ISOLATION,
-            "--tools", "", "--disable-slash-commands", "--no-session-persistence", "--no-chrome",
+            "--tools", "WebSearch" if web_search else "", "--disable-slash-commands", "--no-chrome",
             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disallowedTools", "mcp__*",
             "--permission-mode", "dontAsk", "--permission-prompts", "none", "--json-schema", schema_bytes.decode()]
+        if web_search:
+            arguments.extend(["--allowedTools", "WebSearch", "--max-turns", "6"])
+        if session_id is not None:
+            try:
+                session_id = str(UUID(session_id))
+            except (ValueError, TypeError, AttributeError) as error:
+                raise AIAdapterError("ai_invalid_session") from error
+            arguments.extend(["--resume", session_id])
+        elif not self.persist_session:
+            arguments.append("--no-session-persistence")
         if self.model is not None:
             arguments.extend(["--model", self.model])
         # Unlike Codex's schema file, Claude accepts this schema in argv. Reject OS limits explicitly.
@@ -174,6 +211,10 @@ class ClaudeAdapter(CodexAdapter):
         if any(path.is_symlink() for path in (directory, *directory.parents)):
             raise AIAdapterError("ai_unsafe_directory")
         private_directory(directory, exist_ok=False)
+        # 같은 분석의 후속 호출은 Claude가 처음 기록한 작업 위치에서 재개한다.
+        if self.persist_session and session_id is None:
+            self._session_directory = directory
+        execution_directory = getattr(self, "_session_directory", directory) if session_id else directory
         _write_new(directory / "prompt.txt", prompt_bytes)
         _write_new(directory / "source-schema.json", original_schema)
         _write_new(directory / "schema.json", schema_bytes)
@@ -182,17 +223,27 @@ class ClaudeAdapter(CodexAdapter):
             "reported_model": None, "evidence_kind": "client_observed", "semantic_validation": "not_run",
             "prompt_sha256": sha256(prompt_bytes).hexdigest(), "schema_sha256": sha256(schema_bytes).hexdigest(),
             "input_schema_sha256": sha256(original_schema).hexdigest(), "status": "failed"}
-        events, started = _Events(), time.monotonic()
+        events, started = _Events(web_search=web_search), time.monotonic()
         callback = on_event if on_event is not None else self.on_event
         try:
-            code, output, stderr = await _execute(arguments, directory=directory, environment=env,
+            code, output, stderr = await _execute(arguments, directory=execution_directory, environment=env,
                 prompt=prompt_bytes, timeout=self.timeout_seconds, on_event=callback or (lambda _: None), event_parser=events)
             metadata.update(returncode=code, stdout_sha256=sha256(output).hexdigest(), stderr_sha256=sha256(stderr).hexdigest(),
-                            reported_model=events.model)
+                            reported_model=events.model, token_usage=events.token_usage)
             if code != 0:
                 raise AIAdapterError("ai_login_or_execution_failed")
             if events.result is None:
                 raise AIAdapterError("ai_incomplete_turn")
+            if web_search:
+                metadata["web_search_completed"] = len(events.web_completed_ids)
+                if not metadata["web_search_completed"]:
+                    raise AIAdapterError("ai_web_search_not_used")
+            if self.persist_session or session_id is not None:
+                if events.session_id is None or session_id is not None and session_id != events.session_id:
+                    raise AIAdapterError("ai_session_mismatch")
+                self.session_id = events.session_id
+                metadata.update(session_id=events.session_id, session_persisted=True,
+                    session_directory=str(execution_directory))
             raw = canonical_json_bytes(events.result)
             if len(raw) > MAX_RESULT_BYTES:
                 raise AIAdapterError("ai_output_limit")

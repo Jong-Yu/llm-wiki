@@ -10,6 +10,8 @@ stale 그래프도 손상 검사는 수행하지만 옛 주장을 현재 사실�
 import json
 import re
 
+from core.modules.documents.metadata import parse_document
+from .storage import validate_document_id, source_fields
 from . import constants
 from .errors import OntologyValidationError, OntologyCorruptError
 from .validation import _items, _graph
@@ -40,7 +42,17 @@ def _stored_graph(raw: bytes, document: str) -> tuple:
         if type(version) is not int or version not in (1, 2, 3, 4, 5, 6):
             raise OntologyValidationError("unsupported schema_version")
         fields = {1: constants._V1_GRAPH_FIELDS, 2: constants._GRAPH_FIELDS, 3: constants._V3_GRAPH_FIELDS, 4: constants._V3_GRAPH_FIELDS, 5: constants._V3_GRAPH_FIELDS, 6: constants._V3_GRAPH_FIELDS}[version]
-        _optional_fields(graph, fields, fields | {"generation_id"}, "graph")
+        _optional_fields(graph, fields, fields | {"generation_id", "document_id", "body_revision", "body_start_line", "evidence_coordinates"}, "graph")
+        envelope_fields = {"document_id", "body_revision", "body_start_line", "evidence_coordinates"}
+        if set(graph) & envelope_fields:
+            if not envelope_fields <= set(graph):
+                raise OntologyValidationError("incomplete body evidence envelope")
+            if graph["document_id"] is not None:
+                validate_document_id(graph["document_id"])
+            _revision(graph["body_revision"])
+            if (type(graph["body_start_line"]) is not int or graph["body_start_line"] < 1
+                    or graph["evidence_coordinates"] != "full_file"):
+                raise OntologyValidationError("invalid body evidence coordinates")
         if "generation_id" in graph and (
             not isinstance(graph["generation_id"], str)
             or re.fullmatch(r"[0-9a-f]{32}", graph["generation_id"]) is None
@@ -131,20 +143,27 @@ def _query_snapshot(document: str, source, raw) -> dict:
     """Validate an already captured pair without taking another storage lock."""
     # 같이 캡처한 source/raw를 비교한다. 원문 버전이 달라졌다면 예전 주장을 비우고 stale 상태를 반환한다.
     empty = {"document": document, "source_revision": source.revision,
-             "entities": [], "relations": [], "relation_candidates": [], "attributes": []}
+             "entities": [], "relations": [], "relation_candidates": [], "attributes": [],
+             **source_fields(source.content)}
     if raw is None:
         return {**empty, "status": "missing"}
     graph, entities, relations, candidates, attributes = _stored_graph(raw, document)
     if graph["source_revision"] != source.revision:
-        return {**empty, "status": "stale", "indexed_revision": graph["source_revision"]}
+        return {**empty, "status": "stale", "indexed_revision": graph["source_revision"],
+                "needs_reextraction": True, "indexed_body_revision": graph.get("body_revision")}
     try:
         normalized = _graph(
             document, source.revision, entities, relations, source.content, candidates,
-            attributes=attributes, schema_version=graph["schema_version"],
+            attributes=attributes, schema_version=graph["schema_version"], body_only="body_revision" in graph,
         )
     except OntologyValidationError as error:
         raise OntologyCorruptError("Stored ontology evidence does not match its source") from error
+    if "body_revision" in graph:
+        parsed = parse_document(source.content)
+        normalized.update(document_id=parsed.document_id, body_revision=parsed.body_revision,
+                          body_start_line=parsed.body_start_line, evidence_coordinates="full_file")
     if {k: v for k, v in graph.items() if k != "generation_id"} != normalized:
         raise OntologyCorruptError("Stored ontology evidence locations do not match its source")
-    return {"relation_candidates": [], "attributes": [], **graph, "status": "ready",
+    return {"relation_candidates": [], "attributes": [], **graph, **source_fields(source.content), "status": "ready",
+            "evidence_scope": "body" if "body_revision" in graph else "full_file",
             "needs_reextraction": graph["schema_version"] < 3}

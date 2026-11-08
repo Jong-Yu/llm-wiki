@@ -1,0 +1,109 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-8);
+  min-width: 0;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-6, 6px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 8px;
+  background-color: var(--wiki-color-surface-subtle);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+.body {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 9px;
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  small {
+    flex: none;
+    color: var(--wiki-color-text-secondary);
+    font-size: 11px;
+  }
+}
+button.body {
+  min-height: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+.remove {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  min-height: 0;
+  padding: 0;
+  align-self: stretch;
+  color: var(--wiki-color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 0 8px 8px 0;
+  cursor: pointer;
+  &:hover {
+    color: var(--wiki-color-text-primary);
+    background-color: var(--wiki-color-surface-hover);
+  }
+}
+// 한도 때문에 앞부분만 담긴 첨부입니다.
+.partial {
+  border-color: var(--wiki-color-status-warning);
+  background-color: var(--wiki-color-status-warning-surface);
+  .body small {
+    color: var(--wiki-color-status-warning);
+  }
+}
+.preview {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--wiki-space-8) var(--wiki-space-12);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-surface-subtle);
+  font: inherit;
+  font-size: var(--wiki-font-size-12);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+// 형식 배지: 칩 앞에서 TXT·PDF·XLSX처럼 종류를 한눈에 알립니다.
+.badge,
+.badgeSheet {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: var(--wiki-font-family-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}
+.badge {
+  background-color: var(--wiki-color-action-surface);
+  color: var(--wiki-color-action-primary);
+}
+.badgeSheet {
+  background-color: var(--wiki-color-status-success-surface);
+  color: var(--wiki-color-status-success);
+}

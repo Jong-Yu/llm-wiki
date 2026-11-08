@@ -1,0 +1,299 @@
+@use '../../../shared/ui/button';
+.form,
+.fields {
+  min-width: 0;
+}
+.fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.tabs {
+  display: flex;
+  gap: var(--wiki-space-16);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  button {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    padding: var(--wiki-space-7) 0;
+    min-height: var(--wiki-component-control-height);
+    background: transparent;
+    color: var(--wiki-color-text-secondary);
+    font: inherit;
+    line-height: var(--wiki-component-control-line-height);
+    cursor: pointer;
+    &[aria-pressed='true'] {
+      border-bottom-color: var(--wiki-color-action-primary);
+      color: var(--wiki-color-text-primary);
+      font-weight: 600;
+    }
+    &:hover:not(:disabled) {
+      color: var(--wiki-color-text-primary);
+    }
+  }
+}
+.field {
+  display: grid;
+  gap: var(--wiki-space-6);
+  label {
+    font-weight: 600;
+  }
+  input,
+  textarea {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--wiki-color-border-control);
+    border-radius: var(--wiki-component-control-radius);
+    background: var(--wiki-color-surface-canvas);
+    color: var(--wiki-color-text-primary);
+    padding: var(--wiki-space-7) var(--wiki-space-12);
+    font: inherit;
+  }
+  input {
+    min-height: var(--wiki-component-control-height);
+    line-height: var(--wiki-component-control-line-height);
+  }
+  textarea {
+    min-height: 16rem;
+    resize: vertical;
+    line-height: 1.6;
+  }
+  input[aria-invalid='true'],
+  textarea[aria-invalid='true'] {
+    border-color: var(--wiki-color-status-danger);
+  }
+  small {
+    color: var(--wiki-color-text-secondary);
+    font-size: var(--wiki-font-size-12);
+  }
+}
+.dropZone {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--wiki-space-12);
+  padding: var(--wiki-space-16) 0;
+  border-block: 1px solid var(--wiki-color-border-default);
+  h3 {
+    margin: 0;
+    font-size: var(--wiki-font-size-13);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  p {
+    margin: 0;
+  }
+  small,
+  p {
+    color: var(--wiki-color-text-secondary);
+    font-size: var(--wiki-font-size-12);
+  }
+  > .error {
+    grid-column: 2 / -1;
+  }
+}
+.fileContent {
+  display: grid;
+  gap: var(--wiki-space-4);
+  min-width: 0;
+}
+.uploadIcon {
+  color: var(--wiki-color-text-secondary);
+}
+.button {
+  @include button.base;
+  @include button.surface;
+}
+.primary {
+  @include button.base;
+  @include button.primary;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--wiki-space-8);
+  margin-top: var(--wiki-space-16);
+}
+.caption {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+  margin-right: auto;
+}
+.notice {
+  padding: var(--wiki-space-12) 0;
+  margin-bottom: var(--wiki-space-16);
+  font-size: var(--wiki-font-size-13);
+  overflow-wrap: anywhere;
+  h2 {
+    font-size: var(--wiki-font-size-14);
+    margin: 0 0 var(--wiki-space-8);
+  }
+  p {
+    margin: 0;
+    line-height: var(--wiki-component-control-line-height);
+  }
+  p + p {
+    margin-top: var(--wiki-space-8);
+  }
+  > a {
+    color: var(--wiki-color-action-primary);
+    margin-left: var(--wiki-space-12);
+  }
+  > button {
+    margin-top: var(--wiki-space-12);
+  }
+}
+.errorNotice {
+  border-left: 2px solid var(--wiki-color-status-danger);
+  padding-inline: var(--wiki-space-12);
+  background: var(--wiki-color-status-danger-surface);
+  h2 {
+    color: var(--wiki-color-status-danger);
+  }
+}
+.warning {
+  background: var(--wiki-color-status-warning-surface);
+  color: var(--wiki-color-status-warning);
+  border-left: 2px solid var(--wiki-color-status-warning);
+  padding-inline: var(--wiki-space-12);
+}
+.error,
+.field .error,
+.dropZone .error {
+  color: var(--wiki-color-status-danger);
+  font-size: var(--wiki-font-size-12);
+}
+.pending {
+  color: var(--wiki-color-text-secondary);
+}
+.result {
+  min-width: 0;
+  > h2 {
+    font-size: var(--wiki-font-size-20);
+    line-height: 1.4;
+    font-weight: 600;
+    margin: var(--wiki-space-8) 0;
+  }
+  > p {
+    margin: 0 0 var(--wiki-space-24);
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.report {
+  margin: 0;
+  font-size: var(--wiki-font-size-12);
+  overflow-wrap: anywhere;
+  summary {
+    cursor: pointer;
+    color: var(--wiki-color-text-primary);
+    padding-block: var(--wiki-space-8);
+  }
+  form {
+    display: grid;
+    gap: var(--wiki-space-16);
+    margin-top: var(--wiki-space-12);
+    > button {
+      justify-self: start;
+    }
+  }
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 20rem;
+    overflow: auto;
+    padding: var(--wiki-space-12);
+    background: var(--wiki-color-surface-subtle);
+    font: var(--wiki-font-size-12) / 1.5 var(--wiki-font-family-mono);
+  }
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.form :focus-visible,
+.result :focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
+}
+.result [data-workspace-section] .actions {
+  justify-content: flex-start;
+  margin-top: 0;
+}
+.result [data-workspace-section] .notice {
+  margin: 0;
+}
+.report + .report {
+  border-top: 1px solid var(--wiki-color-border-default);
+  padding-top: var(--wiki-space-12);
+}
+@container workspace (width < 560px) {
+  .dropZone {
+    grid-template-columns: auto minmax(0, 1fr);
+    > button {
+      grid-column: 2;
+      justify-self: start;
+    }
+  }
+  .actions {
+    justify-content: flex-start;
+  }
+  .caption {
+    width: 100%;
+  }
+}
+
+.resultLinks {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8) var(--wiki-space-16);
+}
+.resultLinks a {
+  border-color: transparent;
+  padding-inline: 0;
+  color: var(--wiki-color-action-primary);
+}
+
+.stepList {
+  list-style: none;
+  margin: var(--wiki-space-16) 0;
+  padding: 0;
+  display: grid;
+  gap: var(--wiki-space-8);
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--wiki-space-8);
+    font-size: var(--wiki-font-size-14);
+    color: var(--wiki-color-text-secondary);
+  }
+  li[data-state='done'] {
+    color: var(--wiki-color-text-primary);
+    svg {
+      color: var(--wiki-color-status-success);
+    }
+  }
+  li[data-state='active'] {
+    color: var(--wiki-color-text-primary);
+    font-weight: 600;
+    svg {
+      color: var(--wiki-color-action-primary);
+    }
+  }
+  li[data-state='failed'] svg {
+    color: var(--wiki-color-status-danger);
+  }
+  small {
+    font-size: var(--wiki-font-size-12);
+    color: var(--wiki-color-text-secondary);
+  }
+}

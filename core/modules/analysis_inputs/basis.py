@@ -128,12 +128,15 @@ def expected_after_saves(service, job, fixed):
         next_value = {**previous, "status": "captured", "source_revision": receipt["source_revision"]}
         if payload["stage"] == "prepare_wiki":
             entry = receipt.get("history_entry")
+            audit_added = receipt.get("authorship_entry_created", False)
+            if audit_added:
+                history_entries[document].append("changes.json")
             needs_history = previous["source_revision"] is not None and receipt["changed"]
             if needs_history:
                 if type(entry) is not str or not entry or "/" in entry or "\\" in entry:
                     raise limits.InputConflictError("analysis_basis_changed")
                 history_entries[document].append(entry)
-            elif entry is not None or receipt["history_revision"] != previous["history_revision"]:
+            elif entry is not None or (not audit_added and receipt["history_revision"] != previous["history_revision"]):
                 raise limits.InputConflictError("analysis_basis_changed")
             next_value["history_revision"] = receipt["history_revision"]
         elif payload["stage"] == "extract_ontology":

@@ -6,6 +6,15 @@
 from typing import Literal
 from pydantic import Field, JsonValue, field_validator
 from core.api.schemas import Access, Model
+from core.api.v1.analysis_plans.schemas import SourceRef as RegistrationSourceRef, ConversionRef
+
+
+class CreateRegistration(Model):
+    request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    source_ref: RegistrationSourceRef
+    document: str = Field(min_length=1, max_length=4096)
+    title: str = Field(min_length=1, max_length=200)
+    conversion_ref: ConversionRef | None = None
 
 
 class EmptyQuery(Model):
@@ -63,6 +72,8 @@ class Target(Model):
 # 서버 상태(state), CLI의 자기보고(reported_status), 사용권(lease), 실제 결과(result_summary)를 나눠 표현한다.
 class Job(Model):
     schema_version: Literal[1]
+    registration: dict[str, JsonValue] | None = None
+    conversion: dict[str, JsonValue] | None = None
     job_id: str
     tenant: str
     user_id: str

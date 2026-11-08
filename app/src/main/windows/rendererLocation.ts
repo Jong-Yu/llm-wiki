@@ -24,3 +24,28 @@ export function isRendererLocation(url: string, expected: string): boolean {
     return false;
   }
 }
+
+/** 하위 프레임은 앱에 포함한 두 가이드 문서만 탐색할 수 있습니다. */
+export function isUserGuideLocation(url: string, renderer: string): boolean {
+  try {
+    const location = new URL(url);
+    location.hash = '';
+    return ['index.html', 'reference.html'].some(
+      (page: string): boolean =>
+        location.href === new URL(`user-guide/${page}`, renderer).href,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 앱 본문과 가이드 하위 프레임의 허용 문서를 서로 섞지 않습니다. */
+export function isWindowFrameLocation(
+  url: string,
+  renderer: string,
+  mainFrame: boolean,
+): boolean {
+  return mainFrame
+    ? isRendererLocation(url, renderer)
+    : isUserGuideLocation(url, renderer);
+}

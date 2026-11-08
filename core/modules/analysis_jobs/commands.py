@@ -7,6 +7,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from core.common.json_codec import canonical_json_hash
+from core.common.storage_layout import analysis_job_root, analysis_request_root, personal_root
 from core.modules.reviews.store import ReviewStore
 from core.modules.sources import files
 from . import contracts as limits, queries, records
@@ -45,7 +46,7 @@ def result(record, *, replayed=False, confirmed=False):
 
 
 def create(self, *, tenant, user_id, request_id, source_id, source_version, source_sha256,
-           expected_registration_revision, targets, outputs, authorize, plan_ref=None):
+           expected_registration_revision, targets, outputs, authorize, plan_ref=None, registration=None):
     # 요청을 원본·대상 문서 기준에 묶어 접수한다. 이미 같은 요청이 있으면 기존 결과를 돌려준다.
     for identifier in (request_id, source_id, source_version):
         limits.identifier(identifier)
@@ -53,6 +54,12 @@ def create(self, *, tenant, user_id, request_id, source_id, source_version, sour
     records.validate_targets(self, targets, outputs)
     payload = {"source_id": source_id, "source_version": source_version, "source_sha256": source_sha256,
                "expected_registration_revision": expected_registration_revision, "targets": targets, "outputs": outputs}
+    if registration is not None:
+        from .registration import validate
+        validate(registration)
+        if plan_ref is not None or len(targets) != 1 or outputs != ["wiki", "ontology"]:
+            raise JobValidationError("A registration creates exactly one Markdown and its ontology.")
+        payload["registration"] = registration
     # 옛 호출은 기존 지문을 그대로 유지하고, 계획 인계만 정확한 계획/목표를 요청에 결합한다.
     if plan_ref is not None:
         if type(plan_ref) is not dict or set(plan_ref) != {"plan_id", "plan_revision", "document"}:
@@ -87,12 +94,13 @@ def create(self, *, tenant, user_id, request_id, source_id, source_version, sour
         source_request = self.sources._request_path(tenant, user_id, request_id)
         if files.checked(self.store, source_request).exists():
             raise JobConflictError("request_conflict", request_id=request_id)
-        jobs = files.entries(self.store, self.jobs_dir, maximum=limits.MAX_JOBS + 3)
-        if any(name not in {"_owners", "_requests"} and not limits.ID.fullmatch(name) for name in jobs):
+        jobs = files.entries(self.store, personal_root(self.store.data_dir, user_id) / "analysis", maximum=limits.MAX_JOBS + 1)
+        if any(not limits.ID.fullmatch(name) for name in jobs):
             raise limits.JobCorruptError("The job registry contains an unexpected entry.")
-        if len([name for name in jobs if not name.startswith("_")]) >= limits.MAX_JOBS:
+        old_jobs = files.entries(self.store, self.jobs_dir / "_owners" / records.owner_key(tenant, user_id), maximum=limits.MAX_JOBS + 1)
+        if len(jobs) + len(old_jobs) >= limits.MAX_JOBS:
             raise JobLimitError("The job count limit was reached.")
-        requests = files.entries(self.store, self.jobs_dir / "_requests", maximum=limits.MAX_JOBS + 1)
+        requests = files.entries(self.store, analysis_request_root(self.store.data_dir, user_id), maximum=limits.MAX_JOBS + 1)
         if len(requests) >= limits.MAX_JOBS:
             raise JobLimitError("The job request count limit was reached.")
         catalog = self.sources._get_source_locked(source_id)
@@ -100,9 +108,10 @@ def create(self, *, tenant, user_id, request_id, source_id, source_version, sour
         source = {"source_id": source_id, "source_version": source_version, "source_sha256": source_sha256,
                   "size_bytes": current["size_bytes"], "registration_revision": expected_registration_revision}
         check_basis(self, source)
-        if current["format"] not in {"md", "txt"}:
+        if current["format"] not in {"md", "txt"} and registration is None:
             raise JobValidationError("Binary originals require a fixed conversion and analysis-plan handoff")
-        with files.verify_original(self.store, self.sources.sources_dir / source_id / source_version / "original", current):
+        from .registration import original_path
+        with files.verify_original(self.store, original_path(self.sources, source_id, source_version), current):
             pass
         captured = []
         # 기존 대상은 본문/검토 상태를, 신규 대상은 부재(None)를 시작 기준으로 남긴다.
@@ -113,12 +122,20 @@ def create(self, *, tenant, user_id, request_id, source_id, source_version, sour
                                  "state_revision": snapshot["state_revision"]})
             except FileNotFoundError:
                 captured.append({"document": document, "source_revision": None, "state_revision": None})
+        if registration is not None and any(target["source_revision"] is not None for target in captured):
+            raise JobConflictError("document_exists")
         now, job_id = self._now(), uuid4().hex
+        self._job_paths[job_id] = analysis_job_root(self.store.data_dir, user_id, job_id)
         job = {"schema_version": 1, "job_id": job_id, "tenant": tenant, "user_id": user_id,
                "request_id": request_id, "payload_hash": digest, "actor": actor, "created_at": now.isoformat(),
                "source_ref": source, "targets": captured, "outputs": list(outputs), "state": "awaiting_cli",
                "run_id": None, "reported_status": None, "message": "", "events": [event("created", actor, now,
-                   **({"analysis_plan": plan_ref} if plan_ref is not None else {}))]}
+                   **({"analysis_plan": plan_ref} if plan_ref is not None else {}),
+                   **({"registration": registration} if registration is not None else {}))]}
+        conversion = None
+        if registration is not None:
+            from .registration import materialize
+            _, conversion = materialize(self, job, actor)
         record = {"operation": "analysis_job_create", "tenant": tenant, "user_id": user_id,
                   "request_id": request_id, "payload_hash": digest, "job_id": job_id,
                   "job_revision": canonical_json_hash(job), "state": "pending_reconcile", "job": job}
@@ -126,6 +143,8 @@ def create(self, *, tenant, user_id, request_id, source_id, source_version, sour
         try:
             # 접수 근거 → 소유 인덱스 → 작업 상태 → 완료 영수증 순서로 쓴다.
             self._write(records.owner_path(self, tenant, user_id, job_id), {"job_id": job_id, "tenant": tenant, "user_id": user_id})
+            if conversion is not None:
+                self._write(self.job_root(job_id) / "conversion.json", conversion)
             self._write(records.state_path(self, job_id), job)
             complete = {**record, "state": "complete"}
             self._write_request(path, complete)
@@ -140,6 +159,8 @@ def opened(self, job_id, tenant, user_id, authorize, expected=None, *, check_sou
     # 다른 변경 함수가 공통으로 사용하는 확인 단계다. 이미 잠금을 잡은 호출자가 사용한다.
     actor = records.authorized(authorize, tenant, user_id)
     job = records.owned_state(self, job_id, tenant, user_id)
+    if check_source_basis:
+        records.check_access(job["actor"], actor)
     if expected is not None:
         limits.revision(expected)
         if canonical_json_hash(job) != expected:
@@ -201,7 +222,7 @@ def claim(self, job_id, *, tenant, user_id, expected_job_revision, authorize, re
             raise JobValidationError("An unclaimed job does not require reclaim.")
         if len(job["events"]) >= limits.MAX_EVENTS:
             raise JobLimitError("The job event limit was reached.")
-        leases = files.entries(self.store, self.jobs_dir / job_id / "leases", maximum=limits.MAX_RUNS + 1)
+        leases = files.entries(self.store, self.job_root(job_id) / "leases", maximum=limits.MAX_RUNS + 1)
         if len(leases) >= limits.MAX_RUNS:
             raise JobLimitError("The job run count limit was reached.")
         if any(not name.endswith(".json") or not limits.ID.fullmatch(name[:-5]) for name in leases):
@@ -215,7 +236,7 @@ def claim(self, job_id, *, tenant, user_id, expected_job_revision, authorize, re
                                   run_id=run_id, previous_run_id=job["run_id"])
         records.preflight(lease)
         # 두 파일의 한도를 모두 먼저 검사해 실패한 claim마다 불필요한 lease가 쌓이지 않게 한다.
-        self._write(self.jobs_dir / job_id / "leases" / (run_id + ".json"), lease)
+        self._write(self.job_root(job_id) / "leases" / (run_id + ".json"), lease)
         self._write(records.state_path(self, job_id), candidate)
         return queries.project(self, candidate)
 
@@ -233,7 +254,7 @@ def heartbeat(self, job_id, *, tenant, user_id, run_id, expected_lease_revision,
         now = self._now(); expiry = (now + timedelta(seconds=limits.LEASE_SECONDS)).isoformat()
         value = {**lease, "expires_at": expiry, "events": [*lease["events"],
             {"event_id": uuid4().hex, "actor": actor, "timestamp": now.isoformat(), "expires_at": expiry}]}
-        self._write(self.jobs_dir / job_id / "leases" / (run_id + ".json"), value)
+        self._write(self.job_root(job_id) / "leases" / (run_id + ".json"), value)
         return queries.project(self, job)
 
 

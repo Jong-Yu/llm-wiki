@@ -1,12 +1,16 @@
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, screen, shell } from 'electron';
 import type {
   Event,
   WebContentsWillFrameNavigateEventParams,
   WebContentsWillRedirectEventParams,
   WindowOpenHandlerResponse,
+  HandlerDetails,
 } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { isRendererLocation } from './rendererLocation';
+import appIcon from '../../../design/brand/llm-wiki-icon.png?asset';
+import windowsIcon from '../../../design/brand/llm-wiki-icon.ico?asset';
+import { isRendererLocation, isWindowFrameLocation } from './rendererLocation';
+import { isPublicWebUrl } from '@contracts/webEvidence.contract';
 
 /** 창 수명과 탐색 경계만 관리하며 자료 서비스나 파일 저장을 시작하지 않습니다. */
 export function createAppWindow(rendererLocation: string): BrowserWindow {
@@ -24,6 +28,7 @@ export function createAppWindow(rendererLocation: string): BrowserWindow {
     minWidth: Math.min(960, workArea.width),
     minHeight: Math.min(640, workArea.height),
     title: 'LLM Wiki',
+    icon: process.platform === 'win32' ? windowsIcon : appIcon,
     show: false,
     webPreferences: {
       preload: fileURLToPath(new URL('../preload/index.cjs', import.meta.url)),
@@ -34,20 +39,31 @@ export function createAppWindow(rendererLocation: string): BrowserWindow {
     },
   });
 
-  window.webContents.setWindowOpenHandler((): WindowOpenHandlerResponse => ({
-    action: 'deny',
-  }));
+  window.webContents.setWindowOpenHandler(
+    (details: HandlerDetails): WindowOpenHandlerResponse => {
+      // 웹 근거의 명시 링크는 기본 브라우저에 열고 앱 창의 외부 탐색은 계속 막습니다.
+      if (
+        isRendererLocation(window.webContents.getURL(), rendererLocation) &&
+        isPublicWebUrl(details.url)
+      )
+        void shell.openExternal(details.url).catch((): void => {});
+      return { action: 'deny' };
+    },
+  );
   window.webContents.on(
     'will-frame-navigate',
     (event: Event<WebContentsWillFrameNavigateEventParams>): void => {
-      if (!isRendererLocation(event.url, rendererLocation))
+      if (
+        !isWindowFrameLocation(event.url, rendererLocation, event.isMainFrame)
+      )
         event.preventDefault();
     },
   );
   window.webContents.on(
     'will-redirect',
     (event: Event<WebContentsWillRedirectEventParams>, url: string): void => {
-      if (!isRendererLocation(url, rendererLocation)) event.preventDefault();
+      if (!isWindowFrameLocation(url, rendererLocation, event.isMainFrame))
+        event.preventDefault();
     },
   );
   window.once('ready-to-show', (): void => window.show());

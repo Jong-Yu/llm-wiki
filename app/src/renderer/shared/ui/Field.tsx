@@ -58,16 +58,16 @@ export function Field({
           </span>
         ) : null}
       </label>
-      {hasDescription ? (
-        <div id={descriptionId} className={styles.description}>
-          {description}
-        </div>
-      ) : null}
       {children({
         id: controlId,
         'aria-describedby': descriptionIds,
         'aria-invalid': hasError ? true : invalid,
       })}
+      {hasDescription ? (
+        <div id={descriptionId} className={styles.description}>
+          {description}
+        </div>
+      ) : null}
       {hasError ? (
         <div id={errorId} className={styles.error}>
           {error}

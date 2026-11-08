@@ -158,7 +158,7 @@ def _range(value, lines):
 def source_text(manifest, components, payload):
     """단계가 고정한 증거 원문을 반환한다. 참고 문서로 대체하지 않는다."""
     if manifest["stage"] == "prepare_wiki":
-        return components["data/extraction.txt"]
+        return components.get("data/registration.md", components.get("data/extraction.txt", ""))
     context = json.loads(components["data/context.json"])
     return next(item["source"]["content"] for item in context["documents"] if item["document"] == payload["document"])
 

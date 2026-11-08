@@ -1,8 +1,8 @@
+import { sameAccessRevision } from '@contracts/connection.contract';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
-import { dialog } from 'electron';
 import type { BrowserWindow, OpenDialogOptions } from 'electron';
 import { z } from 'zod';
 import type {
@@ -23,7 +23,7 @@ import {
   readWorkspaceJsonBody,
   workspaceHttpFailure,
 } from './WorkspaceApiService';
-import { apiFailure, readApiJson } from './readApi';
+import { apiFailure, readApiJson, matchesExpectedScope } from './readApi';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const id = z.string().regex(/^[a-f0-9]{32}$/);
@@ -35,6 +35,14 @@ const accessSchema = z.object({
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
   policy_revision: revision,
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 const envelopeSchema = z.object({
   data: knowledgeValueSchema,
@@ -83,15 +91,6 @@ function changed(): Failure {
     '연결 또는 작업 공간이 변경되었습니다. 현재 범위에서 다시 선택해 주세요.',
   );
 }
-/** 표시 중인 과거 범위는 권한이 아니라 현재 선택과 비교하는 기준입니다. */
-function matches(scope: WorkspaceScope, context: AnalysisContext): boolean {
-  return (
-    scope.userId === context.active.userId &&
-    scope.tenant === context.selection.tenant &&
-    scope.profileId === context.selection.profile &&
-    scope.policyRevision === context.active.policyRevision
-  );
-}
 /** 응답 유실은 실패로 확정하지 않고 같은 요청의 영수증 확인을 요구합니다. */
 function unknownOutcome(): Failure {
   return {
@@ -131,7 +130,7 @@ export class ArtifactService {
   ): Promise<AnalysisContext | Failure> {
     const context = await this.#connection.analysisContext(connectionId);
     if ('ok' in context) return context;
-    if (!matches(scope, context)) return changed();
+    if (!matchesExpectedScope(scope, context)) return changed();
     const workspace = context.active.workspaces.find(
       (value: AnalysisContext['active']['workspaces'][number]): boolean =>
         value.id === context.selection.tenant,
@@ -171,6 +170,7 @@ export class ArtifactService {
         title: '산출물 파일 선택',
         properties: ['openFile'],
       };
+      const { dialog } = await import('electron');
       const selection = parent
         ? await dialog.showOpenDialog(parent, options)
         : await dialog.showOpenDialog(options);
@@ -257,7 +257,13 @@ export class ArtifactService {
       if (
         job.access.user_id !== context.active.userId ||
         job.access.tenant !== context.selection.tenant ||
-        job.access.policy_revision !== context.active.policyRevision ||
+        !sameAccessRevision(
+          {
+            policyRevision: job.access.policy_revision,
+            accessRevision: job.access.access_revision,
+          },
+          context.active,
+        ) ||
         job.user_id !== context.active.userId ||
         job.tenant !== context.selection.tenant ||
         job.job_id !== request.jobId
@@ -318,7 +324,7 @@ export class ArtifactService {
           error: {
             code: 'input_basis_changed',
             message:
-              '원본 읽기 입력을 준비한 관점과 현재 관점이 다릅니다. 입력을 준비한 관점으로 전환하거나 현재 관점에서 새 입력을 준비해 주세요.',
+              '원본 읽기 입력을 준비한 조회 기준이 변경되었습니다. 현재 작업 공간에서 새 입력을 준비해 주세요.',
             status: 409,
             retry: 'reconcile',
           },
@@ -382,7 +388,13 @@ export class ArtifactService {
       access.profile_id !== context.selection.profile ||
       access.domain !== profile.domain ||
       access.viewpoint !== profile.viewpoint ||
-      access.policy_revision !== context.active.policyRevision
+      !sameAccessRevision(
+        {
+          policyRevision: access.policy_revision,
+          accessRevision: access.access_revision,
+        },
+        context.active,
+      )
     ) {
       this.#connection.invalidateApiScope('scope_changed');
       return unknownOutcome();
@@ -422,6 +434,9 @@ export class ArtifactService {
           domain: access.domain,
           viewpoint: access.viewpoint,
           policyRevision: access.policy_revision,
+          ...(access.access_revision
+            ? { accessRevision: access.access_revision }
+            : {}),
         },
         traceId: parsed.meta.trace_id,
       },
@@ -740,6 +755,7 @@ export class ArtifactService {
         title: '산출물 내려받기',
         defaultPath: request.filename,
       };
+      const { dialog } = await import('electron');
       const destination = parent
         ? await dialog.showSaveDialog(parent, options)
         : await dialog.showSaveDialog(options);

@@ -1,3 +1,5 @@
+import type { ConnectionResult } from '@contracts/connection.contract';
+import { sameAccessRevision } from '@contracts/connection.contract';
 import type { AnalysisContext, ConnectionService } from './ConnectionService';
 import type { ProtectedRecoveryStore } from './ProtectedRecoveryStore';
 import type { RecoveryScope } from './ProtectedRecoveryStore';
@@ -10,7 +12,12 @@ import type {
 
 type Connection = Pick<
   ConnectionService,
-  'analysisContext' | 'isAnalysisCurrent'
+  'analysisContext' | 'isAnalysisCurrent' | 'getState'
+>;
+/** 저장 구현만 교체할 수 있으며 범위·판본 검사는 복구 서비스가 계속 소유합니다. */
+export type RecoveryStore = Pick<
+  ProtectedRecoveryStore,
+  'list' | 'put' | 'forgetIdentity'
 >;
 /** 인증된 main 문맥의 비밀 없는 값만 저장 기준으로 복사합니다. */
 function recoveryScope(context: AnalysisContext): RecoveryScope {
@@ -29,6 +36,9 @@ function recoveryScope(context: AnalysisContext): RecoveryScope {
     tenant: context.selection.tenant,
     profileId: profile.id,
     policyRevision: context.active.policyRevision,
+    ...(context.active.accessRevision
+      ? { accessRevision: context.active.accessRevision }
+      : {}),
     domain: profile.domain,
     viewpoint: profile.viewpoint,
   };
@@ -54,8 +64,8 @@ export class RecoveryService {
     );
   }
   readonly connection: Connection;
-  readonly store: ProtectedRecoveryStore;
-  constructor(connection: Connection, store: ProtectedRecoveryStore) {
+  readonly store: RecoveryStore;
+  constructor(connection: Connection, store: RecoveryStore) {
     this.connection = connection;
     this.store = store;
   }
@@ -71,7 +81,7 @@ export class RecoveryService {
       expected.userId !== context.active.userId ||
       expected.tenant !== context.selection.tenant ||
       expected.profileId !== context.selection.profile ||
-      expected.policyRevision !== context.active.policyRevision
+      !sameAccessRevision(expected, context.active)
     )
       return failure('scope_changed');
     if (request.operation === 'list')
@@ -120,6 +130,9 @@ export class RecoveryService {
         tenant: context.selection.tenant,
         profileId: context.selection.profile,
         policyRevision: context.active.policyRevision,
+        ...(context.active.accessRevision
+          ? { accessRevision: context.active.accessRevision }
+          : {}),
       },
       kind,
       key,
@@ -164,13 +177,42 @@ export class RecoveryService {
       (): boolean => this.#current(context),
     );
   }
-  /** 앱 종료·계정 전환과 구별한 명시 로그아웃 삭제입니다. */
-  async forgetCurrent(connectionId: string): Promise<RecoveryResult> {
-    const context = await this.connection.analysisContext(connectionId);
-    if ('ok' in context) return context;
-    this.#forgottenConnections.add(connectionId);
-    return this.store.forgetIdentity(recoveryScope(context), (): boolean =>
-      this.connection.isAnalysisCurrent(context),
-    );
+  /** 로그아웃 전 신원을 고정하고 네트워크 없이 복구 파일을 정리합니다. */
+  async forgetLocal(context: AnalysisContext): Promise<RecoveryResult> {
+    this.#forgottenConnections.add(context.active.connectionId);
+    return this.store.forgetIdentity(recoveryScope(context), (): boolean => {
+      const state = this.connection.getState();
+      return state.ok && state.data.status === 'disconnected';
+    });
   }
+}
+
+/** 로컬 정리 실패가 메모리 해제·자동 복원 차단을 되돌리지 않게 합니다. */
+export async function logoutWithRecovery(
+  connection: ConnectionService,
+  recovery: RecoveryService,
+): Promise<ConnectionResult> {
+  const local = connection.localContext();
+  const result = await connection.logout();
+  if (!result.ok || !local) return result;
+  let cleaned = false;
+  try {
+    cleaned = (await recovery.forgetLocal(local)).ok;
+  } catch {
+    /* 로그아웃은 이미 완료되었습니다. */
+  }
+  const state = connection.getState();
+  if (state.ok && state.data.status !== 'disconnected')
+    return {
+      ok: false,
+      error: {
+        code: 'superseded',
+        message: '새 계정 연결로 이전 로그아웃 응답을 버렸습니다.',
+      },
+    };
+  return cleaned
+    ? state
+    : connection.setLogoutWarning(
+        '로그아웃은 완료했습니다. 로컬 복구 자료 정리에 실패해 보호된 파일은 남아 있습니다.',
+      );
 }

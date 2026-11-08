@@ -1,0 +1,40 @@
+.root {
+  width: 100%;
+  min-width: 0;
+  color: var(--wiki-color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.root[hidden] {
+  display: none !important;
+}
+
+.root[data-standalone] {
+  padding: var(--wiki-space-24);
+}
+@container workspace (width < 900px) {
+  .root[data-standalone] {
+    padding: var(--wiki-space-16);
+  }
+}
+
+.heading h2 {
+  margin: 0;
+  font-size: var(--wiki-font-size-20);
+  font-weight: var(--wiki-font-weight-semibold);
+  line-height: var(--wiki-font-line-height-heading);
+}
+
+.heading {
+  display: grid;
+  gap: var(--wiki-space-12);
+  margin-bottom: var(--wiki-space-24);
+  min-width: 0;
+  > button {
+    justify-self: start;
+  }
+}
+
+.body {
+  min-width: 0;
+}

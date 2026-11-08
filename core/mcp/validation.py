@@ -2,9 +2,11 @@
 
 # AI가 보낸 인자를 SDK가 자동 보정하기 전에 확인한다. JSON null과 문자열 "null"은 다르다.
 # 저장 기준 버전이 의도치 않게 신규 생성으로 바뀌지 않게 하며, 실제 인용/저장 검사는 업무 모듈에 맡긴다.
+import json
 import re
 
 from mcp.types import CallToolResult
+from pydantic import ValidationError
 
 from core.mcp.results import _result
 from core.mcp.schemas import CONCEPT_TOOLS, CORRESPONDENCE_TOOLS, REVISION_PATTERN
@@ -13,6 +15,18 @@ from core.mcp.schemas import CONCEPT_TOOLS, CORRESPONDENCE_TOOLS, REVISION_PATTE
 _CORRESPONDENCE_MUTATIONS = CORRESPONDENCE_TOOLS - {
     "ontology_correspondence_query", "ontology_correspondence_find", "ontology_correspondence_prepare",
 }
+
+
+def validate_model_arguments(name, arguments, models, *, maximum):
+    """도구별 모델을 적용하고 SDK 처리 전 원래 JSON의 UTF-8 크기를 검사한다."""
+    model = models.get(name)
+    if model is None:
+        return True
+    try:
+        model.model_validate(arguments)
+        return len(json.dumps(arguments, ensure_ascii=False, allow_nan=False).encode("utf-8")) <= maximum
+    except (ValidationError, ValueError, TypeError, UnicodeError, RecursionError):
+        return False
 
 
 def _concept_argument_error(name: str, arguments: dict) -> str | None:
@@ -112,110 +126,156 @@ def _correspondence_argument_error(name: str, arguments: dict) -> str | None:
     return None
 
 
+def _is_revision(value):
+    return isinstance(value, str) and re.fullmatch(REVISION_PATTERN, value) is not None
+
+
+def _is_string(value):
+    return isinstance(value, str)
+
+
+def _is_object(value):
+    return isinstance(value, dict)
+
+
+def _objects(value):
+    return isinstance(value, list) and all(isinstance(item, dict) for item in value)
+
+
+def _strings(value):
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _schema_version(value):
+    return type(value) is int and value in (3, 4, 5, 6)
+
+
+def _response_mode(value):
+    return type(value) is str and value in {"full", "compact"}
+
+
+def _impact_baseline(value):
+    fields = {"source_revision", "graph_revision", "review_revision", "history_revision"}
+    return (isinstance(value, dict) and value.keys() == fields
+            and all((item is None and key in {"graph_revision", "review_revision"}) or _is_revision(item)
+                    for key, item in value.items()))
+
+
+_STATE_MESSAGE = "expected_state_revision must be the SHA-256 from ontology_review_query."
+_WIKI_REVISION_MESSAGE = "expected_revision must be JSON null or the 64-character SHA-256 from wiki_read."
+_SOURCE_REVISION_MESSAGE = "expected_revision must be the 64-character SHA-256 from wiki_read."
+_SCHEMA_MESSAGE = "schema_version must be the JSON integer 3, 4, 5 or 6."
+_COLLECTION_MESSAGE = "Ontology collections must be JSON arrays of objects."
+_QUALIFIER_MESSAGE = "qualifiers must be a JSON object, not encoded JSON text or null."
+_FILTER_MESSAGE = "Ontology filters must be strings; omit a filter to leave it unset."
+_REPLACEMENT_MESSAGE = "replacement must be a complete JSON claim object, not encoded JSON text."
+
+# 순서는 기존 첫 오류의 우선순위다. required는 누락도 검사하며 optional은 명시 null을
+# 검사한다. nullable만 누락과 JSON null을 함께 허용한다. 문자열 "null"은 여기에 포함되지 않는다.
+_FILTER_RULES = (("domain", "optional", _is_string, _FILTER_MESSAGE),
+                 ("viewpoint", "optional", _is_string, _FILTER_MESSAGE))
+_STATE_RULE = ("expected_state_revision", "required", _is_revision, _STATE_MESSAGE)
+_RAW_FIELD_RULES = {
+    "ontology_review": (_STATE_RULE, ("replacement", "nullable", _is_object, _REPLACEMENT_MESSAGE)),
+    "ontology_review_undo": (_STATE_RULE,),
+    "ontology_policy": (_STATE_RULE,
+        ("replacement", "optional", _is_object, _REPLACEMENT_MESSAGE),
+        ("entities", "nullable", _objects, "entities must be a JSON array of new concept objects.")),
+    "ontology_policy_undo": (_STATE_RULE,),
+    "ontology_query": _FILTER_RULES,
+    "ontology_review_query": _FILTER_RULES,
+    "ontology_context": (*_FILTER_RULES,
+        ("documents", "optional", _strings, "documents must be a JSON array of relative Markdown paths.")),
+    "ontology_impact": (("baseline", "nullable", _impact_baseline,
+        "baseline must contain exactly source_revision, graph_revision, review_revision and history_revision SHA-256 values; only graph/review revisions may be null."),
+        *_FILTER_RULES),
+    "wiki_write": (("expected_revision", "nullable", _is_revision, _WIKI_REVISION_MESSAGE),),
+    "ontology_generate": (
+        ("expected_state_revision", "nullable", _is_revision, _STATE_MESSAGE),
+        ("schema_version", "optional", _schema_version, _SCHEMA_MESSAGE),
+        ("expected_revision", "required", _is_revision, _SOURCE_REVISION_MESSAGE),
+        ("entities", "optional", _objects, _COLLECTION_MESSAGE),
+        ("relations", "optional", _objects, _COLLECTION_MESSAGE),
+        ("relation_candidates", "optional", _objects, _COLLECTION_MESSAGE),
+        ("attributes", "optional", _objects, _COLLECTION_MESSAGE)),
+}
+_RESPONSE_MODE_RULES = (("response_mode", "optional", _response_mode, "response_mode must be full or compact."),)
+_MESSAGE_FIRST_ERRORS = {_WIKI_REVISION_MESSAGE, _SOURCE_REVISION_MESSAGE, _SCHEMA_MESSAGE,
+                         _COLLECTION_MESSAGE, _QUALIFIER_MESSAGE}
+
+
+def _field_argument_error(arguments, rules):
+    for field, presence, check, message in rules:
+        value = arguments.get(field)
+        if presence == "optional" and field not in arguments:
+            continue
+        if presence == "nullable" and value is None:
+            continue
+        if not check(value):
+            return message
+    return None
+
+
+def _cleanup_argument_error(name, arguments):
+    from core.api.v1.reviews.schemas import CleanupApply, CleanupUndo, EventListQuery
+    from core.api.v1.documents.schemas import ContentQuery
+    from core.modules.reviews.cleanup_state import identifier
+    try:
+        if name in {"ontology_cleanup_apply", "ontology_cleanup_undo"}:
+            (CleanupApply if name.endswith("apply") else CleanupUndo).model_validate(arguments)
+        elif name == "ontology_cleanup_request":
+            identifier(arguments.get("request_id"))
+            ContentQuery.model_validate({key: value for key, value in arguments.items() if key != "request_id"})
+        else:
+            if "limit" in arguments and type(arguments["limit"]) is not int:
+                raise ValueError("limit must be a JSON integer")
+            EventListQuery.model_validate(arguments)
+    except (ValidationError, ValueError, TypeError):
+        return "Cleanup fields must match the strict preview/selection contract."
+    return None
+
+
+def _qualifier_argument_error(arguments):
+    # 배열/원소 타입을 먼저 검사한 뒤 관계·후보·속성 안의 qualifiers만 검사한다.
+    for field in ("relations", "relation_candidates", "attributes"):
+        for item in arguments.get(field, []):
+            if "qualifiers" in item and not isinstance(item["qualifiers"], dict):
+                return _QUALIFIER_MESSAGE
+    return None
+
+
+def _invalid_argument(message):
+    # JSON 객체뿐 아니라 text-only 클라이언트가 받던 키 순서도 유지한다.
+    error = {"code": "invalid_argument", "retryable": False, "message": message}
+    if message in _MESSAGE_FIRST_ERRORS:
+        error = {"code": "invalid_argument", "message": message, "retryable": False}
+    return _result({"ok": False, "error": error})
+
+
 def validate_raw_arguments(name: str, arguments: dict) -> CallToolResult | None:
-    # 오류가 있으면 MCP 오류 응답을 반환한다. None은 다음 SDK 검사를 진행해도 된다는 뜻이다.
+    """원시 타입을 순서대로 검사해 SDK의 문자열/nullable 보정 전 첫 오류를 반환한다."""
+    from core.mcp.response_views import COMPACT_OPERATIONS
+    if name in COMPACT_OPERATIONS:
+        message = _field_argument_error(arguments, _RESPONSE_MODE_RULES)
+        if message is not None:
+            return _invalid_argument(message)
+    if name.startswith("ontology_cleanup_"):
+        message = _cleanup_argument_error(name, arguments)
+        if message is not None:
+            return _invalid_argument(message)
     if name in CONCEPT_TOOLS:
         message = _concept_argument_error(name, arguments)
         if message is not None:
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "retryable": False, "message": message,
-            }})
+            return _invalid_argument(message)
     if name in CORRESPONDENCE_TOOLS:
         message = _correspondence_argument_error(name, arguments)
         if message is not None:
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "retryable": False, "message": message,
-            }})
-    if name in ("ontology_generate", "ontology_review", "ontology_review_undo", "ontology_policy", "ontology_policy_undo"):
-        value = arguments.get("expected_state_revision")
-        if (name != "ontology_generate" or value is not None) and (
-            not isinstance(value, str) or re.fullmatch(REVISION_PATTERN, value) is None
-        ):
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "retryable": False,
-                "message": "expected_state_revision must be the SHA-256 from ontology_review_query.",
-            }})
-    if name in ("ontology_review", "ontology_policy") and "replacement" in arguments:
-        if (name == "ontology_policy" or arguments["replacement"] is not None) and not isinstance(arguments["replacement"], dict):
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "retryable": False,
-                "message": "replacement must be a complete JSON claim object, not encoded JSON text.",
-            }})
-    if name == "ontology_policy" and "entities" in arguments:
-        entities = arguments["entities"]
-        if entities is not None and (not isinstance(entities, list) or any(not isinstance(item, dict) for item in entities)):
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "retryable": False,
-                "message": "entities must be a JSON array of new concept objects.",
-            }})
-    if name == "ontology_impact" and arguments.get("baseline") is not None:
-        baseline = arguments["baseline"]
-        fields = {"source_revision", "graph_revision", "review_revision", "history_revision"}
-        if (not isinstance(baseline, dict) or set(baseline) != fields
-                or any(not (value is None and key in {"graph_revision", "review_revision"})
-                       and (not isinstance(value, str) or re.fullmatch(REVISION_PATTERN, value) is None)
-                       for key, value in baseline.items())):
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "retryable": False,
-                "message": "baseline must contain exactly source_revision, graph_revision, review_revision and history_revision SHA-256 values; only graph/review revisions may be null.",
-            }})
-    if name in ("ontology_query", "ontology_context", "ontology_review_query", "ontology_impact"):
-        for field in ("domain", "viewpoint"):
-            if field in arguments and not isinstance(arguments[field], str):
-                return _result({"ok": False, "error": {
-                    "code": "invalid_argument", "retryable": False,
-                    "message": "Ontology filters must be strings; omit a filter to leave it unset.",
-                }})
-    if name == "ontology_context" and "documents" in arguments:
-        documents = arguments["documents"]
-        if not isinstance(documents, list) or any(not isinstance(item, str) for item in documents):
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "retryable": False,
-                "message": "documents must be a JSON array of relative Markdown paths.",
-            }})
-    # SDK 2.3은 nullable 인자의 JSON 모양 문자열을 먼저 파싱한다.
-    # revision 문자열 "null"이 신규 생성용 None으로 바뀌기 전에 원본을 검사한다.
-    if name == "wiki_write" and "expected_revision" in arguments:
-        revision = arguments["expected_revision"]
-        if revision is not None and (
-            not isinstance(revision, str) or re.fullmatch(REVISION_PATTERN, revision) is None
-        ):
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument",
-                "message": "expected_revision must be JSON null or the 64-character SHA-256 from wiki_read.",
-                "retryable": False,
-            }})
+            return _invalid_argument(message)
+    message = _field_argument_error(arguments, _RAW_FIELD_RULES.get(name, ()))
+    if message is not None:
+        return _invalid_argument(message)
     if name == "ontology_generate":
-        if "schema_version" in arguments and (
-            type(arguments["schema_version"]) is not int or arguments["schema_version"] not in (3, 4, 5, 6)
-        ):
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument", "message": "schema_version must be the JSON integer 3, 4, 5 or 6.",
-                "retryable": False,
-            }})
-        revision = arguments.get("expected_revision")
-        if not isinstance(revision, str) or re.fullmatch(REVISION_PATTERN, revision) is None:
-            return _result({"ok": False, "error": {
-                "code": "invalid_argument",
-                "message": "expected_revision must be the 64-character SHA-256 from wiki_read.",
-                "retryable": False,
-            }})
-        for field in ("entities", "relations", "relation_candidates", "attributes"):
-            if field in arguments and (
-                not isinstance(arguments[field], list)
-                or any(not isinstance(item, dict) for item in arguments[field])
-            ):
-                return _result({"ok": False, "error": {
-                    "code": "invalid_argument",
-                    "message": "Ontology collections must be JSON arrays of objects.",
-                    "retryable": False,
-                }})
-        for field in ("relations", "relation_candidates", "attributes"):
-            for item in arguments.get(field, []):
-                if "qualifiers" in item and not isinstance(item["qualifiers"], dict):
-                    return _result({"ok": False, "error": {
-                        "code": "invalid_argument",
-                        "message": "qualifiers must be a JSON object, not encoded JSON text or null.",
-                        "retryable": False,
-                    }})
+        message = _qualifier_argument_error(arguments)
+        if message is not None:
+            return _invalid_argument(message)
     return None

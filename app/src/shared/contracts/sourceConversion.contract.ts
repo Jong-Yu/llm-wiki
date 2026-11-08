@@ -141,9 +141,6 @@ const resultSchema = z.discriminatedUnion('ok', [
   }),
 ]);
 export type ConversionSource = z.infer<typeof conversionSourceSchema>;
-export type SourceConversionReference = z.infer<
-  typeof conversionReferenceSchema
->;
 export type SourceConversionReadRequest = z.infer<
   typeof sourceConversionReadSchema
 >;
@@ -155,7 +152,6 @@ export type SourceConversionCancelRequest = z.infer<
 >;
 export type SourceConversionRun = z.infer<typeof sourceConversionRunSchema>;
 export type SourceConversionResult = z.infer<typeof resultSchema>;
-export type ConversionReport = z.infer<typeof conversionReportSchema>;
 export type SourceConversionBridge = {
   start: (
     request: SourceConversionStartRequest,

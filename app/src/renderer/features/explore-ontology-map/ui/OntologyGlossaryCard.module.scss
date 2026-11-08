@@ -1,0 +1,47 @@
+.card {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.6;
+  p {
+    margin: 8px 0;
+  }
+  h4 {
+    margin: 12px 0 4px;
+    font-size: 12px;
+  }
+}
+.sourceLink {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+  }
+}
+.identifiers {
+  > div + div {
+    border-top: 1px solid var(--wiki-color-border-default);
+  }
+  summary {
+    cursor: pointer;
+    min-height: 24px;
+    font-size: 12px;
+  }
+  p {
+    white-space: pre-wrap;
+  }
+}
+.passage {
+  summary {
+    cursor: pointer;
+    min-height: 24px;
+  }
+  blockquote {
+    margin-top: 8px;
+  }
+}

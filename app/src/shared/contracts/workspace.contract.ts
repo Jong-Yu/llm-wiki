@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { documentListPageSchema, isDocumentPath } from './documents.contract';
 import { knowledgeValueSchema } from './knowledge.contract';
+import { webEvidenceInputSchema } from './webEvidence.contract';
+import {
+  ontologySearchInputSchema,
+  ontologyNeighborsInputSchema,
+  ontologyGlossaryInputSchema,
+} from './ontologyExploration.contract';
 
 export const WORKSPACE_CHANNELS = { execute: 'workspace:execute' } as const;
 const text = z.string().min(1).max(4096);
@@ -11,6 +17,7 @@ export const workspaceScopeSchema = z.strictObject({
   tenant: text,
   profileId: text,
   policyRevision: z.string().regex(/^[a-f0-9]{64}$/),
+  accessRevision: z.string().min(1).optional(),
 });
 const expectedScope = workspaceScopeSchema.optional();
 export type WorkspaceScope = z.infer<typeof workspaceScopeSchema>;
@@ -70,8 +77,15 @@ const claimSelection = z.strictObject({
   state_revision: revision,
 });
 const questionContextInput = z.strictObject({
+  /** 새 채팅만 필요한 근거를 조회하며, 생략한 기존 요청은 전체 근거 계약을 유지합니다. */
+  mode: z.enum(['full', 'on_demand']).optional(),
+  retrieval_scope: z.enum(['selected', 'workspace']).optional(),
+  lookup_question: z.string().min(1).max(65536).optional(),
+  web: webEvidenceInputSchema.optional(),
   documents: z.array(document).max(8).optional(),
   required_documents: z.array(document).max(8).optional(),
+  /** 검색으로 관련 문서를 찾지 못한 질문을 "근거 없음"으로 고정할 때만 true입니다. */
+  allow_empty: z.boolean().optional(),
   claims: z.array(claimSelection).max(100).optional(),
   source_refs: z
     .array(
@@ -271,6 +285,86 @@ export const createAnalysisPlanInputSchema = z
 export const workspaceRequestSchema = z.discriminatedUnion('operation', [
   z.strictObject({
     connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('relationCreate'),
+    input: z.strictObject({
+      document,
+      request_id: id,
+      expected_state_revision: revision,
+      kind: z.enum(['source', 'policy']),
+      replacement: knowledgeValueSchema,
+      reason: z.string().trim().min(1).max(1000),
+    }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('relationUndo'),
+    input: z.strictObject({
+      document,
+      request_id: id,
+      event_id: id,
+      expected_state_revision: revision,
+      kind: z.enum(['source', 'policy']),
+      reason: z.string().trim().min(1).max(1000),
+    }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('relationRequest'),
+    input: z.strictObject({ document, request_id: id }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('cleanupPreview'),
+    input: pageInput,
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('cleanupHistory'),
+    input: pageInput,
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('cleanupRequest'),
+    input: z.strictObject({ document, request_id: id }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('cleanupApply'),
+    input: z.strictObject({
+      document,
+      request_id: id,
+      preview_revision: revision,
+      item_ids: z
+        .array(revision)
+        .min(1)
+        .max(50)
+        .refine(
+          (values: string[]): boolean => new Set(values).size === values.length,
+        ),
+      reason: z.string().trim().min(1).max(1000),
+    }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('cleanupUndo'),
+    input: z.strictObject({
+      document,
+      request_id: id,
+      event_id: id,
+      expected_state_revision: revision,
+      reason: z.string().trim().min(1).max(1000),
+    }),
+  }),
+  z.strictObject({
+    connectionId,
     expectedScope,
     operation: z.literal('search'),
     input: z.strictObject({
@@ -309,6 +403,24 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
   z.strictObject({
     connectionId,
     expectedScope,
+    operation: z.literal('ontologySearch'),
+    input: ontologySearchInputSchema,
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope,
+    operation: z.literal('ontologyNeighbors'),
+    input: ontologyNeighborsInputSchema,
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope,
+    operation: z.literal('ontologyGlossary'),
+    input: ontologyGlossaryInputSchema,
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope,
     operation: z.literal('conceptQuery'),
     input: z.strictObject({
       target: knowledgeValueSchema,
@@ -339,14 +451,36 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
     connectionId,
     expectedScope,
     operation: z.literal('reviewQueue'),
-    input: z.strictObject({
-      ...aggregate,
-      states: z
-        .array(z.enum(['unreviewed', 'defer', 'pending']))
-        .min(1)
-        .max(3)
-        .optional(),
-    }),
+    input: z
+      .strictObject({
+        coverage: z.enum(['selected', 'tenant']).optional(),
+        documents: z.array(document).max(8).default([]),
+        correspondence_ids: correspondenceIds,
+        limit,
+        cursor,
+        states: z
+          .array(z.enum(['unreviewed', 'defer', 'pending']))
+          .min(1)
+          .max(3)
+          .refine(
+            (values: string[]): boolean =>
+              new Set(values).size === values.length,
+          )
+          .optional(),
+      })
+      .refine(
+        (value: {
+          coverage?: 'selected' | 'tenant';
+          documents: string[];
+          correspondence_ids?: string[];
+        }): boolean =>
+          // 전체 공간과 명시 문서 선택을 섞지 않고 기존 선택 조회는 문서를 요구합니다.
+          value.coverage === 'tenant'
+            ? value.documents.length === 0 &&
+              (value.correspondence_ids?.length ?? 0) === 0
+            : value.documents.length > 0,
+        { message: '조회 범위를 확인해 주세요.' },
+      ),
   }),
   z.strictObject({
     connectionId,
@@ -804,7 +938,6 @@ const result = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: response }),
   z.object({ ok: z.literal(false), error }),
 ]);
-export type WorkspaceResponse = z.infer<typeof response>;
 export type WorkspaceResult = z.infer<typeof result>;
 export type WorkspaceBridge = {
   execute: (request: WorkspaceRequest) => Promise<WorkspaceResult>;

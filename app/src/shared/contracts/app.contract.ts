@@ -1,3 +1,5 @@
+import type { KnowledgeComparisonsBridge } from './knowledgeComparisons.contract';
+import type { AiSessionsBridge } from './aiSessions.contract';
 import type { RecoveryBridge } from './recovery.contract';
 import type { ProposalExecutionBridge } from './proposalExecution.contract';
 import type { RuntimeBridge } from './runtime.contract';
@@ -12,6 +14,9 @@ import type { KnowledgeBridge } from './knowledge.contract';
 import type { WorkspaceBridge } from './workspace.contract';
 import type { AnalysisBridge } from './analysis.contract';
 import type { ArtifactsBridge } from './artifacts.contract';
+import type { FileExportsBridge } from './fileExports.contract';
+import type { AttachmentBridge } from './attachments.contract';
+import type { UpdateBridge } from './update.contract';
 
 /** 공개 앱 정보와 제한된 연결 작업만 노출하는 IPC 계약입니다. */
 export const IPC_CHANNELS = { appGetInfo: 'app:get-info' } as const;
@@ -31,6 +36,11 @@ export type GetAppInfoResult =
     };
 
 export type WikiBridge = {
+  knowledgeComparisons?: KnowledgeComparisonsBridge;
+  aiSessions?: AiSessionsBridge;
+  fileExports?: FileExportsBridge;
+  attachments?: AttachmentBridge;
+  update?: UpdateBridge;
   runtime: RuntimeBridge;
   recovery?: RecoveryBridge;
   proposalExecution: ProposalExecutionBridge;

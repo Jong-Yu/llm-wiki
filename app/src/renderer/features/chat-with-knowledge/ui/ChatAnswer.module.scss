@@ -1,0 +1,86 @@
+.markdown {
+  max-inline-size: 56ch;
+  font-size: var(--wiki-font-size-14);
+  line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+
+  p,
+  ul,
+  ol {
+    margin: 0 0 var(--wiki-space-6);
+  }
+  ul,
+  ol {
+    padding-inline-start: var(--wiki-space-20);
+  }
+  h1,
+  h2,
+  h3 {
+    margin: var(--wiki-space-12) 0 var(--wiki-space-3);
+    font-size: inherit;
+    line-height: inherit;
+  }
+  code {
+    padding: 1px var(--wiki-space-4);
+    border-radius: var(--wiki-radius-4);
+    background: var(--wiki-color-surface-hover);
+    font-family: var(--wiki-font-family-mono);
+    font-size: 0.9em;
+  }
+  pre {
+    box-sizing: border-box;
+    inline-size: fit-content;
+    max-inline-size: 100%;
+    overflow-x: auto;
+    margin: var(--wiki-space-6) 0 var(--wiki-space-14);
+    padding: var(--wiki-space-9) var(--wiki-space-12);
+    border-radius: var(--wiki-radius-7);
+    background: var(--wiki-color-surface-hover);
+    font: inherit;
+    code {
+      padding: 0;
+      background: transparent;
+      white-space: pre;
+    }
+  }
+  blockquote {
+    margin: var(--wiki-space-14) 0;
+    padding-inline-start: var(--wiki-space-11);
+    border-inline-start: 2px solid var(--wiki-color-border-control);
+    > :last-child {
+      margin-bottom: 0;
+    }
+  }
+  > :first-child {
+    margin-block-start: 0;
+  }
+  > :last-child {
+    margin-block-end: 0;
+  }
+  &[data-secondary-ending] > p:not(:first-child):last-child {
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.tableScroll {
+  max-inline-size: 100%;
+  margin: var(--wiki-space-14) 0;
+  overflow-x: auto;
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow-wrap: normal;
+  }
+  th,
+  td {
+    padding: var(--wiki-space-6) var(--wiki-space-12) var(--wiki-space-6) 0;
+    text-align: start;
+    vertical-align: top;
+    border-bottom: 1px solid var(--wiki-color-border-default);
+  }
+  th {
+    font-size: var(--wiki-font-size-12);
+    font-weight: 600;
+    color: var(--wiki-color-text-secondary);
+  }
+}

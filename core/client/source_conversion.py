@@ -25,6 +25,7 @@ from core.runtime.client_process import WindowsJob, process_arguments, spawn_opt
 from .analysis import _private_directory, server_url
 from .transport import AnalysisClientError, api_call
 from .source_conversion_worker import atomic_json
+from .source_conversion_report import empty_conversion, interrupt_conversion
 
 MAX_ORIGINAL = 20 * 1024 * 1024
 SOURCE_KEYS = ("source_id", "source_version", "source_sha256", "registration_revision")
@@ -41,13 +42,6 @@ def check_ref(reference):
 
 def cancelled(cancel_file):
     return cancel_file is not None and Path(cancel_file).exists()
-
-
-def empty_conversion(format, code):
-    return {"format": format, "method": None, "units": [], "complete": False,
-        "unread_ranges": ["whole source: " + code], "warnings": [], "diagnostics": [{"code": code}],
-        "unit_methods": {}, "state": "failed", "origin": "client_reported",
-        "coverage": "reported_units_only", "original_coverage": "not_verified", "semantic_validation": "not_run"}
 
 
 async def download(http, endpoint, directory, original, cancel_file, emit):
@@ -140,11 +134,7 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
         shutil.rmtree(scratch)
     value = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else empty_conversion(format, reason or "worker_failed")
     if reason or process.returncode != 0 or value.get("state") == "running":
-        code = reason or "worker_failed"
-        value["complete"] = False
-        value["state"] = "cancelled" if code == "conversion_cancelled" else "partial" if value["units"] else "failed"
-        value["unread_ranges"] = value["unread_ranges"][:99] + ["remaining source: " + code]
-        value["diagnostics"] = value["diagnostics"][:99] + [{"code": code, "scope": "remaining source", "unread": True}]
+        interrupt_conversion(value, reason or "worker_failed")
     atomic_json(result_path, value)
     return value
 
@@ -257,7 +247,7 @@ async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profi
             conversion["complete"] = False
             conversion["state"] = "cancelled"
             if not any("conversion_cancelled" in value for value in conversion["unread_ranges"]):
-                conversion["unread_ranges"] = conversion["unread_ranges"][:99] + ["remaining source: conversion_cancelled"]
+                interrupt_conversion(conversion, "conversion_cancelled", diagnostic=False)
             atomic_json(result_path, conversion)
         if conversion["units"]:
             body = report_body(conversion, source_ref, request_id, profile)
@@ -272,8 +262,7 @@ async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profi
         local["ok"] = conversion["state"] in {"complete", "partial"} and local["receipt"]["state"] in {"saved", "not_submitted"}
     except asyncio.CancelledError:
         conversion = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else empty_conversion(local["format"], "conversion_cancelled")
-        conversion.update(complete=False, state="cancelled")
-        conversion["unread_ranges"] = conversion["unread_ranges"][:99] + ["remaining source: conversion_cancelled"]
+        interrupt_conversion(conversion, "conversion_cancelled", diagnostic=False)
         local.update(ok=False, state="cancelled", conversion=conversion)
         atomic_json(result_path, conversion)
         # 강제 취소 중 저장 응답을 확인하지 못하면 성공으로 추정하지 않는다.

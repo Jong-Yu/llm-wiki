@@ -5,8 +5,9 @@ revision은 '읽었던 내용이 아직 같은가'를 확인하는 지문이다.
 """
 
 from typing import Literal
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, model_serializer
 from core.api.schemas import Model
+from core.modules.personal.web_evidence import public_web_url, web_retrieved_at
 from .schemas import PersonalProfile
 
 
@@ -63,8 +64,26 @@ class InputRead(PersonalProfile):
     run_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
+class EvidenceQuery(Model):
+    """고정한 근거 안의 제한된 조회만 허용한다. 파일 경로나 도구 이름은 받지 않는다."""
+    action: Literal["search", "read", "claims", "history", "dialogue", "initial"]
+    query: str = Field("", max_length=200)
+    material_id: str | None = Field(None, pattern=r"^[dow][1-9][0-9]{0,2}$")
+    start_line: int = Field(1, ge=1)
+    line_count: int = Field(60, ge=1, le=100)
+    offset: int = Field(0, ge=0)
+    limit: int = Field(10, ge=1, le=20)
+    start_character: int = Field(0, ge=0)
+    character_count: int = Field(4000, ge=1, le=4000)
+
+
+class RunEvidence(RunCommand):
+    run_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    query: EvidenceQuery
+
+
 class AnswerCitation(Model):
-    kind: Literal["document", "source", "claim", "policy"] | None = None
+    kind: Literal["document", "source", "claim", "policy", "review", "web"] | None = None
     document: str | None = Field(None, min_length=1, max_length=4096)
     source_revision: str | None = Field(None, pattern=r"^[0-9a-f]{64}$")
     source_id: str | None = Field(None, pattern=r"^[0-9a-f]{32}$")
@@ -75,11 +94,30 @@ class AnswerCitation(Model):
     graph_revision: str | None = Field(None, pattern=r"^[0-9a-f]{64}$")
     state_revision: str | None = Field(None, pattern=r"^[0-9a-f]{64}$")
     event_id: str | None = Field(None, pattern=r"^[0-9a-f]{32}$")
+    ledger: Literal["review", "relation"] | None = None
+    url: str | None = Field(None, min_length=1, max_length=2048)
+    title: str | None = Field(None, min_length=1, max_length=300)
+    content_sha256: str | None = Field(None, pattern=r"^[0-9a-f]{64}$")
+    retrieved_at: str | None = Field(None, min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def exact_source(self):
         """원문 인용·기계 주장·전문가 Action log 근거를 다른 종류로 검사한다."""
-        if self.kind == "policy":
+        web_values = (self.url, self.title, self.content_sha256, self.retrieved_at)
+        if self.kind == "review" and self.ledger is None or self.kind != "review" and self.ledger is not None:
+            raise ValueError("Only review citations identify their exact review or relation ledger")
+        if self.kind == "web":
+            if (any(value is None for value in (*web_values, self.quote))
+                    or any(value is not None for value in (self.document, self.source_revision,
+                        self.source_id, self.source_version, self.source_sha256, self.claim_id,
+                        self.graph_revision, self.state_revision, self.event_id))):
+                raise ValueError("A web citation needs its exact retained web source and quote")
+            public_web_url(self.url)
+            web_retrieved_at(self.retrieved_at)
+            return self
+        if any(value is not None for value in web_values):
+            raise ValueError("Only web citations can carry external web metadata")
+        if self.kind in {"policy", "review"}:
             if (self.document is None or self.state_revision is None or self.event_id is None
                     or any(value is not None for value in (self.quote, self.claim_id, self.source_id, self.source_version, self.source_sha256))):
                 raise ValueError("A policy cites its actual Action log without a fabricated source quote")
@@ -96,6 +134,17 @@ class AnswerCitation(Model):
                 or any(value is None for value in (self.source_id, self.source_version, self.source_sha256))):
             raise ValueError("Select one exact original citation")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        """구 인용에 새 null 필드를 더해 같은 요청의 지문을 바꾸지 않는다."""
+        value = handler(self)
+        for key in ("url", "title", "content_sha256", "retrieved_at"):
+            if value[key] is None:
+                value.pop(key)
+        if self.ledger is None:
+            value.pop("ledger", None)
+        return value
 
 
 class AnswerExecution(Model):
@@ -114,3 +163,12 @@ class RunAnswer(RunCommand):
     content: str = Field(min_length=1, max_length=65536)
     citations: list[AnswerCitation] = Field(default_factory=list, max_length=100)
     execution: AnswerExecution
+    evidence_ids: list[str] | None = Field(None, max_length=64)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        """새 근거 읽기 계약을 쓰지 않은 옛 제출의 요청 지문을 유지한다."""
+        value = handler(self)
+        if self.evidence_ids is None:
+            value.pop("evidence_ids", None)
+        return value

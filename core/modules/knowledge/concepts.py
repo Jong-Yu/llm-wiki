@@ -86,6 +86,18 @@ class ConceptStore:
         # 문자열과 명시 범위에서 발견 목록을 반환한다. 실제 검색/출처 조립은 discovery.py를 읽는다.
         return discovery.find(self, text, documents=documents, include_history=include_history, application_context=application_context, as_of=as_of, limit=limit, policy_revision=policy_revision, profile=profile, tenant=tenant)
 
+    def explore_search(self, text="", *, kind="all", document=None, cursor=None, limit=20):
+        from .ontology_exploration import explore_search
+        return explore_search(self, text, kind=kind, document=document, cursor=cursor, limit=limit)
+
+    def explore_neighbors(self, document, entity_id, expected_state_revision, *, cursor=None, limit=20):
+        from .ontology_exploration import explore_neighbors
+        return explore_neighbors(self, document, entity_id, expected_state_revision, cursor=cursor, limit=limit)
+
+    def glossary(self, document, entity_id, expected_state_revision, *, limit=10):
+        from .glossary import glossary
+        return glossary(self, document, entity_id, expected_state_revision, limit=limit)
+
     @staticmethod
     def _anchor_status(anchor, entry):
         return references._anchor_status(anchor, entry)

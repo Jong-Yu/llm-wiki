@@ -89,3 +89,7 @@ def main() -> None:
                     log_level="warning", access_log=False)
     else:
         create_server(store).run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

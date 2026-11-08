@@ -1,10 +1,12 @@
+import { isServerUnreachable } from './serverReachability';
+import type { AccountPreferencesStore } from './AccountPreferencesStore';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import type {
   ProtectedConnectionStore,
   SavedConnection,
 } from './ProtectedConnectionStore';
 import type { BrowserWindow } from 'electron';
-import { dialog } from 'electron';
 import { writeFile } from 'node:fs/promises';
 import { parseDocumentKnowledgeResponse } from '@contracts/knowledge.contract';
 import type {
@@ -42,10 +44,13 @@ import type {
 import { apiFailure, readApiJson, readApiSourceBytes } from './readApi';
 import { isTextSource, sourceText } from './sourceOriginal';
 import {
+  sameAccessRevision,
   parseAccessContext,
   parseConnectionResult,
 } from '@contracts/connection.contract';
 import type {
+  AccountRequest,
+  RememberedAccount,
   AccessContext,
   ConnectRequest,
   ConnectionResult,
@@ -65,7 +70,9 @@ type SourceOriginal = SourcePreviewRequest & {
   access: DocumentListPage['access'];
   traceId: string;
 };
-type SourceOriginalResult = { ok: true; data: SourceOriginal } | ApiFailure;
+export type SourceOriginalResult =
+  | { ok: true; data: SourceOriginal }
+  | ApiFailure;
 /** 토큰을 포함하므로 main 안에서만 사용합니다. renderer 응답에는 넣지 않습니다. */
 export type AnalysisContext = {
   active: Connected;
@@ -94,9 +101,31 @@ function apiUrl(input: string): string {
     url.hash
   )
     throw new Error('invalid_url');
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}/`;
+  url.pathname = `${url.pathname.replace(/\/+$/, '').replace(/\/mcp$/, '')}/`;
   if (!url.pathname.endsWith('/api/v1/')) url.pathname += 'api/v1/';
   return url.href;
+}
+
+/** PoC는 서버가 허용한 기본값 중 조회 제한이 없는 설정만 사용합니다. */
+function workspaceDefault(
+  workspace: WorkspaceMembership | undefined,
+): WorkspaceProfile | null {
+  return (
+    workspace?.profiles.find(
+      (profile: WorkspaceProfile): boolean =>
+        profile.id === workspace.defaultProfile &&
+        profile.domain === null &&
+        profile.viewpoint === null,
+    ) ?? null
+  );
+}
+
+/** 서버 설정을 앱에서 우회하거나 다른 허용값으로 임의 대체하지 않습니다. */
+function workspaceDefaultFailure(): ApiFailure {
+  return apiFailure(
+    'workspace_default_invalid',
+    '작업 공간의 기본 조회 설정을 사용할 수 없습니다. 관리자에게 기본 조회 범위를 전체로 설정해 달라고 요청해 주세요.',
+  );
 }
 
 /** 자격 증명은 main 메모리·선택한 보호 저장소에만 두고 공개 상태와 분리합니다. */
@@ -107,6 +136,9 @@ export class ConnectionService {
   #remembered = false;
   #protectionGeneration = 0;
   #restoreIssue: ConnectionProtection['issue'] = 'none';
+  #account: RememberedAccount | undefined;
+  #warning: string | undefined;
+  #autoRestore = true;
   #active: Connected | null = null;
   #token: string | null = null;
   #generation = 0;
@@ -117,7 +149,12 @@ export class ConnectionService {
   #contentGeneration = 0;
   #scopeListeners = new Set<() => void>();
 
-  constructor(protection?: ProtectedConnectionStore) {
+  readonly preferences: AccountPreferencesStore | undefined;
+  constructor(
+    protection?: ProtectedConnectionStore,
+    preferences?: AccountPreferencesStore,
+  ) {
+    this.preferences = preferences;
     this.#protection = protection;
   }
 
@@ -137,8 +174,21 @@ export class ConnectionService {
       protectionGeneration === this.#protectionGeneration;
     this.#restoreIssue = 'none';
     try {
+      try {
+        const account = await this.preferences?.load();
+        if (!current()) return superseded();
+        if (account) {
+          this.#account = { name: account.name, serverUrl: account.serverUrl };
+          this.#autoRestore = account.autoRestore;
+        }
+      } catch {
+        this.#autoRestore = false;
+        this.#warning =
+          '계정 기억 파일을 읽지 못해 자동 로그인을 차단했습니다.';
+      }
       const stored = await this.#protection.load();
       if (!current()) return superseded();
+      if (!this.#autoRestore) return this.getState();
       if (!stored.ok)
         return apiFailure(
           'protection_unavailable',
@@ -185,7 +235,7 @@ export class ConnectionService {
         (item: WorkspaceProfile): boolean => item.id === scope?.profile,
       );
       if (
-        result.policyRevision !== entry.policyRevision ||
+        !sameAccessRevision(result, entry) ||
         (scope &&
           (!workspace?.permissions.includes('read') ||
             !profile ||
@@ -196,8 +246,21 @@ export class ConnectionService {
         this.#restoreIssue = 'scope_changed';
         return apiFailure(
           'access_changed',
-          '저장 이후 권한 또는 관점이 변경되었습니다. 새로 연결하고 현재 작업 공간을 선택해 주세요.',
+          '저장 이후 권한 또는 조회 설정이 변경되었습니다. 새로 연결하고 현재 작업 공간을 선택해 주세요.',
         );
+      }
+      if (scope) {
+        const neutral = workspaceDefault(workspace);
+        if (!neutral || scope.profile !== neutral.id) {
+          if (restoresActiveCredential) this.#clearSelection();
+          this.#restoreIssue = 'scope_changed';
+          return !neutral
+            ? workspaceDefaultFailure()
+            : apiFailure(
+                'workspace_selection_changed',
+                '이전에 저장한 작업 공간 설정은 현재 앱에서 사용할 수 없습니다. 다시 로그인하거나 작업 공간을 다시 선택해 주세요. 기존 저장 내용은 보존했습니다.',
+              );
+        }
       }
       this.#active = {
         status: 'connected',
@@ -210,6 +273,8 @@ export class ConnectionService {
         checkedAt: new Date().toISOString(),
       };
       this.#token = entry.token;
+      if (result.displayName)
+        this.#account = { name: result.displayName, serverUrl };
       this.#rememberRequested = true;
       this.#remembered = true;
       return this.getState();
@@ -248,6 +313,10 @@ export class ConnectionService {
       token,
       userId: active.userId,
       policyRevision: active.policyRevision,
+      ...(active.accessRevision
+        ? { accessRevision: active.accessRevision }
+        : {}),
+      ...(active.displayName ? { displayName: active.displayName } : {}),
       selection:
         selection && profile
           ? {
@@ -258,7 +327,23 @@ export class ConnectionService {
           : null,
     };
     const saved = await store.save(entry, current);
-    if (current()) this.#remembered = saved;
+    if (current()) {
+      this.#remembered = saved;
+      // 인증 파일 확정 뒤에만 복원을 허용해 이전 계정이 되살아나지 않게 합니다.
+      if (saved && this.#account && this.preferences) {
+        const enabled = await this.preferences.save(
+          { version: 1, ...this.#account, autoRestore: true },
+          current,
+        );
+        if (current()) {
+          this.#autoRestore = enabled;
+          this.#remembered = enabled;
+          if (!enabled)
+            this.#warning =
+              '로그인은 완료됐지만 재시작 로그인 설정을 저장하지 못했습니다.';
+        }
+      }
+    }
   }
 
   /** 저장된 인증정보만 명시 삭제하며 현재 세션과 서버 자료는 유지합니다. */
@@ -280,10 +365,48 @@ export class ConnectionService {
     return this.getState();
   }
 
-  /** 명시 연결 해제는 메모리를 비우고 저장된 자격 증명도 제거합니다. */
+  /** 네트워크 없이 메모리를 비우고 복원 차단을 먼저 기록합니다. */
   async logout(): Promise<ConnectionResult> {
     this.disconnect();
-    return this.forgetSaved();
+    this.#autoRestore = false;
+    const generation = this.#generation;
+    const current = (): boolean => generation === this.#generation;
+    const blocked =
+      this.#account && this.preferences
+        ? await this.preferences.save(
+            { version: 1, ...this.#account, autoRestore: false },
+            current,
+          )
+        : false;
+    if (!current()) return superseded();
+    const deleted =
+      !this.#protection || (await this.#protection.forget(current));
+    if (!current()) return superseded();
+    this.#warning =
+      !blocked && !deleted
+        ? '로그아웃했지만 저장소 오류로 다음 실행의 자동 로그인 차단을 확인하지 못했습니다. 저장소를 확인하고 로그아웃을 다시 실행해 주세요.'
+        : !deleted
+          ? '로그아웃과 자동 로그인 차단을 완료했습니다. 보호된 인증 파일 정리는 실패했습니다.'
+          : undefined;
+    return this.getState();
+  }
+
+  /** 로그아웃 정리는 이미 확인한 로컬 신원만 사용하며 서버 조회를 요구하지 않습니다. */
+  localContext(): AnalysisContext | null {
+    const active = this.#active;
+    if (!active?.selection || !this.#token) return null;
+    return {
+      active,
+      token: this.#token,
+      generation: this.#generation,
+      selection: { ...active.selection },
+    };
+  }
+
+  /** 정리 실패를 로그아웃 성공과 분리해 비밀 없는 경고로 표시합니다. */
+  setLogoutWarning(message: string): ConnectionResult {
+    this.#warning = this.#warning ? `${this.#warning} ${message}` : message;
+    return this.getState();
   }
 
   /** 연결 선택이 바뀌면 로컬 AI 실행도 이전 범위에서 계속 쓰지 못하게 합니다. */
@@ -298,7 +421,7 @@ export class ConnectionService {
       this.#pending === null &&
       this.#active?.connectionId === context.active.connectionId &&
       this.#active.userId === context.active.userId &&
-      this.#active.policyRevision === context.active.policyRevision &&
+      sameAccessRevision(this.#active, context.active) &&
       this.#active.selection?.tenant === context.selection.tenant &&
       this.#active.selection.profile === context.selection.profile
     );
@@ -320,7 +443,7 @@ export class ConnectionService {
     )
       return apiFailure(
         'connection_changed',
-        '작업 공간과 관점을 다시 선택해 주세요.',
+        '작업 공간을 다시 선택해 주세요.',
       );
     const context: AnalysisContext = {
       active,
@@ -340,7 +463,7 @@ export class ConnectionService {
     }
     if (
       result.userId !== active.userId ||
-      result.policyRevision !== active.policyRevision
+      !sameAccessRevision(result, active)
     ) {
       this.#clearSelection();
       return apiFailure(
@@ -374,8 +497,18 @@ export class ConnectionService {
       this.#clearSelection();
       return apiFailure(
         'access_changed',
-        '현재 작업 공간·관점의 조회 권한을 확인할 수 없습니다.',
+        '현재 작업 공간의 조회 권한을 확인할 수 없습니다.',
       );
+    }
+    const neutral = workspaceDefault(workspace);
+    if (!neutral || context.selection.profile !== neutral.id) {
+      this.#clearSelection();
+      return !neutral
+        ? workspaceDefaultFailure()
+        : apiFailure(
+            'workspace_selection_changed',
+            '작업 공간의 기본 설정이 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
+          );
     }
     if (write && !workspace.permissions.includes('source_write'))
       return apiFailure(
@@ -401,6 +534,11 @@ export class ConnectionService {
       ok: true,
       data: {
         ...(this.#active ?? { status: 'disconnected' }),
+        ...(this.#account ? { rememberedAccount: this.#account } : {}),
+        ...(this.#warning ? { warning: this.#warning } : {}),
+        ...(this.#active && isServerUnreachable()
+          ? { serverUnreachable: true }
+          : {}),
         ...(protection
           ? {
               protection: {
@@ -469,9 +607,116 @@ export class ConnectionService {
     }
   }
 
+  /** 가입·이름 로그인 응답의 토큰을 main에서만 사용하고 기본 공간을 자동 선택합니다. */
+  async authenticate(request: AccountRequest): Promise<ConnectionResult> {
+    const initialization = this.initialize();
+    const initialGeneration = this.#generation;
+    await initialization;
+    if (initialGeneration !== this.#generation) return superseded();
+    this.disconnect();
+    const { controller, generation } = this.#begin();
+    const current = (): boolean => generation === this.#generation;
+    let serverUrl: string;
+    try {
+      serverUrl = apiUrl(request.serverUrl);
+    } catch {
+      this.#pending = null;
+      return apiFailure('invalid_url', 'HTTPS 서버 주소를 확인해 주세요.');
+    }
+    this.#account = { name: request.name, serverUrl };
+    this.#warning = undefined;
+    this.#autoRestore = false;
+    if (
+      this.preferences &&
+      !(await this.preferences.save(
+        { version: 1, ...this.#account, autoRestore: false },
+        current,
+      ))
+    ) {
+      this.#warning =
+        '이름과 서버 주소를 저장하지 못했습니다. 로그인 상태는 이번 실행에서만 유지될 수 있습니다.';
+    }
+    if (!current()) return superseded();
+    const response = await readApiJson(
+      `${serverUrl}auth/${request.mode}`,
+      null,
+      controller,
+      { method: 'POST', body: { name: request.name } },
+    );
+    if (!current()) return superseded();
+    this.#pending = null;
+    if (!response.ok) {
+      if (!response.error.status || response.error.status >= 500)
+        return apiFailure(
+          'auth_outcome_unknown',
+          request.mode === 'signup'
+            ? '가입 결과를 확인하지 못했습니다. 같은 이름으로 로그인해 가입 여부를 확인하세요. 자동으로 다시 가입하지 않습니다.'
+            : '로그인 결과를 확인하지 못했습니다. 서버 상태를 확인하고 다시 로그인하세요.',
+        );
+      return apiFailure(
+        response.error.code,
+        request.mode === 'signup' && response.error.status === 409
+          ? '이미 가입한 이름입니다. 로그인으로 전환해 주세요.'
+          : '이름과 서버 상태를 확인해 주세요. 로그인 실패를 자동 가입으로 바꾸지 않습니다.',
+        response.error.status,
+      );
+    }
+    try {
+      const parsed = z
+        .object({
+          data: z.object({
+            token: z
+              .string()
+              .min(32)
+              .max(4096)
+              .regex(/^[a-zA-Z0-9_-]+$/),
+            access_revision: z.string().min(1),
+            display_name: z.string().min(1),
+            default_tenant: z.string().min(1).nullable(),
+          }),
+        })
+        .parse(response.value);
+      const access = parseAccessContext(response.value);
+      const workspace = access.workspaces.find(
+        (item: WorkspaceMembership): boolean =>
+          item.id === access.defaultTenant,
+      );
+      if (workspace && !workspace.permissions.includes('read'))
+        throw new Error('invalid_response');
+      if (workspace && !workspaceDefault(workspace))
+        return workspaceDefaultFailure();
+      this.#active = {
+        status: 'connected',
+        connectionId: randomUUID(),
+        serverUrl,
+        ...access,
+        selection: workspace
+          ? { tenant: workspace.id, profile: workspace.defaultProfile }
+          : null,
+        checkedAt: new Date().toISOString(),
+      };
+      this.#token = parsed.data.token;
+      this.#account = { name: parsed.data.display_name, serverUrl };
+      this.#rememberRequested = true;
+      this.#restoreIssue = 'none';
+      this.#protectionGeneration += 1;
+      await this.#persist(generation);
+      return current() ? this.getState() : superseded();
+    } catch {
+      if (!current()) return superseded();
+      return apiFailure(
+        'auth_outcome_unknown',
+        '로그인 응답을 확인하지 못했습니다. 같은 이름으로 로그인해 현재 계정을 확인하세요.',
+      );
+    }
+  }
+
   /** 새 연결이 검증된 경우에만 기존 공개 상태와 토큰을 교체합니다. */
   async connect(request: ConnectRequest): Promise<ConnectionResult> {
-    await this.initialize();
+    const initialization = this.initialize();
+    const initialGeneration = this.#generation;
+    await initialization;
+    if (initialGeneration !== this.#generation) return superseded();
     const { controller, generation } = this.#begin();
     let serverUrl: string;
     try {
@@ -504,7 +749,7 @@ export class ConnectionService {
     return this.getState();
   }
 
-  /** 현재 소속을 재조회해 허용된 작업 공간·관점만 선택합니다. */
+  /** 현재 소속을 재조회해 작업 공간의 제한 없는 기본 설정만 선택합니다. */
   async selectWorkspace(
     request: SelectWorkspaceRequest,
   ): Promise<ConnectionResult> {
@@ -550,24 +795,26 @@ export class ConnectionService {
     const workspace = result.workspaces.find(
       (item: WorkspaceMembership): boolean => item.id === request.tenant,
     );
-    if (
-      !workspace ||
-      !workspace.profiles.some(
-        (item: WorkspaceProfile): boolean => item.id === request.profile,
-      )
-    )
+    if (!workspace)
       return apiFailure(
         'access_changed',
-        '작업 공간 또는 관점 권한이 변경되었습니다. 현재 허용 목록에서 다시 선택해 주세요.',
+        '작업 공간 권한이 변경되었습니다. 현재 허용 목록에서 다시 선택해 주세요.',
       );
     if (!workspace.permissions.includes('read'))
       return apiFailure(
         'read_required',
         '선택한 작업 공간에 자료 조회 권한이 없습니다.',
       );
+    const neutral = workspaceDefault(workspace);
+    if (!neutral) return workspaceDefaultFailure();
+    if (request.profile !== neutral.id)
+      return apiFailure(
+        'workspace_selection_changed',
+        '작업 공간의 기본 설정만 사용할 수 있습니다. 작업 공간을 다시 선택해 주세요.',
+      );
     this.#active = {
       ...this.#active,
-      selection: { tenant: request.tenant, profile: request.profile },
+      selection: { tenant: request.tenant, profile: neutral.id },
     };
     this.#restoreIssue = 'none';
     await this.#persist(generation);
@@ -594,7 +841,7 @@ export class ConnectionService {
       access.profileId === active.selection?.profile &&
       access.domain === profile.domain &&
       access.viewpoint === profile.viewpoint &&
-      access.policyRevision === active.policyRevision
+      sameAccessRevision(access, active)
     );
   }
 
@@ -613,7 +860,7 @@ export class ConnectionService {
     if (!selection)
       return apiFailure(
         'selection_required',
-        '작업 공간과 관점을 먼저 선택해 주세요.',
+        '작업 공간을 먼저 선택해 주세요.',
       );
     if (this.#pending)
       return apiFailure(
@@ -623,14 +870,16 @@ export class ConnectionService {
     const workspace = active.workspaces.find(
       (item: WorkspaceMembership): boolean => item.id === selection.tenant,
     );
-    const profile = workspace?.profiles.find(
-      (item: WorkspaceProfile): boolean => item.id === selection.profile,
-    );
-    if (!profile || !workspace?.permissions.includes('read')) {
+    const profile = workspaceDefault(workspace);
+    if (
+      !profile ||
+      profile.id !== selection.profile ||
+      !workspace?.permissions.includes('read')
+    ) {
       this.#clearSelection();
       return apiFailure(
         'access_changed',
-        '현재 작업 공간과 관점의 조회 권한을 다시 확인해 주세요.',
+        '현재 작업 공간의 조회 권한을 다시 확인해 주세요.',
       );
     }
     this.#cancelList();
@@ -651,7 +900,7 @@ export class ConnectionService {
       listGeneration !== this.#listGeneration ||
       current?.connectionId !== active.connectionId ||
       current.userId !== active.userId ||
-      current.policyRevision !== active.policyRevision ||
+      !sameAccessRevision(current, active) ||
       current.selection?.tenant !== selection.tenant ||
       current.selection.profile !== selection.profile
     )
@@ -687,7 +936,7 @@ export class ConnectionService {
       this.#clearSelection();
       return apiFailure(
         'scope_changed',
-        '권한 또는 조회 범위가 변경되었습니다. 작업 공간과 관점을 다시 선택해 주세요.',
+        '권한 또는 조회 범위가 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
       );
     }
     return { ok: true, data: page };
@@ -751,6 +1000,15 @@ export class ConnectionService {
     return this.#sources.chooseFile(request, parent);
   }
 
+  /** 웹 업로드도 현재 권한과 원본 서비스의 동일한 파일 snapshot 경계를 사용합니다. */
+  acceptSourceFile(
+    request: SourceSessionRequest,
+    filename: string,
+    bytes: Uint8Array,
+  ): Promise<ChooseSourceFileResult> {
+    return this.#sources.acceptFile(request, filename, bytes);
+  }
+
   /** 현재 작업 공간에 원본을 한 번 등록하고 불변 판본 영수증을 반환합니다. */
   registerSource(
     request: SourceRegistrationRequest,
@@ -789,7 +1047,7 @@ export class ConnectionService {
     if (!selection)
       return apiFailure(
         'selection_required',
-        '작업 공간과 관점을 먼저 선택해 주세요.',
+        '작업 공간을 먼저 선택해 주세요.',
       );
     if (this.#pending)
       return apiFailure(
@@ -799,14 +1057,16 @@ export class ConnectionService {
     const workspace = active.workspaces.find(
       (item: WorkspaceMembership): boolean => item.id === selection.tenant,
     );
-    const profile = workspace?.profiles.find(
-      (item: WorkspaceProfile): boolean => item.id === selection.profile,
-    );
-    if (!profile || !workspace?.permissions.includes('read')) {
+    const profile = workspaceDefault(workspace);
+    if (
+      !profile ||
+      profile.id !== selection.profile ||
+      !workspace?.permissions.includes('read')
+    ) {
       this.#clearSelection();
       return apiFailure(
         'access_changed',
-        '현재 작업 공간과 관점의 조회 권한을 다시 확인해 주세요.',
+        '현재 작업 공간의 조회 권한을 다시 확인해 주세요.',
       );
     }
     // 여러 문서의 주장과 원문은 함께 읽을 수 있어야 하며 화면별 선택 수명은 renderer가 검사합니다.
@@ -831,7 +1091,7 @@ export class ConnectionService {
       contentGeneration !== this.#contentGeneration ||
       current?.connectionId !== active.connectionId ||
       current.userId !== active.userId ||
-      current.policyRevision !== active.policyRevision ||
+      !sameAccessRevision(current, active) ||
       current.selection?.tenant !== selection.tenant ||
       current.selection.profile !== selection.profile
     )
@@ -861,7 +1121,7 @@ export class ConnectionService {
       this.#clearSelection();
       return apiFailure(
         'scope_changed',
-        '권한 또는 조회 범위가 변경되었습니다. 작업 공간과 관점을 다시 선택해 주세요.',
+        '권한 또는 조회 범위가 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
       );
     }
     return { ok: true, data: document };
@@ -968,6 +1228,13 @@ export class ConnectionService {
     return this.#sources.versions(request);
   }
 
+  /** 웹 다운로드에는 현재 권한·카탈로그·해시를 확인한 원본만 내부 전송기로 반환합니다. */
+  readSourceDownload(
+    request: SourceDownloadRequest,
+  ): Promise<SourceOriginalResult> {
+    return this.#readSourceOriginal(request);
+  }
+
   /** 원본 해시를 확인한 전체 바이트만 사용자가 고른 새 파일로 저장합니다. */
   async downloadSource(
     request: SourceDownloadRequest,
@@ -981,6 +1248,7 @@ export class ConnectionService {
       !active.selection
     )
       return superseded();
+    const { dialog } = await import('electron');
     const selected = await dialog.showSaveDialog(parent, {
       title: '원본 내려받기',
       defaultPath: `original.${request.format}`,
@@ -1074,7 +1342,7 @@ export class ConnectionService {
           if (!this.#matchesAccess(catalog.access, active, profile))
             return apiFailure(
               'scope_changed',
-              '권한 또는 조회 범위가 변경되었습니다. 작업 공간과 관점을 다시 선택해 주세요.',
+              '권한 또는 조회 범위가 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
             );
           const fileUrl = new URL(
             `${active.serverUrl}tenants/${encodeURIComponent(selection.tenant)}/sources/${request.sourceId}/versions/${request.sourceVersion}/file`,

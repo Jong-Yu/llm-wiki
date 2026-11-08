@@ -4,19 +4,62 @@
 # 설정/규약이 잘못됐을 때 이전 버전을 자동 선택하면 철회 정책을 우회할 수 있어 명시 오류를 낸다.
 
 from hashlib import sha256
+from collections import OrderedDict
+from functools import lru_cache
 from pathlib import Path
 from datetime import datetime
+import json
 import os
+from threading import Lock
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from core.common.json_codec import canonical_json_bytes
 from core.modules.analysis_results.diagnostics import legacy_schema as legacy_diagnostics_schema
+from core.modules.analysis_results import diagnostics as diagnostic_reports
 from . import contracts as limits, content, files
 from .contracts import (
     RulesetCompatibilityError, RulesetConfigurationError, RulesetCorruptError,
     RulesetUnavailableError,
 )
+
+
+_DIAGNOSTICS_CACHE_ENTRIES = 8
+_DIAGNOSTICS_CACHE_ENTRY_BYTES = 3 * limits.MAX_COMPONENT_BYTES
+_diagnostics_bytes = OrderedDict()
+_diagnostics_guard = Lock()
+
+
+def _expected_diagnostics_bytes():
+    """Memoize only immutable bytes generated from the running Python models.
+
+    Keep builder identities in the key, including the module-level schema
+    helper used by legacy_schema. Patched/replaced builders must run again.
+    Policy, release files and their validation are never cached here.
+    """
+    builders = (content.diagnostics_schema, legacy_diagnostics_schema, diagnostic_reports.schema)
+    with _diagnostics_guard:
+        cached = _diagnostics_bytes.get(builders)
+        if cached is not None:
+            _diagnostics_bytes.move_to_end(builders)
+            return cached
+    # Preserve the original eager order and exceptions for all three supported
+    # forms. A failed builder never publishes a partial or negative cache entry.
+    values = (canonical_json_bytes(builders[0]()), canonical_json_bytes(builders[0](1)),
+              canonical_json_bytes(builders[1]()))
+    if sum(map(len, values)) <= _DIAGNOSTICS_CACHE_ENTRY_BYTES:
+        with _diagnostics_guard:
+            _diagnostics_bytes[builders] = values
+            _diagnostics_bytes.move_to_end(builders)
+            while len(_diagnostics_bytes) > _DIAGNOSTICS_CACHE_ENTRIES:
+                _diagnostics_bytes.popitem(last=False)
+    return values
+
+
+@lru_cache(maxsize=8)
+def _check_schema(raw):
+    """같은 스키마 바이트의 순수 구조 검사만 재사용한다. 정책·릴리스 검사는 매번 수행한다."""
+    Draft202012Validator.check_schema(json.loads(raw))
 
 
 def schema_bytes(schema):
@@ -34,10 +77,10 @@ def schema_bytes(schema):
                     or branch["properties"]["relations"]["items"] != {"$ref": f"#/$defs/RelationV{version}"}
                     or f"RelationV{version}" not in schema["$defs"]):
                 raise ValueError()
-        Draft202012Validator.check_schema(schema)
         raw = canonical_json_bytes(schema)
         if len(raw) > limits.MAX_COMPONENT_BYTES:
             raise ValueError()
+        _check_schema(raw)
         return raw
     except (ValueError, TypeError, KeyError, UnicodeError, SchemaError) as error:
         raise RulesetCompatibilityError("The current submission schema is unavailable or incompatible.") from error
@@ -100,9 +143,7 @@ def read_release(root, ruleset_id, ruleset_version, *, expected_schema, validato
             components[filename] = {"sha256": entry["sha256"], "content": component.decode("utf-8")}
         if components["submission.schema.json"]["content"].encode() != schema_bytes(expected_schema):
             raise RulesetCompatibilityError("The release submission schema differs from the server.")
-        if components["diagnostics.schema.json"]["content"].encode() not in (
-                canonical_json_bytes(content.diagnostics_schema()), canonical_json_bytes(content.diagnostics_schema(1)),
-                canonical_json_bytes(legacy_diagnostics_schema())):
+        if components["diagnostics.schema.json"]["content"].encode() not in _expected_diagnostics_bytes():
             raise RulesetCompatibilityError("The release diagnostics schema differs from the server.")
         if components["definitions.json"]["content"].encode() != canonical_json_bytes(content.definitions()):
             raise RulesetCompatibilityError("The release vocabulary differs from the server.")

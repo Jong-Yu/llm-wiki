@@ -1,7 +1,7 @@
 """개인 기록의 원자 저장·소유권·버전 충돌·같은 요청 확인을 공통 처리한다.
 
 기존 원본 저장의 잠금·안전한 파일 접근·정규 JSON 기록을 재사용한다. 사용자
-ID는 경로로 직접 쓰지 않고 hash로 바꾼다. 한 JSON 안에 추가 이력을 보존하므로
+ID는 검증된 서버 ID를 쓰며 기존 hash 경로를 호환 조회한다. 한 JSON 안에 추가 이력을 보존하므로
 파일 교체는 한 번이며 대화 내용을 덮어 고치거나 옛 이벤트를 삭제하지 않는다.
 """
 
@@ -10,12 +10,13 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 from core.common.json_codec import canonical_json_hash
+from core.common.storage_layout import personal_root
 from core.modules.sources import files
 from core.modules.sources.contracts import identifier, SourceLimitError
 from core.modules.documents.listing import _decode_cursor, _encode_cursor, CatalogChangedError
 
 
-KINDS = {"conversations", "saved-results", "comparisons", "result-drafts", "question-runs"}
+KINDS = {"conversations", "saved-results", "comparisons", "result-drafts", "question-runs", "knowledge-comparisons"}
 MAX_RECORDS = 200
 MAX_EVENTS = 100
 
@@ -43,12 +44,14 @@ class PersonalStore:
     def __init__(self, scope):
         self.scope, self.store = scope, scope.store
         owner = sha256(scope.user_id.encode("utf-8")).hexdigest()
-        self.root = self.store.data_dir / "_personal" / owner
+        self.root = personal_root(self.store.data_dir, scope.user_id)
+        self.legacy_root = self.store.data_dir / "_personal" / owner
 
     @contextmanager
     def _coordination(self, *, create=False):
         """기존 공통 잠금을 사용하되 개인 기록이 있는데 잠금이 사라졌으면 중단한다."""
         files.checked(self.store, self.root)
+        files.checked(self.store, self.legacy_root)
         if (self.store.data_dir / "_personal").exists() and not (self.store.data_dir / ".registration.lock").exists():
             raise PersonalCorruptError("Personal coordination lock is unavailable")
         with files.coordination(self.store, create=create):
@@ -59,7 +62,23 @@ class PersonalStore:
         if kind not in KINDS:
             raise ValueError("Unknown personal resource")
         identifier(record_id)
-        return self.root / kind / f"{record_id}.json"
+        return self._select_path(self.root / kind / f"{record_id}.json",
+                                 self.legacy_root / kind / f"{record_id}.json")
+
+    def _select_path(self, *paths):
+        present = [path for path in paths if files.checked(self.store, path).exists()]
+        if len(present) > 1:
+            raise PersonalCorruptError("The same personal record exists in both layouts")
+        return present[0] if present else paths[0]
+
+    def _names(self, kind):
+        current = files.entries(self.store, self.root / kind, maximum=MAX_RECORDS)
+        legacy = files.entries(self.store, self.legacy_root / kind, maximum=MAX_RECORDS)
+        if set(current) & set(legacy):
+            raise PersonalCorruptError("Duplicate personal records in both layouts")
+        if len(current) + len(legacy) > MAX_RECORDS:
+            raise PersonalLimitError("Personal record count limit reached")
+        return sorted([*current, *legacy])
 
     def _publish(self, kind, record_id, value):
         """공통 원자 기록의 바이트 한도 오류를 개인 기록의 오류로 구분한다."""
@@ -95,7 +114,7 @@ class PersonalStore:
         if kind not in KINDS or not 1 <= limit <= 50:
             raise ValueError("Invalid personal listing")
         with self._coordination():
-            names = files.entries(self.store, self.root / kind, maximum=MAX_RECORDS)
+            names = self._names(kind)
             values = []
             for name in names:
                 if not name.endswith(".json"):
@@ -135,7 +154,7 @@ class PersonalStore:
                 if old["requests"].get(request_id) != fingerprint:
                     raise PersonalConflictError()
                 return {"record": old, "revision": canonical_json_hash(old), "replayed": True, "changed": False}
-            if len(files.entries(self.store, self.root / kind, maximum=MAX_RECORDS)) >= MAX_RECORDS:
+            if len(self._names(kind)) >= MAX_RECORDS:
                 raise PersonalLimitError("Personal record count limit reached")
             value = {"schema_version": 1, "id": record_id, "kind": kind, "tenant": self.scope.tenant,
                 "user_id": self.scope.user_id, "created_at": timestamp(), "actor": actor, "data": deepcopy(data),

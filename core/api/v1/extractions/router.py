@@ -16,7 +16,7 @@ from core.api.operations import reauthorize
 from core.api.schemas import Envelope
 from core.api.v1.sources.download import OriginalResponse
 from core.api.v1.sources.ingress import SourceHttpError, SourceMultipartParser, bounded_stream
-from core.modules.access.policy import AccessDenied, AccessScope
+from core.modules.access.policy import AccessScope
 from core.modules.analysis_jobs.store import JobStore
 from core.modules.analysis_inputs import artifacts, contracts as limits
 from core.modules.analysis_inputs.store import InputStore

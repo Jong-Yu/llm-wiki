@@ -16,10 +16,20 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from core.common.read_metrics import span
 from core.modules.access.policy import AccessDenied, AccessPolicy, PolicyError
 
 
 HTTP_HOST = "127.0.0.1"
+PUBLIC_AUTH_PATHS = frozenset({"/api/v1/auth/signup", "/api/v1/auth/login"})
+
+
+def _public_auth(scope):
+    """디코딩·후행 slash·다른 메서드 별칭을 공개 예외로 넓히지 않는다."""
+    path = scope.get("path", "")
+    raw = scope.get("raw_path", path.encode("utf-8"))
+    return (scope.get("method") == "POST" and path in PUBLIC_AUTH_PATHS
+            and raw == path.encode("ascii"))
 
 
 def transport_security_settings() -> TransportSecuritySettings:
@@ -85,10 +95,11 @@ class HttpAccessMiddleware:
             await self.app(scope, receive, send)
             return
         credential = bearer(scope)
-        valid = False
-        if self.policy is not None:
+        valid = self.policy is not None and _public_auth(scope)
+        if self.policy is not None and not valid:
             try:
-                await anyio.to_thread.run_sync(self.policy.authenticate, credential)
+                with span("authorization"):
+                    await anyio.to_thread.run_sync(self.policy.authenticate, credential)
                 valid = True
             except AccessDenied:
                 pass
@@ -97,7 +108,7 @@ class HttpAccessMiddleware:
                     scope, receive, send
                 )
                 return
-        elif credential is not None:
+        elif self.policy is None and credential is not None:
             valid = secrets.compare_digest(credential.encode("ascii"), self.token)
         if not valid:
             await self._error(scope, 401, "unauthenticated", "Unauthorized",

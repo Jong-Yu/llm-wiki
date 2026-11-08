@@ -78,7 +78,7 @@ def checked_receipt(record, job, *, request_id=None):
 def reserved_capacity(store, jobs, job):
     """완료·미확인 영수증과 미연결 파일도 예약량에 포함해 실패로 한도를 우회하지 못하게 한다."""
     reserved = {}
-    directory = jobs.jobs_dir / job["job_id"] / "artifact_requests"
+    directory = jobs.job_root(job["job_id"]) / "artifact_requests"
     for name in source_files.entries(store, directory, maximum=MAX_ARTIFACTS + 1):
         record = records.read(jobs, directory / name)
         value = checked_receipt(record, job)
@@ -119,7 +119,7 @@ def request_receipt(store, jobs, *, tenant, user_id, job_id, request_id):
     limits.identifier(request_id)
     with jobs.sources._coordination_lock():
         job = records.owned_state(jobs, job_id, tenant, user_id)
-        path = jobs.jobs_dir / job_id / "artifact_requests" / (request_key(tenant, user_id, request_id) + ".json")
+        path = jobs.job_root(job_id) / "artifact_requests" / (request_key(tenant, user_id, request_id) + ".json")
         record = records.read(jobs, path)
         value = checked_receipt(record, job, request_id=request_id)
         published = any(ref["artifact_id"] == value["artifact_id"]
@@ -219,11 +219,11 @@ def submit(inputs, job_id, *, tenant, user_id, run_id, expected_job_revision, bu
         "media_type": media_type, "sha256": content_sha256, "size_bytes": len(raw), "request_id": request_id}
     fingerprint = canonical_json_hash(metadata)
     jobs, store = inputs.jobs, inputs.store
-    directory = jobs.jobs_dir / job_id / "artifact_requests"
-    receipt_path = directory / (request_key(tenant, user_id, request_id) + ".json")
     with jobs.sources._coordination_lock():
         # 조회 재시도와 달리 새 공개는 살아 있는 실행·취소·원본 기준까지 검사한다.
         job, actor = bundles.opened(inputs, job_id, tenant, user_id, run_id, authorize, "source_write")
+        directory = jobs.job_root(job_id) / "artifact_requests"
+        receipt_path = directory / (request_key(tenant, user_id, request_id) + ".json")
         try:
             prior = records.read(jobs, receipt_path)
         except FileNotFoundError:

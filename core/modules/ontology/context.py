@@ -7,6 +7,7 @@
 # focus/other_context/unclassified는 우선 읽을 주장 그룹이다. 다른 그룹의 조건이나 예외를 버리는 권한 필터가 아니다.
 # 배열 위치는 그 그래프 버전에서만 의미가 있으므로 문서·원문·그래프 버전과 함께 사용한다.
 
+from .storage import source_fields
 from hashlib import sha256
 import json
 import re
@@ -147,6 +148,7 @@ def selected_context(ontology, documents: list[str], *, domain=None, viewpoint=N
                 skip(document, code, "ontology", omitted=False)
         entry = {"document": document,
                  "source": {"content": source.content, "revision": source.revision,
+                            **source_fields(source.content, include_body=True),
                             "line_start": 1 if source.content else 0,
                             "line_end": (len(re.findall(r"\r\n|\r|\n", source.content))
                                          + (not source.content.endswith(("\r", "\n")))) if source.content else 0},

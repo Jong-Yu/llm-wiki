@@ -2,7 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023"],
-    "types": ["node"],
+    "types": ["node", "electron-vite/node"],
     "paths": {
       "@contracts/*": ["../../src/shared/contracts/*"],
       "@main/*": ["../../src/main/*"]

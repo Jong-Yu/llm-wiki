@@ -84,6 +84,8 @@ def _finish(self, result, capture, policy_revision, profile, tenant, requested_a
                   "profile_definition": deepcopy(profile or {"domain": self.actor.get("domain"), "viewpoint": self.actor.get("viewpoint")}),
                   "policy_revision": policy_revision or self.actor.get("policy_revision"), "application_context": deepcopy(capture.application_context),
                   "requested_as_of": requested_as_of, "evaluated_at": capture.at.isoformat(), "temporal_scope": "current_capture_evaluated_at_requested_time"}
+    if "access_revision" in self.actor:
+        evaluation["access_revision"] = self.actor["access_revision"]
     result.update(ok=True, resource_manifest=deepcopy(capture.manifest), evaluation=evaluation, access=deepcopy(self.actor),
                   skipped=skipped, truncated=bool(truncated or capture.truncated),
                   completeness={"selection": {"complete": not capture.truncated, "scope": "explicit_and_bounded_discovery"},
@@ -113,7 +115,7 @@ def _finish(self, result, capture, policy_revision, profile, tenant, requested_a
         result["completeness"]["output"]["complete"] = False
     result["revision_scope"] = "complete_manifest" if result["complete"] else "partial_manifest"
     manifest = result["resource_manifest"]
-    snapshot_scope = {"contract_version": contracts.CONTRACT_VERSION, "tenant": tenant or self.actor["tenant"], "policy_revision": evaluation["policy_revision"],
+    snapshot_scope = {"contract_version": contracts.CONTRACT_VERSION, "tenant": tenant or self.actor["tenant"], "policy_revision": evaluation.get("access_revision", evaluation["policy_revision"]),
                       "scope": result["scope"], "target": result.get("target", {}).get("requested"), "manifest": manifest, "coverage": deepcopy(capture.coverage)}
     # evaluated_at and transient status decisions belong only to view hash.
     if "expanded_via" in snapshot_scope["scope"]:

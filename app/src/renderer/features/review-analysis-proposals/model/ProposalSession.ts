@@ -122,11 +122,11 @@ export class ProposalSession {
           });
           if (!read.ok)
             throw new Error(
-              '보관된 추출안의 현재 접근·판본을 확인하지 못했습니다. 서버 연결 후 다시 확인해 주세요.',
+              '보관된 추출 결과의 현재 접근·버전을 확인하지 못했습니다. 서버 연결 후 다시 확인해 주세요.',
             );
           observed = proposalSchema.parse(read.data);
           if (observed.proposal_id !== proposalId)
-            throw new Error('복원된 추출안 ID가 서버 응답과 다릅니다.');
+            throw new Error('복원된 추출 결과 ID가 서버 응답과 다릅니다.');
         }
         this.forms.restore(restored.forms);
         const recovery =
@@ -144,7 +144,7 @@ export class ProposalSession {
           review: null,
           receipt: null,
           recoveryNotice:
-            '종료 전 입력과 원래 판본을 복원했습니다. 현재 서버 후보를 대조하고 명시 선택해 주세요. 확인 체크는 초기화했습니다.',
+            '종료 전 입력과 원래 버전을 복원했습니다. 현재 서버 후보를 대조하고 명시 선택해 주세요. 확인 체크는 초기화했습니다.',
         });
         if (restored.execution) this.execution?.restore(restored.execution);
       }
@@ -179,7 +179,7 @@ export class ProposalSession {
         : null,
     });
   }
-  /** 타이핑은 짧게 묶어 저장하고 실패를 숨기거나 낡은 판본으로 덮어쓰지 않습니다. */
+  /** 타이핑은 짧게 묶어 저장하고 실패를 숨기거나 낡은 버전으로 덮어쓰지 않습니다. */
   #scheduleSave(): void {
     if (!this.#recoverySlot || this.#recoveryFailed) return;
     if (this.#saveTimer) clearTimeout(this.#saveTimer);
@@ -244,11 +244,11 @@ export class ProposalSession {
         review: null,
       });
   }
-  /** 실제 새 세대의 검토 상태만 완료 폼에 제공합니다. */
+  /** 실제 새 버전의 검토 상태만 완료 폼에 제공합니다. */
   setReview(review: DocumentKnowledge): void {
     this.#set({ review });
   }
-  /** 현재 연결의 고정 범위를 모든 작업에 부착합니다. */
+  /** 현재 연결의 범위를 모든 작업에 부착합니다. */
   requestFields(): {
     connectionId: string;
     expectedScope: ReturnType<typeof proposalExpectedScope>;
@@ -404,9 +404,9 @@ export class ProposalSession {
             (matchesPending && !!this.#state.pending),
           error: resolved
             ? null
-            : '일부 기록 또는 저장 상태가 미확인입니다. 같은 요청 영수증으로 확인해 주세요.',
+            : '일부 기록 또는 저장 상태가 미확인입니다. 같은 요청 확인 기록으로 확인해 주세요.',
         });
-        // 후보 제출 영수증은 canonical 저장 성공을 뜻하지 않으며 최신 후보를 별도로 읽습니다.
+        // 후보 제출 확인 기록은 canonical 저장 성공을 뜻하지 않으며 최신 후보를 별도로 읽습니다.
       } else {
         const record = proposalSchema.parse(result.data);
         if (

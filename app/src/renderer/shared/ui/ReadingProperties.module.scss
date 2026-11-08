@@ -1,0 +1,43 @@
+.root {
+  min-width: 0;
+  align-self: start;
+}
+.heading {
+  margin: 0 0 var(--wiki-space-12);
+  color: var(--wiki-color-text-primary);
+  font-size: var(--wiki-font-size-14);
+  line-height: var(--wiki-component-control-line-height);
+  font-weight: var(--wiki-font-weight-semibold);
+  button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wiki-space-8);
+    min-height: var(--wiki-component-control-height);
+    padding: 7px 0;
+    border: 1px solid transparent;
+    border-radius: var(--wiki-component-control-radius);
+    color: inherit;
+    background: transparent;
+    font: inherit;
+  }
+}
+.body {
+  min-width: 0;
+  display: grid;
+  gap: var(--wiki-space-24);
+  &[hidden] {
+    display: none;
+  }
+  > :where(p, ul, ol, dl, details) {
+    margin-block: 0;
+  }
+  > [data-workspace-section] + [data-workspace-section] {
+    margin-top: 0;
+  }
+}
+@container workspace (width < 900px) {
+  .root {
+    border-top: 1px solid var(--wiki-color-border-default);
+    padding-top: var(--wiki-space-12);
+  }
+}

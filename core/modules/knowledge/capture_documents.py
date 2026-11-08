@@ -4,6 +4,7 @@
 # full=False면 원문 앵커 확인에 필요한 범위만, full=True면 실제 그래프와 검토 상태도 확인한다.
 
 from core.modules.documents.store import DocumentSnapshot
+from core.modules.ontology.storage import source_fields
 from .capture_errors import _empty_graph
 from core.common.json_codec import canonical_json_hash as _hash
 from core.modules.ontology.snapshots import _query_snapshot
@@ -90,6 +91,7 @@ def document(self, document, purpose="content", required_by=None, *, root=False,
               "review_revision": self._component("review", document)["revision"] if full else None,
               "state_revision": None if snapshot is None else snapshot["state_revision"]}
     source_entry = None if source is None else {"content": source.content, "revision": source.revision,
+        **source_fields(source.content, include_body=True),
         "line_start": 1 if source.content else 0,
         "line_end": len(source.content.splitlines())}
     graph_valid = full and ("graph", document) not in self.errors and machine["status"] == "ready" and not machine.get("needs_reextraction", False)
@@ -98,11 +100,12 @@ def document(self, document, purpose="content", required_by=None, *, root=False,
              "content": None if source is None else source.content,
              "machine_graph": machine if full else None,
              "effective_graph": deepcopy(snapshot["effective_graph"]) if effective_available else None,
-             "claims": [] if snapshot is None else deepcopy(snapshot["claims"]),
+             "claims": [] if snapshot is None else deepcopy(snapshot.get("current_claims", snapshot["claims"])),
+             "cleanup": {} if snapshot is None else deepcopy(snapshot.get("cleanup", {})),
              "policies": [] if snapshot is None else deepcopy(snapshot.get("policies", [])),
              "history": [] if ledger is None else deepcopy(ledger["events"]),
              "ledger": deepcopy(ledger),
-             "pending_history": [] if snapshot is None else deepcopy(snapshot["pending_history"]),
+             "pending_history": [] if snapshot is None else deepcopy(snapshot.get("current_pending_history", snapshot["pending_history"])),
              "snapshot": deepcopy(snapshot),
              "components": {kind: self._component(kind, document) if full or kind in {"source", "history"} else {"status": "not_requested", "revision": None, "captured_bytes": 0} for kind in ("source", "graph", "review", "history")},
              "policy_evaluation": {"status": "ready" if effective_available else "not_requested" if not full else "unavailable"},

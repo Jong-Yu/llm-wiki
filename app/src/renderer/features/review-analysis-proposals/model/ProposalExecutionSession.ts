@@ -34,7 +34,7 @@ export type ProposalExecutionState = {
   busy: boolean;
   error: string | null;
 };
-/** AI 실행 요청과 후보 영수증 확인을 분리하고 화면 이동 뒤에도 미확인 ID를 유지합니다. */
+/** AI 실행 요청과 후보 확인 기록 확인을 분리하고 화면 이동 뒤에도 미확인 ID를 유지합니다. */
 export class ProposalExecutionSession {
   #state: ProposalExecutionState = {
     request: null,
@@ -77,10 +77,10 @@ export class ProposalExecutionSession {
             },
           }
         : null,
-      error: '복원된 실행입니다. 같은 실행·후보 영수증을 조회해 주세요.',
+      error: '복원된 실행입니다. 같은 실행·후보 확인 기록을 조회해 주세요.',
     });
   }
-  /** 새 실행은 앞선 서버 상태를 확인한 명시 동작이며 이전 요청·영수증을 보존합니다. */
+  /** 새 실행은 앞선 서버 상태를 확인한 명시 동작이며 이전 요청·확인 기록을 보존합니다. */
   prepareNext(): void {
     if (!this.canPrepareNext()) return;
     const { request, detail, executionId, previous } = this.#state;
@@ -116,7 +116,7 @@ export class ProposalExecutionSession {
     this.#state = { ...this.#state, ...patch };
     for (const listener of this.#listeners) listener();
   }
-  /** 응답의 추출안과 실행 ID를 대조하고 다른 실행 결과를 숨깁니다. */
+  /** 응답의 추출 결과과 실행 ID를 대조하고 다른 실행 결과를 숨깁니다. */
   #accept(result: ProposalExecutionResult): void {
     if (!result.ok) {
       this.#set({
@@ -141,7 +141,7 @@ export class ProposalExecutionSession {
       this.#set({
         busy: false,
         detail: null,
-        error: '응답의 추출안·실행 ID가 달라 결과를 숨겼습니다.',
+        error: '응답의 추출 결과·실행 ID가 달라 결과를 숨겼습니다.',
       });
       return;
     }

@@ -104,6 +104,10 @@ class ResultStore:
             record, _ = repository.load(self, job, request_id)
             value = self._response(record, job, replayed=False)
             value["current_output"] = self._observe(record["receipt"], actor) if record["saved"] is True else None
+            # 과거 저장 성공은 계속 읽을 수 있다. 새 실행에서 재사용할 때에는 현재의
+            # 검토·맥락·규약·권한까지 별도로 대조한 상태를 사용한다.
+            from .reuse import observe as reuse_basis
+            value["reuse_basis"] = reuse_basis(self, job, actor) if record["saved"] is True else None
             return value
 
     @staticmethod
@@ -251,6 +255,10 @@ class ResultStore:
         from core.modules.analysis_proposals.executions import ensure_proposal_job_draft
         ensure_proposal_job_draft(self.store, job, actor, payload, rulesets=self.rulesets)
         manifest, _, components = bundles.load_locked(self.inputs, job, payload["bundle_id"], payload["bundle_revision"])
+        from core.modules.analysis_jobs.registration import registration
+        if stage == "prepare_wiki" and registration(job) is not None:
+            if payload["content"] != components.get("data/registration.md"):
+                raise ResultError("preservation_content_mismatch")
         # 위키 작성용 입력으로 그래프를 저장하거나, 다른 문서를 대상으로 바꾸는 것을 막는다.
         if manifest["stage"] != stage or manifest["target_document"] != document:
             raise ResultError("input_scope_mismatch")
@@ -321,11 +329,12 @@ class ResultStore:
                                      lambda: validation.graph_submission(self.rulesets, payload["submission"]))
         # 실제 저장 뒤 이벤트 한도에 걸리지 않도록 같은 크기의 후보로 먼저 검사한다.
         self._candidate(job, actor, payload, source_revision="0" * 64, graph_revision="0" * 64)
+        authorship_entry_created = False
 
         def before_commit():
             """저장 함수가 위키 잠금을 잡은 뒤, 실제 자료 변경 직전에 호출하는 함수다."""
             # nonlocal은 바깥 _save의 actor를 바꾼다는 뜻이다. 최종 확인한 주체를 기록한다.
-            nonlocal actor
+            nonlocal actor, authorship_entry_created
             rule_checks.start(report, "R-A02")
             current = records.authorized(lambda: authorize(permission), job["tenant"], job["user_id"])
             commands.check_basis(self.jobs, job["source_ref"])
@@ -333,6 +342,9 @@ class ResultStore:
             rule_checks.start(report, "R-A03")
             bundles.validate_current_locked(self.inputs, job, manifest, current)
             actor = current
+            if stage == "prepare_wiki":
+                history = self.store._document_path(self.store.history_dir, document)
+                authorship_entry_created = not (history / "changes.json").exists()
             rule_checks.mark(report, "R-A03", "pass", "current_fixed_basis_and_storage_cas_checked")
             rule_checks.mark(report, "R-A05", "pass", "schema_and_canonical_storage_validation_completed")
             report.pop("active_rule", None)
@@ -346,7 +358,9 @@ class ResultStore:
             # before_commit()처럼 여기서 실행하지 않고 함수 자체를 넘긴다.
             # WikiStore가 잠금을 보유한 정확한 시점에 이 함수를 실행해야 하기 때문이다.
             result = self.store.save(document, payload["content"], expected_revision=source_revision,
-                                     before_commit=before_commit)
+                                     before_commit=before_commit, actor=actor,
+                                     origin={"kind": "ai", "tool": "analysis", "job_id": job["job_id"], "run_id": job["run_id"]},
+                                     reason="preserve_source" if registration(job) is not None else "analysis_wiki")
             result = {"source_revision": result.revision, "graph_revision": None, "changed": result.changed,
                       "history_entry": result.history_path.name if result.history_path is not None else None,
                       "cleanup_failures": cleanup_details(self.store.data_dir, result.cleanup_failures)}
@@ -369,6 +383,8 @@ class ResultStore:
             "execution": execution}
         receipt["analysis_basis_revision"] = manifest.get("analysis_basis_revision")
         receipt["history_entry"] = result.get("history_entry")
+        if stage == "prepare_wiki":
+            receipt["authorship_entry_created"] = authorship_entry_created and result["changed"]
         observed = self._observe(receipt, actor)
         if observed["status"] == "current":
             receipt["state_revision"] = observed["state_revision"]
@@ -382,6 +398,9 @@ class ResultStore:
             # 마지막 파일을 쓰다가 끊겨도 앞의 성공 증거로 '자료는 저장됨'을 확인할 수 있다.
             # Canonical 저장이 반환한 revision을 별도로 남긴다. 영수증 실패가 저장 재실행을 유도하지 않는다.
             records.write(self.jobs, directory / "saved.json", record)
+            if stage == "prepare_wiki" and registration(job) is not None:
+                from core.modules.analysis_jobs.registration import confirm
+                confirm(self.jobs, job, receipt)
             candidate = self._candidate(job, actor, payload, source_revision=receipt["source_revision"],
                                         graph_revision=receipt["graph_revision"])
             self.jobs._write(records.state_path(self.jobs, job["job_id"]), candidate)

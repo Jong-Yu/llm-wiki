@@ -10,7 +10,9 @@ from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
 from core.modules.access.policy import AccessDenied, PolicyError
+from core.common.read_index import CanonicalIndexUnavailable
 from core.modules.documents.store import DocumentTooLargeError, StorageBusyError, RevisionConflictError
+from core.modules.documents.changes import AuthorshipCorruptError
 from core.api.ingress import RequestInputError
 from core.modules.correspondences.contracts import CorrespondenceCorruptError, CorrespondenceLimitError
 from core.modules.personal.store import PersonalConflictError, PersonalCorruptError, PersonalLimitError
@@ -109,6 +111,8 @@ async def domain_error(request, error):
         status, code, message = 403, "access_denied", "Access denied."
     elif isinstance(error, PolicyError):
         status, code, message = 503, "access_unavailable", "Access policy is unavailable."
+    elif isinstance(error, CanonicalIndexUnavailable):
+        status, code, message, retry = 503, "index_unavailable", "The exploration index is unavailable; existing records are preserved.", "read_again"
     elif isinstance(error, CatalogChangedError):
         status, code, message, retry = 409, "catalog_changed", "The listing basis changed; restart from the first page.", "read_again"
         details = {"requires_refresh": True}
@@ -130,6 +134,8 @@ async def domain_error(request, error):
         code, message = "invalid_encoding", "The document is not valid UTF-8."
     elif isinstance(error, FileNotFoundError):
         status, code, message = 404, "not_found", "The requested document does not exist."
+    elif isinstance(error, AuthorshipCorruptError):
+        code, message = "authorship_corrupt", "The preserved authorship journal is inconsistent; inspect it before writing."
     elif isinstance(error, (ValueError, TypeError)):
         status, code, message = 422, "invalid_argument", "Check the relative .md document path and query arguments."
     elif isinstance(error, OSError):
@@ -159,6 +165,6 @@ def register_errors(app):
         500, "response_invalid", "The service result does not match the response contract."))
     app.add_exception_handler(HTTPException, http_error)
     from core.modules.documents.listing import CatalogChangedError
-    for kind in (AccessDenied, PolicyError, CatalogChangedError, SourceConflictError, JobConflictError, InputConflictError, RevisionConflictError, PersonalConflictError, RequestInputError, ValueError, TypeError, OSError, StorageBusyError):
+    for kind in (CanonicalIndexUnavailable, AccessDenied, PolicyError, CatalogChangedError, SourceConflictError, JobConflictError, InputConflictError, RevisionConflictError, PersonalConflictError, RequestInputError, ValueError, TypeError, OSError, StorageBusyError):
         app.add_exception_handler(kind, domain_error)
     app.add_exception_handler(Exception, domain_error)

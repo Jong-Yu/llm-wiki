@@ -1,0 +1,42 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.page[data-standalone='true'] {
+  height: 100dvh;
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 20px;
+  font: var(--wiki-font-size-13) / var(--wiki-font-line-height-ui)
+    var(--wiki-font-family-ui);
+}
+
+.heading h1 {
+  margin: 0;
+  font-size: var(--wiki-font-size-16);
+}
+
+.heading a {
+  color: var(--wiki-color-action-primary);
+}
+
+.frame {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}

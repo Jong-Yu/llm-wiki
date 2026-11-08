@@ -2,9 +2,10 @@
 # machine_graph는 기계 추출 결과, effective_graph는 현재 검토/정책을 반영한 결과이므로 구별한다.
 
 from typing import Literal
-from pydantic import Field, JsonValue, field_validator, model_serializer
+from pydantic import Field, JsonValue, field_validator, model_serializer, model_validator
 from core.api.schemas import Access, Model
 from core.api.v1.analysis_plans.schemas import ConversionRef
+from core.modules.personal.web_evidence import validate_web_evidence
 
 
 class KnowledgeQuery(Model):
@@ -114,12 +115,57 @@ class QuestionSource(Model):
         return value
 
 
+class WebEvidenceSource(Model):
+    """외부 페이지에서 개인 PC가 읽어 보관한 문자와 그 출처다."""
+    url: str = Field(min_length=1, max_length=2048)
+    title: str = Field(min_length=1, max_length=300)
+    content: str = Field(min_length=1, max_length=12000)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    retrieved_at: str = Field(min_length=1, max_length=64)
+
+
+class WebEvidence(Model):
+    """웹 검색 선택을 실제 취득 결과·실패 상태와 함께 질문별로 고정한다."""
+    query: str = Field(min_length=1, max_length=200)
+    status: Literal["complete", "partial", "empty", "unavailable"]
+    sources: list[WebEvidenceSource] = Field(max_length=5)
+    warnings: list[str] = Field(max_length=10)
+
+    @model_validator(mode="after")
+    def retained_sources(self):
+        """내부 호출과 같은 경계에서 URL·시각·본문 지문을 검사한다."""
+        validate_web_evidence(self.model_dump())
+        return self
+
+
 class QuestionContextRequest(ProfileRequest):
     """정의·예외·고정 주장과 원본 판본을 조용히 제외하지 않는 질문 준비 입력이다."""
     documents: list[str] = Field(default_factory=list, max_length=8)
     required_documents: list[str] = Field(default_factory=list, max_length=8)
     claims: list[ClaimSelection] = Field(default_factory=list, max_length=100)
     source_refs: list[QuestionSource] = Field(default_factory=list, max_length=4)
+    mode: Literal["full", "on_demand"] = "full"
+    retrieval_scope: Literal["selected", "workspace"] | None = None
+    lookup_question: str | None = Field(None, min_length=1, max_length=65536)
+    # 검색으로 관련 자료를 찾지 못한 질문을 "근거 없음"으로 고정해 AI가 위키에 없다고 답하게 한다.
+    # 명시한 경우에만 빈 선택을 허용하며, 기본값(거부)은 그대로다.
+    allow_empty: bool = False
+    web: WebEvidence | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        """생략한 새 필드가 기존 요청의 hash·재시도 비교를 바꾸지 않게 한다."""
+        value = handler(self)
+        for key in ("retrieval_scope", "lookup_question"):
+            if value.get(key) is None:
+                value.pop(key, None)
+        if not self.allow_empty:
+            value.pop("allow_empty", None)
+        if self.web is None:
+            value.pop("web", None)
+        if self.mode == "full":
+            value.pop("mode", None)
+        return value
 
 
 # 각 revision은 서로 다른 자료의 버전이다. 원문·그래프·검토·전체 이력을 같은 값으로 취급하지 않는다.
@@ -138,6 +184,11 @@ class DocumentKnowledge(Model):
     policies: list[dict[str, JsonValue]]
     history: list[dict[str, JsonValue]]
     pending_history: list[str]
+    current_claims: list[dict[str, JsonValue]]
+    current_pending_history: list[str]
+    cleanup: dict[str, JsonValue]
+    authored_relations: list[dict[str, JsonValue]]
+    relation_history: list[dict[str, JsonValue]]
     selection: dict[str, JsonValue]
     needs_review: bool
     access: Access

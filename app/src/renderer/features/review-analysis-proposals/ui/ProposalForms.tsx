@@ -1,49 +1,35 @@
-import { useEffect } from 'react';
-import type { JSX } from 'react';
+import { useEffect, useId } from 'react';
+import type { JSX, ChangeEvent } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import type {
   DocumentKnowledge,
   KnowledgeClaim,
+  KnowledgeValue,
+  KnowledgeJson,
 } from '@contracts/knowledge.contract';
 import { Button } from '@renderer/shared/ui/Button';
 import {
-  prepareFieldsSchema,
-  submitFieldsSchema,
+  parseObject,
   decisionFieldsSchema,
   completionFieldsSchema,
 } from '../model/analysisProposal.schema';
 import type {
-  PrepareFields,
-  SubmitFields,
   DecisionFields,
   CompletionFields,
-  ProposalRecord,
   ProposalClaim,
 } from '../model/analysisProposal.schema';
 import styles from './ReviewAnalysisProposals.module.scss';
+import { ProposalClaimSummary } from './ProposalClaimSummary';
+import { ProposalClaimDetails } from './ProposalGraphDetails';
 import type { ProposalFormDrafts } from '../model/ProposalFormDrafts';
 
-type PrepareFormProps = {
-  drafts: ProposalFormDrafts;
-  draftKey: string;
-  document: string;
-  disabled: boolean;
-  onPrepare: (values: PrepareFields) => Promise<void>;
-};
-type SubmitFormProps = {
-  drafts: ProposalFormDrafts;
-  draftKey: string;
-  record: ProposalRecord;
-  disabled: boolean;
-  onSubmit: (values: SubmitFields) => void;
-};
 type DecisionFormProps = {
   drafts: ProposalFormDrafts;
   canRestore: boolean;
   draftKey: string;
   claim: ProposalClaim;
+  graph: KnowledgeValue | null;
   disabled: boolean;
   onDecide: (values: DecisionFields) => void;
 };
@@ -54,7 +40,7 @@ type CompleteFormProps = {
   disabled: boolean;
   onComplete: (values: CompletionFields) => void;
 };
-type FormErrorsProps = { errors: unknown };
+type FormErrorsProps = { errors: unknown; id: string };
 
 /** 폼 오류 본문만 읽고 DOM 참조를 따라가지 않습니다. */
 function errorMessages(errors: unknown): string[] {
@@ -69,224 +55,15 @@ function errorMessages(errors: unknown): string[] {
   );
 }
 /** 입력 오류를 폼 가까이에 접근 가능한 텍스트로 표시합니다. */
-function FormErrors({ errors }: FormErrorsProps): JSX.Element {
+function FormErrors({ errors, id }: FormErrorsProps): JSX.Element | null {
+  const messages = [...new Set(errorMessages(errors))];
+  if (messages.length === 0) return null;
   return (
-    <div role="alert">
-      {[...new Set(errorMessages(errors))].map(
-        (message: string): JSX.Element => (
-          <p key={message}>{message}</p>
-        ),
-      )}
-    </div>
-  );
-}
-
-/** 새 추출 입력 준비는 현재 Wiki 전체와 명시한 맥락에 한정합니다. */
-export function ProposalPrepareForm({
-  drafts,
-  draftKey,
-  document,
-  disabled: externalDisabled,
-  onPrepare,
-}: PrepareFormProps): JSX.Element {
-  const {
-    register,
-    handleSubmit,
-    getValues,
-    formState: { errors, isSubmitting },
-  } = useForm<PrepareFields>({
-    resolver: zodResolver(prepareFieldsSchema),
-    defaultValues: drafts.prepare.get(draftKey) ?? { document, contexts: '[]' },
-  });
-  const disabled = externalDisabled || isSubmitting;
-  useEffect(
-    (): (() => void) => (): void => {
-      drafts.prepare.set(draftKey, getValues());
-      drafts.changed();
-    },
-    [draftKey, getValues, drafts],
-  );
-  return (
-    <form
-      className={styles.form}
-      onChange={(): void => {
-        drafts.prepare.set(draftKey, getValues());
-        drafts.changed();
-      }}
-      onSubmit={handleSubmit(onPrepare)}
-    >
-      <h2>현재 Wiki로 추출안 준비</h2>
-      <label>
-        Wiki 문서 경로
-        <input
-          {...register('document')}
-          aria-invalid={!!errors.document}
-          disabled={disabled}
-          placeholder="문서.md"
-        />
-      </label>
-      <details>
-        <summary>함께 고정할 맥락 문서</summary>
-        <p>최대 7개. 각 항목은 document, required, reason을 포함합니다.</p>
-        <label>
-          맥락 문서 JSON
-          <textarea
-            {...register('contexts')}
-            rows={4}
-            disabled={disabled}
-            aria-invalid={!!errors.contexts}
-          />
-        </label>
-      </details>
-      <FormErrors errors={errors} />
-      <Button type="submit" disabled={disabled}>
-        전체 원문·이전 추출 고정
-      </Button>
-      <p>
-        원문을 고정해 검토 초안을 만듭니다. AI 실행과 그래프 적용은 별도입니다.
-      </p>
-    </form>
-  );
-}
-
-/** 기존 ID의 읽기만 수행하며 열람을 새 분석 실행으로 바꾸지 않습니다. */
-type ProposalLookupFormProps = {
-  disabled: boolean;
-  onRead: (id: string) => void;
-};
-/** 기존 추출안의 명시 ID만 조회합니다. */
-export function ProposalLookupForm({
-  disabled,
-  onRead,
-}: ProposalLookupFormProps): JSX.Element {
-  const schema = z.object({
-    id: z.string().regex(/^[a-f0-9]{32}$/, '32자리 추출안 ID를 입력해 주세요.'),
-  });
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<{ id: string }>({
-    resolver: zodResolver(schema),
-    defaultValues: { id: '' },
-  });
-  return (
-    <form
-      className={styles.form}
-      onSubmit={handleSubmit((values: { id: string }): void =>
-        onRead(values.id),
-      )}
-    >
-      <label>
-        기존 추출안 ID
-        <input
-          {...register('id')}
-          aria-invalid={!!errors.id}
-          disabled={disabled}
-        />
-      </label>
-      <FormErrors errors={errors} />
-      <Button type="submit" variant="secondary" disabled={disabled}>
-        추출안 조회
-      </Button>
-    </form>
-  );
-}
-
-/** 새 전체 결과와 재추출 결정의 명시 대응을 같은 CAS 기준으로 제출합니다. */
-export function ProposalSubmitForm({
-  drafts,
-  draftKey,
-  record,
-  disabled,
-  onSubmit,
-}: SubmitFormProps): JSX.Element {
-  const {
-    register,
-    handleSubmit,
-    getValues,
-    formState: { errors },
-  } = useForm<SubmitFields>({
-    resolver: zodResolver(submitFieldsSchema),
-    defaultValues: drafts.submit.get(draftKey) ?? {
-      whole: record.submission
-        ? JSON.stringify(record.submission, null, 2)
-        : '',
-      resolves: '',
-      bindings: '[]',
-    },
-  });
-  useEffect(
-    (): (() => void) => (): void => {
-      drafts.submit.set(draftKey, getValues());
-      drafts.changed();
-    },
-    [draftKey, getValues, drafts],
-  );
-  return (
-    <form
-      className={styles.form}
-      onChange={(): void => {
-        drafts.submit.set(draftKey, getValues());
-        drafts.changed();
-      }}
-      onSubmit={handleSubmit(onSubmit)}
-    >
-      <h2>새 전체 추출안 제출</h2>
-      <details>
-        <summary>보존된 이전 편집 입력</summary>
-        {[...drafts.submit.entries()]
-          .filter(
-            ([key]: [string, SubmitFields]): boolean =>
-              key !== draftKey &&
-              key.slice(0, key.lastIndexOf(':')) ===
-                draftKey.slice(0, draftKey.lastIndexOf(':')),
-          )
-          .map(([key, draft]: [string, SubmitFields]): JSX.Element => (
-            <pre key={key}>{JSON.stringify(draft, null, 2)}</pre>
-          ))}
-      </details>
-      <p>
-        관계·속성·후보·한정어를 포함한 전체 결과를 제출합니다. 현재 관점의
-        일부만으로 덮어쓰지 않습니다.
-      </p>
-      <label>
-        전체 추출 JSON
-        <textarea
-          {...register('whole')}
-          rows={14}
-          disabled={disabled}
-          aria-invalid={!!errors.whole}
-          spellCheck={false}
-        />
-      </label>
-      <label>
-        해결한 재추출 결정 ID · 줄 또는 쉼표 구분
-        <textarea
-          {...register('resolves')}
-          rows={2}
-          disabled={disabled}
-          aria-invalid={!!errors.resolves}
-        />
-      </label>
-      <label>
-        새 claim ID의 명시 대응 JSON
-        <textarea
-          {...register('bindings')}
-          rows={4}
-          disabled={disabled}
-          aria-invalid={!!errors.bindings}
-        />
-      </label>
-      <p>
-        인용 변경으로 ID가 달라졌다면 decision_id, new_claim_id, reason을
-        입력합니다. 이전 승인은 이식되지 않습니다.
-      </p>
-      <FormErrors errors={errors} />
-      <Button type="submit" disabled={disabled}>
-        전체 추출안을 초안으로 제출
-      </Button>
-    </form>
+    <span className={styles.fieldErrors} id={id} role="alert">
+      {messages.map((message: string): JSX.Element => (
+        <span key={message}>{message}</span>
+      ))}
+    </span>
   );
 }
 
@@ -296,13 +73,16 @@ export function MissingClaimDecisionForm({
   canRestore,
   draftKey,
   claim,
+  graph,
   disabled,
   onDecide,
 }: DecisionFormProps): JSX.Element {
+  const errorId = useId();
   const {
     register,
     handleSubmit,
     getValues,
+    setValue,
     control,
     formState: { errors },
   } = useForm<DecisionFields>({
@@ -311,11 +91,51 @@ export function MissingClaimDecisionForm({
       action: 'reextract',
       reason: '',
       evidence: '',
-      replacement: '',
+      replacement: JSON.stringify(claim.value),
       checkedWhole: false,
     },
   });
   const action = useWatch({ control, name: 'action' });
+  const evidence = useWatch({ control, name: 'evidence' });
+  const replacementText = useWatch({ control, name: 'replacement' });
+  const replacement = parseObject(replacementText) ?? claim.value;
+  const entities = Array.isArray(graph?.entities) ? graph.entities : [];
+  useEffect((): void => {
+    if (action !== 'keep') return;
+    const current = parseObject(getValues('replacement')) ?? claim.value;
+    if (current.evidence !== evidence)
+      setValue('replacement', JSON.stringify({ ...current, evidence }), {
+        shouldDirty: true,
+      });
+  }, [action, evidence, claim.value, getValues, setValue]);
+  /** 이름 선택을 내부 참조에 연결하고 기존 조건·한정어를 보존합니다. */
+  function changeReplacement(key: string, value: string): void {
+    setValue(
+      'replacement',
+      JSON.stringify({ ...replacement, [key]: value, evidence }),
+      { shouldDirty: true },
+    );
+    drafts.decision.set(draftKey, getValues());
+    drafts.changed();
+  }
+  /** 현재 후보의 개념 이름으로 복구 대상을 선택합니다. */
+  function endpointOptions(): JSX.Element[] {
+    return entities.flatMap((item: KnowledgeJson): JSX.Element[] => {
+      if (
+        item === null ||
+        typeof item !== 'object' ||
+        Array.isArray(item) ||
+        typeof item.id !== 'string' ||
+        typeof item.label !== 'string'
+      )
+        return [];
+      return [
+        <option key={item.id} value={item.id}>
+          {item.label}
+        </option>,
+      ];
+    });
+  }
   useEffect(
     (): (() => void) => (): void => {
       drafts.decision.set(draftKey, getValues());
@@ -333,7 +153,7 @@ export function MissingClaimDecisionForm({
       onSubmit={handleSubmit(onDecide)}
     >
       <h3>미발견 관계 처리</h3>
-      <code>{claim.claim_id}</code>
+
       <label>
         이번 비교의 판단
         <select {...register('action')} disabled={disabled}>
@@ -351,7 +171,9 @@ export function MissingClaimDecisionForm({
           rows={3}
           disabled={disabled}
           aria-invalid={!!errors.reason}
+          aria-describedby={errors.reason ? `${errorId}-reason` : undefined}
         />
+        <FormErrors id={`${errorId}-reason`} errors={errors.reason} />
       </label>
       <label>
         현재 전체 원문의 정확한 인용
@@ -360,44 +182,106 @@ export function MissingClaimDecisionForm({
           rows={3}
           disabled={disabled}
           aria-invalid={!!errors.evidence}
+          aria-describedby={errors.evidence ? `${errorId}-evidence` : undefined}
         />
+        <FormErrors id={`${errorId}-evidence`} errors={errors.evidence} />
       </label>
       {action === 'exclude' && (
         <label className={styles.check}>
           <input
             type="checkbox"
             {...register('checkedWhole')}
+            aria-invalid={!!errors.checkedWhole}
+            aria-describedby={
+              errors.checkedWhole ? `${errorId}-checkedWhole` : undefined
+            }
             disabled={disabled}
-          />
-          현재 전체 원문을 확인했습니다. 제외는 과거 사실의 삭제·부정이
-          아닙니다.
-        </label>
-      )}
-      {action === 'keep' && (
-        <label>
-          복구할 전체 항목 JSON
-          <textarea
-            {...register('replacement')}
-            rows={6}
-            disabled={disabled}
-            aria-invalid={!!errors.replacement}
           />
           <span>
-            기존 collection에 추가할 한 항목입니다. evidence는 위 인용과 같아야
-            합니다.
+            현재 전체 원문을 확인했습니다. 제외는 과거 사실의 삭제·부정이
+            아닙니다.
+            <FormErrors
+              id={`${errorId}-checkedWhole`}
+              errors={errors.checkedWhole}
+            />
           </span>
         </label>
       )}
+      {action === 'keep' && (
+        <section>
+          <h4>복구할 관계</h4>
+          <input type="hidden" {...register('replacement')} />
+          <label>
+            주체
+            <select
+              value={
+                typeof replacement.subject === 'string'
+                  ? replacement.subject
+                  : ''
+              }
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLSelectElement>): void =>
+                changeReplacement('subject', event.target.value)
+              }
+            >
+              <option value="">개념 선택</option>
+              {endpointOptions()}
+            </select>
+          </label>
+          <label>
+            {claim.collection === 'attributes' ? '속성' : '관계'}
+            <input
+              value={
+                typeof replacement.predicate === 'string'
+                  ? replacement.predicate
+                  : typeof replacement.property === 'string'
+                    ? replacement.property
+                    : ''
+              }
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLInputElement>): void =>
+                changeReplacement(
+                  claim.collection === 'attributes' ? 'property' : 'predicate',
+                  event.target.value,
+                )
+              }
+            />
+          </label>
+          {replacement.object !== undefined && (
+            <label>
+              대상
+              <select
+                value={
+                  typeof replacement.object === 'string'
+                    ? replacement.object
+                    : ''
+                }
+                disabled={disabled}
+                onChange={(event: ChangeEvent<HTMLSelectElement>): void =>
+                  changeReplacement('object', event.target.value)
+                }
+              >
+                <option value="">개념 선택</option>
+                {endpointOptions()}
+              </select>
+            </label>
+          )}
+          <ProposalClaimDetails value={replacement} graph={graph} />
+          <FormErrors
+            id={`${errorId}-replacement`}
+            errors={errors.replacement}
+          />
+        </section>
+      )}
       {action === 'reextract' && (
         <p>
-          요청 기록 후 전체 재추출 결과를 제출하고 바뀐 claim ID를 명시
-          대응합니다. 여기서 AI가 실행되지는 않습니다.
+          재추출이 필요하다는 판단을 기록합니다. AI 재추출은 위의 실행 버튼에서
+          시작할 수 있습니다.
         </p>
       )}
       {action === 'keep' && (
-        <p>복구 초안을 전체 적용한 뒤 새 세대의 실제 검토가 필요합니다.</p>
+        <p>복구 초안을 전체 적용한 뒤 새 버전의 실제 검토가 필요합니다.</p>
       )}
-      <FormErrors errors={errors} />
       <Button type="submit" disabled={disabled}>
         미발견 판단 기록
       </Button>
@@ -405,7 +289,7 @@ export function MissingClaimDecisionForm({
   );
 }
 
-/** 최신 실제 accept/edit 주장만 선택하고 그 검토 판본으로 명시 범위를 완료합니다. */
+/** 최신 실제 accept/edit 주장만 선택하고 그 검토 버전으로 명시 범위를 완료합니다. */
 export function ProposalCompletionForm({
   drafts,
   draftKey,
@@ -413,6 +297,7 @@ export function ProposalCompletionForm({
   disabled,
   onComplete,
 }: CompleteFormProps): JSX.Element {
+  const errorId = useId();
   const {
     register,
     handleSubmit,
@@ -444,7 +329,7 @@ export function ProposalCompletionForm({
     >
       <h2>실제 검토한 명시 범위 완료</h2>
       <p>
-        복구·재추출 관계의 실제 새 세대 검토는 서버가 함께 확인합니다. 미선택
+        복구·재추출 관계의 실제 새 버전 검토는 서버가 함께 확인합니다. 미선택
         주장과 문서 전체는 승인되지 않습니다.
       </p>
       {review.claims.map((claim: KnowledgeClaim): JSX.Element => (
@@ -452,14 +337,32 @@ export function ProposalCompletionForm({
           <input
             type="checkbox"
             {...register('reviewed')}
+            aria-invalid={!!errors.reviewed}
+            aria-describedby={
+              errors.reviewed ? `${errorId}-reviewed` : undefined
+            }
             value={claim.claim_id}
             disabled={disabled || !['accept', 'edit'].includes(claim.decision)}
           />
           <span>
-            {claim.decision} · {claim.claim_id}
+            {claim.decision === 'accept'
+              ? '확인됨'
+              : claim.decision === 'edit'
+                ? '정정됨'
+                : claim.decision === 'reject'
+                  ? '기각'
+                  : claim.decision === 'defer'
+                    ? '보류'
+                    : '미검토'}{' '}
+            ·{' '}
+            <ProposalClaimSummary
+              value={claim.reviewed_value}
+              graph={review.effectiveGraph}
+            />
           </span>
         </label>
       ))}
+      <FormErrors id={`${errorId}-reviewed`} errors={errors.reviewed} />
       <label>
         완료 이유
         <textarea
@@ -467,13 +370,25 @@ export function ProposalCompletionForm({
           rows={3}
           disabled={disabled}
           aria-invalid={!!errors.reason}
+          aria-describedby={errors.reason ? `${errorId}-reason` : undefined}
         />
+        <FormErrors id={`${errorId}-reason`} errors={errors.reason} />
       </label>
       <label className={styles.check}>
-        <input type="checkbox" {...register('confirmed')} disabled={disabled} />
-        이번 미발견 처리와 위 선택 범위만 완료합니다.
+        <input
+          type="checkbox"
+          {...register('confirmed')}
+          disabled={disabled}
+          aria-invalid={!!errors.confirmed}
+          aria-describedby={
+            errors.confirmed ? `${errorId}-confirmed` : undefined
+          }
+        />
+        <span>
+          이번 미발견 처리와 위 선택 범위만 완료합니다.
+          <FormErrors id={`${errorId}-confirmed`} errors={errors.confirmed} />
+        </span>
       </label>
-      <FormErrors errors={errors} />
       <Button type="submit" disabled={disabled}>
         명시 범위 완료 기록
       </Button>

@@ -17,13 +17,16 @@ from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.client.analysis import _identifier, _private_directory, server_url
 from core.client.transport import AnalysisClientError
 from core.client.question_ai import AnswerPreview, assemble_question, answer_payload, question_answer_schema
+from core.client.question_sessions import QuestionSessions
+from core.client.supervision import supervise
+from core.client.ai.contracts import AIAdapterError
 from core.runtime.client_platform import private_directory, write_new
 
 PROTOCOL = "question-cli-v1"
 # 알 수 없는 서버 오류/전송 예외 원문에는 비밀이 섞일 수 있어 출력하지 않는다.
 _SAFE_CODES = {"conflict", "access_denied", "access_unavailable", "unauthorized", "not_found",
     "invalid_argument", "storage_busy", "personal_limit", "record_corrupt", "storage_error",
-    "request_disconnected", "request_too_large", "document_too_large"}
+    "request_disconnected", "request_too_large", "document_too_large", "catalog_changed", "index_unavailable"}
 
 
 class QuestionClientError(AnalysisClientError):
@@ -78,7 +81,7 @@ def _known_receipt(value, question_run_id, request_id, payload=None):
 
 class _QuestionExecution:
     def __init__(self, http, *, base, tenant, directory, profile, on_event, cancel_event,
-                 poll_seconds, heartbeat_seconds):
+                 poll_seconds, heartbeat_seconds, session_root=None):
         self.http, self.base = http, base + f"/api/v1/tenants/{tenant}"
         self.tenant, self.profile, self.directory = tenant, profile, directory
         self.on_event, self.cancel_event = on_event, cancel_event or asyncio.Event()
@@ -88,6 +91,8 @@ class _QuestionExecution:
         self.submitted = False
         self.cancellation = None
         self.lock = asyncio.Lock()
+        self.provider = None
+        self.sessions = QuestionSessions(session_root) if session_root is not None else None
 
     def emit(self, kind, **fields):
         if self.on_event is not None:
@@ -110,6 +115,31 @@ class _QuestionExecution:
 
     async def read(self):
         return await _call(self.http, "GET", self.endpoint())
+
+    async def query_evidence(self, query):
+        """정확히 한 조회 의도를 보내고 응답 유실은 저장된 조회 영수증으로만 확인한다."""
+        async with self.lock:
+            request_id = uuid4().hex
+            body = {"request_id": request_id, "run_id": self.run_id,
+                    "expected_state_revision": self.state["state_revision"], "query": query}
+            self.record(f"evidence-request-{request_id}.json", body)
+            try:
+                current = await _call(self.http, "POST", self.base + "/question-runs/" + self.question_run_id + "/evidence", self.selected(body))
+            except QuestionClientError as original:
+                try:
+                    current = await _call(self.http, "GET", self.endpoint("/evidence/" + request_id))
+                except QuestionClientError:
+                    raise original
+            if current["record"]["requests"].get(request_id) != canonical_json_hash(body):
+                raise QuestionClientError("question_evidence_mismatch")
+            if current["evidence_run_id"] != self.run_id:
+                raise QuestionClientError("question_evidence_mismatch")
+            if canonical_json_hash(current["evidence"]) != current["evidence_sha256"]:
+                raise QuestionClientError("question_evidence_mismatch")
+            self.check_active(current)
+            self.state = current
+            self.record(f"evidence-response-{request_id}.json", current)
+            return current["evidence"]
 
     async def command(self, operation, fields=None):
         """진행과 heartbeat의 서로 다른 CAS를 직렬화하며 유실 응답은 읽기로 확인한다."""
@@ -172,30 +202,92 @@ class _QuestionExecution:
                 self.emit("phase", phase="heartbeat", saved=False)
                 next_heartbeat = asyncio.get_running_loop().time() + self.heartbeat_seconds
 
-    async def guarded_model(self, adapter, prompt, schema):
+    async def guarded_model(self, adapter, prompt, schema, *, directory=None, session_id=None, allow_preview=True):
         """취소/원격 취소/사용권 실패가 먼저 오면 어댑터가 자기 자식만 종료할 때까지 기다린다."""
-        preview = AnswerPreview(self.emit)
-        options = {"prompt": prompt, "schema": schema, "directory": self.directory / "invocation"}
+        # 단계별 초안/내부ID는 표시하지 않고 검사·렌더가 끝난 v5 답변만 전달한다.
+        preview = AnswerPreview(self.emit) if allow_preview else None
+        options = {"prompt": prompt, "schema": schema, "directory": directory or self.directory / "invocation"}
+        if session_id is not None:
+            options["session_id"] = session_id
         old_callback = getattr(adapter, "on_event", None)
-        if "on_event" in inspect.signature(adapter.run).parameters:
+        parameters = inspect.signature(adapter.run).parameters
+        state = self.state if isinstance(self.state, dict) else {}
+        contract = state.get("record", {}).get("data", {}).get("input_contract_version")
+        if (self.provider == "codex" and contract in {"personal-question-v5", "personal-question-v6"}
+                and ("question_profile" in parameters or any(
+                    value.kind == inspect.Parameter.VAR_KEYWORD for value in parameters.values()))):
+            # 검증한 Codex 선택 조회 질문에만 호출별 안내를 적용한다.
+            # 어댑터 모드나 전역 설정을 바꾸지 않는다.
+            options["question_profile"] = True
+        if "on_event" in parameters:
             options["on_event"] = preview
+            if not allow_preview and hasattr(adapter, "on_event"):
+                adapter.on_event = None
         elif hasattr(adapter, "on_event"):
             adapter.on_event = preview
-        work = asyncio.create_task(adapter.run(**options))
-        monitor = asyncio.create_task(self.monitor())
-        cancellation = asyncio.create_task(self.cancel_event.wait())
         try:
-            await asyncio.wait((work, monitor, cancellation), return_when=asyncio.FIRST_COMPLETED)
-            self.check_cancel()
-            if monitor.done():
-                await monitor
-            return await work
+            return await supervise(adapter.run(**options), self.monitor(), self.cancel_event.wait(),
+                                   check=self.check_cancel)
         finally:
-            for task in (work, monitor, cancellation):
-                task.cancel()
-            await asyncio.gather(work, monitor, cancellation, return_exceptions=True)
             if hasattr(adapter, "on_event"):
                 adapter.on_event = old_callback
+
+    async def run_model(self, adapter, handoff, prompt, access, record):
+        """이 PC에 이어 갈 세션이 있으면 새 질문만 resume으로 보내고, 없거나 실패하면 전체 대화로 새 세션을 연다.
+
+        세션은 어디까지나 비용 절감 수단이다. 대화 정본은 서버 기록이며 어떤 실패도 답변을 막지 않는다.
+        """
+        if handoff.get("contract_version") in {"personal-question-v5", "personal-question-v6"}:
+            from .question_grounding import run_grounded_model
+            if self.provider == "codex":
+                return await run_grounded_model(self, adapter, handoff, select_tools=True)
+            return await run_grounded_model(self, adapter, handoff)
+        schema = question_answer_schema(handoff)
+        sessions = self.sessions
+        context = handoff.get("conversation_context")
+        # 이전 대화가 없거나 이 어댑터가 세션을 지원하지 않으면 평소처럼 한 번만 실행한다.
+        if sessions is None or not (context and context.get("turns")) or not hasattr(adapter, "persist_session"):
+            return await self.guarded_model(adapter, prompt, schema), prompt
+        data = record["data"]
+        identity = dict(server=self.base.split("/api/v1/tenants/")[0], tenant=self.tenant, user_id=access["user_id"],
+                        profile=self.profile, conversation_id=data["conversation_id"])
+        preceding = len(context["turns"])
+        basis_sha = canonical_json_hash(data["basis"])
+        provider = self.provider if self.provider in {"codex", "claude"} else None
+        if provider is None:
+            return await self.guarded_model(adapter, prompt, schema), prompt
+        found = sessions.lookup(adapter, provider=provider, preceding_turns=preceding,
+                                basis_sha256=basis_sha, **identity)
+        if found is not None:
+            session_id, seen = found
+            resumed = assemble_question(handoff, record, resumed=True, seen_turns=seen)
+            try:
+                adapter.persist_session = True
+                result = await self.guarded_model(adapter, resumed, schema, session_id=session_id)
+                self.remember_session(result, identity, preceding + 2, basis_sha, new_session=False)
+                return result, resumed
+            except AIAdapterError as error:
+                # 이어 가기에 실패하면 같은 입력으로 전체 대화를 다시 넣어 새 세션을 시작한다.
+                self.emit("phase", phase="session_resume_failed", saved=False, code=error.code)
+        # 새 세션: 처음 실행하는 위치를 보존해 다음 질문에서 이어 갈 수 있게 한다.
+        adapter.persist_session = True
+        container = private_directory(private_directory(sessions.root) / "invocations")
+        directory = private_directory(container / (data["conversation_id"] + "-" + uuid4().hex), exist_ok=False) / "invocation"
+        self.emit("phase", phase="session_history_replay", saved=False)
+        result = await self.guarded_model(adapter, prompt, schema, directory=directory)
+        self.remember_session(result, identity, preceding + 2, basis_sha, new_session=True, directory=directory)
+        return result, prompt
+
+    def remember_session(self, result, identity, turns_seen, basis_sha, *, new_session, directory=None):
+        """세션 기록 실패는 이미 얻은 답변을 버리지 않는다. 다음 질문이 새 세션으로 시작될 뿐이다."""
+        execution = result["execution"]
+        if execution.get("session_persisted") is not True or not execution.get("session_id"):
+            return
+        try:
+            self.sessions.remember(execution=execution, invocation=directory, turns_seen=turns_seen,
+                                   basis_sha256=basis_sha, new_session=new_session, **identity)
+        except (OSError, ValueError, KeyError, AnalysisClientError):
+            self.emit("phase", phase="session_not_saved", saved=False)
 
     async def submit(self, body):
         """최종 전송 뒤에는 취소보다 저장 영수증 확인이 우선이다. POST를 반복하지 않는다."""
@@ -332,7 +424,7 @@ class _QuestionExecution:
             if adapter is None:
                 return self.finish("prepared", False)
             self.check_cancel()
-            await adapter.preflight()
+            self.provider = (await adapter.preflight()).get("provider")
             self.check_cancel()
             claimed = await self.command("claim", {"reclaim": reclaim})
             self.run_id = _identifier(claimed["runtime"]["run_id"])
@@ -351,7 +443,7 @@ class _QuestionExecution:
             self.check_cancel()
             await self.command("progress", {"progress": "answering", "message": "Personal AI is generating an unsaved answer."})
             self.emit("phase", phase="answering", saved=False)
-            result = await self.guarded_model(adapter, prompt, question_answer_schema(handoff))
+            result, prompt = await self.run_model(adapter, handoff, prompt, access, record)
             # 유효하지 않은 모델 식별자도 원시 출력 그대로 남긴다. 추측 보정/자동 재호출하지 않는다.
             self.record("answer-result.json", result)
             payload = answer_payload(result, handoff=handoff, prompt=prompt)
@@ -379,7 +471,8 @@ class _QuestionExecution:
 async def run_question(*, base_url, tenant, token, work_dir, question_run_id=None, conversation_id=None,
                        question_turn_id=None, expected_conversation_revision=None, create_request_id=None,
                        adapter=None, profile=None, reclaim=False, cancel=False, receipt_request_id=None,
-                       on_event=None, cancel_event=None, http=None, poll_seconds=2, heartbeat_seconds=30):
+                       on_event=None, cancel_event=None, http=None, poll_seconds=2, heartbeat_seconds=30,
+                       session_dir=None):
     """명시 adapter가 있을 때만 AI를 실행한다. http 주입은 격리 API 검증에 사용한다."""
     base = server_url(base_url)
     if not isinstance(tenant, str) or re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", tenant) is None:
@@ -408,7 +501,8 @@ async def run_question(*, base_url, tenant, token, work_dir, question_run_id=Non
     write_new(directory / "session.json", canonical_json_bytes({"tenant": tenant, "profile": profile, "question_run_id": question_run_id,
         "automatic_retry": False, "protocol": PROTOCOL}))
     options = dict(base=base, tenant=tenant, directory=directory, profile=profile, on_event=on_event,
-        cancel_event=cancel_event, poll_seconds=poll_seconds, heartbeat_seconds=heartbeat_seconds)
+        cancel_event=cancel_event, poll_seconds=poll_seconds, heartbeat_seconds=heartbeat_seconds,
+        session_root=_private_directory(session_dir) if session_dir is not None else None)
     arguments = dict(question_run_id=question_run_id, conversation_id=conversation_id, question_turn_id=question_turn_id,
         expected_conversation_revision=expected_conversation_revision, create_request_id=create_request_id,
         adapter=adapter, reclaim=reclaim, cancel=cancel, receipt_request_id=receipt_request_id)

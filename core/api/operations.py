@@ -10,6 +10,8 @@ from core.api.concurrency import run_owned_thread
 from core.api.dependencies import access_value, envelope
 from core.api.errors import error_response
 from core.api.ingress import RequestInputError, read_json_model
+from core.common.access import access_basis
+from core.common.read_metrics import span
 from core.modules.access.policy import AccessDenied
 
 BODY_MODELS = {}
@@ -28,10 +30,16 @@ def body_schema(model):
 
 def reauthorize(request, tenant, token, permission, profile, expected=None):
     """저장 직전에도 현재 권한을 확인하며 처음 읽은 주체/관점과 섞지 않는다."""
-    scope = request.app.state.policy.authorize(token, tenant, permission, profile)
-    if expected is not None and access_value(scope) != access_value(expected):
+    with span("authorization"):
+        scope = request.app.state.policy.authorize(token, tenant, permission, profile)
+    if expected is not None and access_basis(scope) != access_basis(expected):
         raise AccessDenied()
     return scope
+
+
+def commit_guard(request, tenant, token, permission, scope):
+    """실제 공개 직전에 처음 확인한 주체·관점의 현재 권한을 다시 검사한다."""
+    return lambda: reauthorize(request, tenant, token, permission, scope.profile_id, expected=scope)
 
 
 async def json_operation(request, tenant, token, model, permission, operation, *, created=False):
@@ -40,7 +48,8 @@ async def json_operation(request, tenant, token, model, permission, operation, *
 응답이 유실되어도 쓰기를 자동 반복하지 않는다. operation에서 저장하는 경우에는
 기존 Store의 CAS와 before_commit 권한 확인을 함께 사용해야 한다.
 """
-    request.app.state.policy.authorize(token, tenant, permission)
+    with span("authorization"):
+        request.app.state.policy.authorize(token, tenant, permission)
     try:
         if request.query_params:
             raise RequestInputError(422, "invalid_argument", "Put the selected profile and fields in the JSON body.")

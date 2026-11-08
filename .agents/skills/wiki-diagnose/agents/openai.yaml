@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki 연결·실행 진단"
+  short_description: "위키 앱과 API·MCP·개인 AI 실행 환경의 연결 문제를 진단"
+  default_prompt: "$wiki-diagnose를 사용해 LLM Wiki의 연결·실행 문제를 기존 읽기 전용 진단으로 확인해줘."

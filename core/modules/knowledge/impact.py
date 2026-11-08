@@ -9,6 +9,7 @@ from core.modules.reviews.store import ReviewStore
 from core.modules.ontology.constants import VIEWPOINTS
 from core.modules.ontology.values import _text
 from core.modules.reviews.values import _token
+from core.modules.documents.metadata import reuse_parsed_documents
 from . import contracts
 
 
@@ -39,7 +40,7 @@ class ImpactStore:
         if viewpoint is not None and (not isinstance(viewpoint, str) or viewpoint not in VIEWPOINTS):
             raise ValueError("viewpoint must be a supported tag")
         self.store._document_path(self.store.wiki_dir, document)
-        with self.store._write_lock():
+        with self.store._write_lock(), reuse_parsed_documents():
             return self._query_locked(document, limit, baseline, domain, viewpoint)
 
     def _query_locked(self, document, limit, baseline, domain, viewpoint):

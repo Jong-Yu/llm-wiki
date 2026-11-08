@@ -1,0 +1,559 @@
+.root {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  font-size: var(--wiki-font-size-13);
+  line-height: 20px;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+// 상단 줄·목록·원문과 판단을 8px 간격의 독립 패널로 나눕니다.
+.queuePanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--wiki-layout-workbench-panel-gap);
+}
+.panel {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 8px;
+  background-color: var(--wiki-color-surface-canvas);
+}
+.initialPanel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+.initialState {
+  flex: 1;
+  justify-content: center;
+}
+.listNotices {
+  display: grid;
+  gap: var(--wiki-space-8);
+  padding: var(--wiki-space-12);
+  &:empty {
+    display: none;
+  }
+}
+.filter {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--wiki-component-control-height-small);
+  padding: 0 8px;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+}
+.documentLink,
+.state,
+.primaryAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pagination p,
+.note {
+  flex: 1;
+  min-height: 0;
+  padding: var(--wiki-space-24);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-canvas);
+}
+.queueSkeleton {
+  padding: 0;
+  gap: 0;
+  .row {
+    cursor: default;
+  }
+  .row:hover {
+    background: transparent;
+  }
+  .groupTitle {
+    min-height: 20px;
+  }
+  .groupTitle > [data-shape='icon'] {
+    width: 13px;
+    height: 13px;
+  }
+  .skeletonDot {
+    width: 8px;
+    height: 8px;
+  }
+}
+.loadingDetail {
+  display: none;
+}
+@container workspace (width >= 900px) {
+  .workspace.queueLoading {
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  }
+  .loadingDetail {
+    display: block;
+  }
+}
+.loading,
+.noticeMessage {
+  margin: 0;
+}
+.coverage {
+  position: relative;
+  max-width: 100%;
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.coverage summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  list-style: none;
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  svg {
+    margin-left: auto;
+    transition: transform 0.12s;
+  }
+}
+.coverage[open] summary svg {
+  transform: rotate(180deg);
+}
+// 전부 불러왔을 때는 차분하게, 일부만 불러왔을 때는 경고색으로 눈에 띄게 보여 줍니다.
+.coverageCount {
+  color: var(--wiki-color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.coverage summary[data-partial='true'] .coverageCount {
+  color: var(--wiki-color-status-warning);
+}
+.coverage summary::-webkit-details-marker {
+  display: none;
+}
+.coverage p {
+  margin: 6px 0 2px;
+  max-width: 72ch;
+}
+.coverage summary,
+.skipped summary {
+  cursor: pointer;
+}
+.workspace {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--wiki-layout-workbench-panel-gap);
+  overflow: hidden;
+}
+.workspace[data-layout='wide'] {
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+}
+.listPane,
+.detailPane {
+  min-width: 0;
+  min-height: 0;
+}
+.workspace [hidden] {
+  display: none;
+}
+.workspace > .listPane,
+.workspace > .detailPane {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.group + .group {
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.groupTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 14px 4px;
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--wiki-color-action-primary);
+  &[data-state='defer'] {
+    background-color: var(--wiki-color-text-secondary);
+  }
+  &[data-state='pending'] {
+    background-color: var(--wiki-color-status-warning);
+  }
+}
+.listEmpty {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--wiki-color-text-secondary);
+}
+.backBar {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  min-width: 0;
+  padding: 4px 14px 4px 22px;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  color: var(--wiki-color-text-primary);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.row:hover:not(:disabled):not([aria-pressed='true']) {
+  background-color: var(--wiki-color-surface-hover);
+}
+.row[aria-pressed='true'] {
+  background-color: var(--wiki-color-action-surface);
+  box-shadow: inset 2px 0 var(--wiki-color-action-primary);
+}
+.row:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.rowTitle {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.state {
+  width: fit-content;
+  max-width: 100%;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--wiki-color-text-secondary);
+  background-color: var(--wiki-color-surface-subtle);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.state[data-state='pending'] {
+  color: var(--wiki-color-status-warning);
+  background-color: var(--wiki-color-status-warning-surface);
+}
+.state[data-state='defer'] {
+  color: var(--wiki-color-action-primary);
+  background-color: var(--wiki-color-action-surface);
+}
+.detailToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+  color: var(--wiki-color-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.detailIdentity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 400;
+}
+.detailContent {
+  padding: 0 16px 24px;
+  overflow-wrap: anywhere;
+}
+.detailContent > .listNotices {
+  padding: 0;
+  margin-bottom: var(--wiki-space-16);
+}
+.detailContent h2 {
+  margin: 8px 0 16px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  white-space: pre-wrap;
+}
+.properties {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  margin: 0 0 16px;
+  line-height: 20px;
+}
+.properties dt {
+  color: var(--wiki-color-text-secondary);
+  min-height: 32px;
+}
+.properties dd {
+  min-width: 0;
+  margin: 0;
+}
+.documentLink {
+  color: var(--wiki-color-action-primary);
+  text-decoration: none;
+}
+.documentLink:hover {
+  text-decoration: underline;
+}
+.documentLink svg {
+  flex-shrink: 0;
+}
+.description {
+  margin: 0 0 16px;
+  color: var(--wiki-color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.evidence {
+  margin: 24px 0 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.evidence header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.evidence header > span {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+}
+.evidence h3 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.evidence blockquote {
+  margin: 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--wiki-color-border-default);
+  font-size: var(--wiki-font-size-16);
+  line-height: var(--wiki-font-line-height-reading);
+  white-space: pre-wrap;
+}
+.primaryAction {
+  flex-shrink: 0;
+  min-height: var(--wiki-component-control-height);
+  justify-content: center;
+  padding: 7px 12px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font-size: 13px;
+  line-height: 20px;
+  text-decoration: none;
+}
+.primaryAction {
+  background-color: var(--wiki-color-button-primary-background);
+  border-color: var(--wiki-color-button-primary-background);
+  color: var(--wiki-color-button-primary-foreground);
+}
+.primaryAction:hover {
+  background-color: var(--wiki-color-button-primary-hover-background);
+  color: var(--wiki-color-button-primary-foreground);
+}
+.iconButton {
+  width: 32px;
+  padding-inline: 0;
+}
+.skipped {
+  padding: 12px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  font-size: 12px;
+}
+.skipped ul {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+.skipped li + li {
+  margin-top: 12px;
+}
+.skipped strong,
+.skipped span {
+  display: block;
+}
+.skipped .technical {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+.note {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 28px;
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+}
+.empty h2,
+.empty p {
+  margin: 0;
+  line-height: 1.7;
+}
+.empty h2 {
+  font-size: 14px;
+  color: var(--wiki-color-text-primary);
+  font-weight: 500;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.detailContent h2:focus-visible,
+.listPane:focus-visible,
+.queuePanel:focus-visible,
+.row:focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: -2px;
+}
+.noticeMessage + .noticeMessage {
+  margin-top: 8px;
+}
+@container workspace (width < 900px) {
+  .row {
+    gap: 12px;
+    padding-inline: 12px;
+  }
+  .detailToolbar,
+  .detailContent {
+    padding-inline: 16px;
+  }
+}
+@container workspace (width < 420px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .properties {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .properties dt {
+    min-height: 0;
+  }
+}
+
+.queuePanel > [role='alert'],
+// 본문을 채우는 카드(공통 빈 상태)는 알림처럼 높이를 제한하지 않습니다.
+.queuePanel > [role='status']:not([data-framed]),
+.skipped {
+  flex-shrink: 0;
+  max-height: 30vh;
+  overflow: auto;
+}
+
+/* 확대하거나 창 높이가 줄어들면 경고와 선택 상세를 한 스크롤로 읽습니다. */
+@media (max-height: 600px) {
+  .root {
+    overflow-y: auto;
+  }
+  .queuePanel {
+    display: block;
+    flex: none;
+  }
+  .workspace {
+    flex: none;
+    overflow: visible;
+  }
+  .workspace > .listPane,
+  .workspace > .detailPane {
+    overflow: visible;
+  }
+  .queuePanel > [role='alert'],
+  .queuePanel > [role='status']:not([data-framed]),
+  .skipped {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+.detailPane > .empty {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+// 조회 범위 안내는 Header 안에서 펼치지 않고 아래로 떠서 보입니다.
+.coverageBody {
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: var(--wiki-space-4) var(--wiki-space-12);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-muted, var(--wiki-color-surface-canvas));
+}
+
+// 필터·새로고침·조회 범위를 목록 패널 맨 위에 붙여 빈 여백 없이 탐색기처럼 보이게 합니다.
+.listToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-4);
+  padding: var(--wiki-space-8) var(--wiki-space-12);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-canvas);
+}
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+}

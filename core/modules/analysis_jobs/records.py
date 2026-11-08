@@ -9,6 +9,7 @@ from core.modules.sources.contracts import SourceCorruptError, SourceLimitError
 from core.modules.sources.validation import actor as checked_actor, request_key
 from . import contracts as limits
 from .contracts import JobCorruptError, JobLimitError, JobValidationError
+from core.common.storage_layout import analysis_job_root, analysis_request_root
 
 
 def owner_key(tenant, user_id):
@@ -49,23 +50,51 @@ def authorized(authorize, tenant, user_id):
         raise JobCorruptError("The server authorization scope is invalid.") from error
 
 
+def check_access(previous, current):
+    """새 기록은 본인 접근 기준만 비교한다. 불변 구 기록에는 새 필드를 주입하지 않는다."""
+    if previous.get("access_revision") is not None and previous["access_revision"] != current.get("access_revision"):
+        from .contracts import JobConflictError
+        raise JobConflictError("access_basis_changed")
+
+
 def state_path(self, job_id):
     # pathlib.Path의 /는 경로 결합이다. ID를 먼저 검증해 임의 경로가 들어오지 않게 한다.
-    return self.jobs_dir / limits.identifier(job_id) / "state.json"
+    root = self.job_root(limits.identifier(job_id))
+    return root / ("state.json" if root.parent == self.jobs_dir else "job.json")
 
 
 def owner_path(self, tenant, user_id, job_id):
+    return self.job_root(job_id) / "owner.json" if job_id in self._job_paths else legacy_owner_path(self, tenant, user_id, job_id)
+
+
+def legacy_owner_path(self, tenant, user_id, job_id):
     return self.jobs_dir / "_owners" / owner_key(tenant, user_id) / (limits.identifier(job_id) + ".json")
 
 
 def request_path(self, tenant, user_id, request_id):
     limits.identifier(request_id)
-    return self.jobs_dir / "_requests" / (request_key(tenant, user_id, request_id) + ".json")
+    name = request_key(tenant, user_id, request_id) + ".json"
+    old = self.jobs_dir / "_requests" / name
+    new = analysis_request_root(self.store.data_dir, user_id) / name
+    if files.checked(self.store, old).exists():
+        if files.checked(self.store, new).exists():
+            raise JobCorruptError("Both legacy and personal request records exist.")
+        return old
+    return new
 
 
 def owned_state(self, job_id, tenant, user_id):
     # 인증 사용자의 인덱스가 없으면 다른 사용자의 state 파일을 먼저 읽지 않는다.
-    marker = read(self, owner_path(self, tenant, user_id, job_id))
+    new = analysis_job_root(self.store.data_dir, user_id, job_id)
+    old_owner = legacy_owner_path(self, tenant, user_id, job_id)
+    if files.checked(self.store, new).exists():
+        if files.checked(self.store, old_owner).exists():
+            raise JobCorruptError("Both legacy and personal job records exist.")
+        marker = read(self, new / "owner.json")
+        self._job_paths[job_id] = new
+    else:
+        marker = read(self, old_owner)
+        self._job_paths.pop(job_id, None)
     if marker != {"job_id": job_id, "tenant": tenant, "user_id": user_id}:
         raise JobCorruptError("The job owner index is invalid.")
     value = read(self, state_path(self, job_id))
@@ -140,7 +169,7 @@ def lease(self, job):
     # 아직 실행이 없으면 None, 있으면 그 run의 임시 실행권 기록을 검증해 반환한다.
     if job["run_id"] is None:
         return None
-    value = read(self, self.jobs_dir / job["job_id"] / "leases" / (job["run_id"] + ".json"))
+    value = read(self, self.job_root(job["job_id"]) / "leases" / (job["run_id"] + ".json"))
     try:
         if type(value) is not dict or set(value) != {"job_id", "run_id", "expires_at", "events"}:
             raise ValueError()

@@ -16,6 +16,7 @@ class JobStore:
         self.store = store
         self.sources = SourceStore(store)
         self.jobs_dir = store.data_dir / "_jobs"
+        self._job_paths = {}
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.rulesets = rulesets
 
@@ -36,6 +37,17 @@ class JobStore:
         """고정 원본·예정 대상과 요청 영수증을 접수하고 현재 권한을 다시 확인한다."""
         return commands.create(self, **kwargs)
 
+    def create_registration(self, **kwargs):
+        """원본 하나에서 보존형 Markdown 하나와 그 판본의 그래프를 접수한다."""
+        from .registration import create
+        return create(self, **kwargs)
+
+    def job_root(self, job_id):
+        """소유 확인/생성으로 이미 선택한 경로만 사용한다. 다른 개인 폴더는 검색하지 않는다."""
+        from .contracts import identifier
+        identifier(job_id)
+        return self._job_paths.get(job_id, self.jobs_dir / job_id)
+
     def query(self, job_id, *, tenant, user_id):
         # 현재 사용자의 소유 범위를 확인한 뒤 상태를 읽는다. 다른 사람의 작업을 먼저 읽지 않는다.
         return queries.query(self, job_id, tenant=tenant, user_id=user_id)
@@ -43,6 +55,15 @@ class JobStore:
     def list_jobs(self, *, tenant, user_id, scope_key, limit=20, cursor=None):
         # 페이지를 이어 읽을 때 권한 범위와 목록 기준까지 같은지 확인한다.
         return queries.list_jobs(self, tenant=tenant, user_id=user_id, scope_key=scope_key, limit=limit, cursor=cursor)
+
+    def list_history_ids(self, *, tenant, user_id, scope_key, limit=20, cursor=None):
+        """검증된 본인 작업 ID만 발견하며 결과물·입력 상세를 조립하지 않는다."""
+        return queries.list_history_ids(self, tenant=tenant, user_id=user_id,
+                                        scope_key=scope_key, limit=limit, cursor=cursor)
+
+    def history(self, job_id, *, tenant, user_id):
+        """원본 작업 상태와 이벤트를 읽는다. 결과물 유효성은 상세 조회의 책임이다."""
+        return queries.history(self, job_id, tenant=tenant, user_id=user_id)
 
     def request_receipt(self, *, tenant, user_id, request_id):
         return queries.request_receipt(self, tenant=tenant, user_id=user_id, request_id=request_id)

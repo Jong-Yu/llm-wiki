@@ -1,0 +1,765 @@
+@use '../../../shared/theme/aiSurface';
+.root {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--wiki-layout-workbench-panel-gap);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: var(--wiki-layout-workbench-panel-gap);
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: 13px/20px var(--wiki-font-family-ui);
+  :where(button, textarea, a) {
+    font: inherit;
+    outline-offset: 2px;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: var(--wiki-opacity-disabled);
+    cursor: not-allowed;
+  }
+  h1,
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+  :where(a) {
+    color: var(--wiki-color-action-primary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  &[data-history='true'] {
+    grid-template-columns: 216px minmax(0, 1fr);
+  }
+  &[data-evidence='true'] {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+  &[data-history='true'][data-evidence='true'] {
+    grid-template-columns: 216px minmax(0, 1fr) 360px;
+  }
+  &[data-layout='narrow'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.historyPanel,
+.evidencePanel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 8px;
+  background-color: var(--wiki-color-surface-canvas);
+  padding: var(--wiki-space-16);
+}
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: calc(-1 * var(--wiki-space-16)) calc(-1 * var(--wiki-space-16))
+    var(--wiki-space-16);
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  background-color: var(--wiki-color-surface-canvas);
+  h2 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+}
+.column {
+  @include aiSurface.palette;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 10px;
+  // 패널은 가득 채우되 읽는 글줄은 1100px 안에 가운데로 모읍니다.
+  padding: 0 max(16px, calc((100% - 1100px) / 2)) 12px;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 38px;
+  padding: 2px 14px;
+  margin-inline: -16px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  flex-shrink: 0;
+  > div:first-child {
+    min-width: 0;
+  }
+}
+.header .title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  white-space: nowrap;
+  i {
+    margin-right: 2px;
+    display: inline-block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--wiki-color-text-secondary);
+  }
+}
+.ok i {
+  background-color: var(--wiki-color-status-success);
+}
+.info i {
+  background-color: var(--wiki-color-action-primary);
+}
+.warn i {
+  background-color: var(--wiki-color-status-warning);
+}
+.bad i {
+  background-color: var(--wiki-color-status-danger);
+}
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.button,
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--wiki-component-control-height);
+  box-sizing: border-box;
+  padding: 7px 12px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  color: var(--wiki-color-text-primary);
+  background-color: var(--wiki-color-surface-canvas);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.button:hover:not(:disabled),
+.ghost:hover:not(:disabled) {
+  background-color: var(--wiki-color-surface-hover);
+}
+.ghost {
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--wiki-color-text-secondary);
+}
+.messages {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 4px;
+}
+.chatSkeleton {
+  display: block;
+  padding: 0;
+}
+.skeletonQuestion {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}
+.user.skeletonUser {
+  width: min(320px, 74%);
+}
+.skeletonScope {
+  margin-bottom: var(--wiki-space-12);
+}
+.skeletonParagraph {
+  margin-top: var(--wiki-space-24);
+}
+.user {
+  margin: 0 0 14px auto;
+  width: fit-content;
+  max-width: 74%;
+  p {
+    background-color: var(--wiki-color-surface-hover);
+    padding: 8px 13px;
+    border-radius: 14px 14px 4px 14px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+.assistant {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 14px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background-color: var(--wiki-color-button-primary-background);
+  color: var(--wiki-color-button-primary-foreground);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.previewStatus {
+  display: block;
+  margin-bottom: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.answer {
+  min-width: 0;
+}
+.evidenceActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.citation {
+  border: 0;
+  border-radius: var(--wiki-component-control-radius);
+  color: var(--wiki-color-action-primary);
+  background-color: var(--wiki-color-action-surface);
+  min-height: 22px;
+  box-sizing: border-box;
+  padding: 2px 9px;
+  font-size: 12px;
+  min-width: 32px;
+  line-height: 20px;
+}
+.empty {
+  box-sizing: border-box;
+  min-height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+  padding: 16px;
+  h2 {
+    font-size: 20px;
+    line-height: 31px;
+    color: var(--wiki-color-text-primary);
+    font-weight: 650;
+    margin-bottom: 6px;
+  }
+  p {
+    font-size: 13px;
+    line-height: 20px;
+  }
+  small {
+    display: block;
+    margin-top: 14px;
+    font-size: 12px;
+  }
+}
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--wiki-space-8);
+  margin-top: 20px;
+}
+.root .example {
+  min-height: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wiki-color-text-primary);
+  font-size: 12px;
+  &:hover:not(:disabled) {
+    background-color: var(--wiki-color-surface-hover);
+  }
+}
+// 보낸 질문에 적용한 답변 양식 이름입니다.
+.templateTag {
+  display: block;
+  margin-top: 6px;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.root .primaryAction {
+  background-color: var(--wiki-color-button-primary-background);
+  color: var(--wiki-color-button-primary-foreground);
+  border-color: var(--wiki-color-button-primary-background);
+  text-decoration: none;
+}
+.scopeNote {
+  margin: 0 0 var(--wiki-space-12);
+  padding-left: 32px;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.footerNotice {
+  flex-shrink: 0;
+  margin-bottom: var(--wiki-space-12);
+}
+.inAnswer {
+  margin-bottom: var(--wiki-space-8);
+}
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-8);
+  margin: 0 0 var(--wiki-space-12);
+  padding: 0;
+  list-style: none;
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--wiki-space-8);
+  }
+}
+.stepMark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: var(--wiki-color-status-success);
+  color: var(--wiki-color-surface-canvas);
+}
+.stepSpinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--wiki-color-action-primary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: stepSpin 1s linear infinite;
+}
+.stepActive {
+  color: var(--wiki-color-action-primary);
+}
+@keyframes stepSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.evidenceCard {
+  display: grid;
+  gap: var(--wiki-space-12);
+  padding: var(--wiki-space-16) 0;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  overflow-wrap: anywhere;
+  h3 {
+    font-size: 13px;
+  }
+  blockquote {
+    margin: 0;
+    padding: 0 0 0 12px;
+    background-color: var(--wiki-color-surface-canvas);
+    border-left: 2px solid var(--wiki-color-action-primary);
+    font-size: var(--wiki-font-size-13);
+    line-height: var(--wiki-font-line-height-ui);
+  }
+  dl {
+    margin: 16px 0;
+    font-size: 12px;
+  }
+  dl div {
+    display: grid;
+    grid-template-columns: 80px minmax(0, 1fr);
+    align-items: baseline;
+    min-height: 32px;
+    gap: 12px;
+  }
+  dt {
+    color: var(--wiki-color-text-secondary);
+  }
+  dd {
+    margin: 0;
+    font-family: var(--wiki-font-family-mono);
+  }
+  details {
+    margin-top: 0;
+    font-size: 12px;
+  }
+  pre {
+    white-space: pre-wrap;
+    font-size: 12px;
+  }
+}
+.evidenceList {
+  display: grid;
+}
+.evidenceListItem {
+  display: grid;
+  grid-template-columns: var(--wiki-space-24) minmax(0, 1fr) auto;
+  gap: var(--wiki-space-8);
+  align-items: center;
+  min-height: calc(var(--wiki-space-32) * 2);
+  padding: var(--wiki-space-12) 0;
+  border: 0;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  background: transparent;
+  color: var(--wiki-color-text-primary);
+  text-align: left;
+  strong,
+  small {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+  small {
+    color: var(--wiki-color-text-secondary);
+    margin-top: var(--wiki-space-4);
+  }
+  &:hover {
+    background: var(--wiki-color-surface-hover);
+  }
+}
+.citationNumber,
+.citationLocation {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.evidenceCard:first-of-type {
+  padding-top: 0;
+}
+.evidenceCard:last-child {
+  border-bottom: 0;
+}
+.kind {
+  font-size: 12px;
+  color: var(--wiki-color-action-primary);
+}
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+}
+.historyPanel {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  overflow: hidden;
+  .panelHeader {
+    flex-wrap: nowrap;
+    flex: none;
+    margin: -8px -8px 6px;
+    padding: 6px 10px 6px 14px;
+    h2 {
+      font-size: 13px;
+    }
+  }
+}
+.historyHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.historyItem {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--wiki-color-text-secondary);
+  background-color: transparent;
+  border: 0;
+  border-radius: 6px;
+  min-height: 40px;
+  cursor: pointer;
+  > svg {
+    flex: none;
+    opacity: 0.75;
+  }
+  &[aria-pressed='true'] {
+    color: var(--wiki-color-text-primary);
+    background-color: var(--wiki-color-surface-hover);
+    .historyTitle {
+      font-weight: 600;
+    }
+    > svg {
+      color: var(--wiki-color-action-primary);
+      opacity: 1;
+    }
+  }
+}
+.historyTitle {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 400;
+}
+.historyDraft {
+  flex: none;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--wiki-color-text-secondary);
+}
+.connectionEmpty {
+  padding: 24px;
+  font-family: var(--wiki-font-family-ui);
+  h1 {
+    font-size: 16px;
+  }
+  h2 {
+    margin-top: 50px;
+    font-size: 18px;
+  }
+  p {
+    margin: 16px 0;
+  }
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@container workspace (width < 900px) {
+  .column {
+    padding: 0 16px 16px;
+  }
+  .header {
+    flex-wrap: wrap;
+  }
+  .header h1 {
+    max-width: 100%;
+  }
+  .answer {
+    padding-left: 0;
+  }
+
+  .evidencePanel {
+    border-left: 0;
+  }
+}
+.historyItem:hover:not(:disabled):not([aria-pressed='true']) {
+  background-color: var(--wiki-color-surface-hover);
+}
+.root :is(button, a):focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
+}
+
+.root .iconButton {
+  width: 32px;
+  min-height: 32px;
+  padding: 5px;
+  flex: none;
+}
+.button {
+  border-color: var(--wiki-color-border-control);
+}
+.historyPanel:focus-visible,
+.evidencePanel:focus-visible,
+.column:focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: -2px;
+}
+
+/* 대화가 없을 때의 짧은 안내 */
+.historyEmpty {
+  display: grid;
+  justify-items: center;
+  gap: var(--wiki-space-4);
+  padding: var(--wiki-space-32) var(--wiki-space-16);
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+  strong {
+    color: var(--wiki-color-text-primary);
+  }
+}
+.evidenceLabel {
+  font-size: 12px;
+  color: var(--wiki-color-text-secondary);
+}
+.filePreview {
+  margin-top: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-13);
+}
+
+.fileCard {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-12);
+  margin-top: var(--wiki-space-8);
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 12px;
+  background-color: var(--wiki-color-surface-hover);
+}
+.fileTile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 40px;
+  border-radius: 7px;
+  background-color: var(--wiki-color-status-success-surface);
+  color: var(--wiki-color-status-success);
+  font-family: var(--wiki-font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 700;
+}
+.fileText {
+  flex: 1;
+  min-width: 0;
+  strong,
+  .previewTrigger {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  small {
+    color: var(--wiki-color-text-secondary);
+    font-size: var(--wiki-font-size-12);
+  }
+}
+.answerActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+  margin-top: var(--wiki-space-8);
+}
+.answerActions .button {
+  min-height: 28px;
+  padding: 4px 12px;
+  line-height: 18px;
+  font-size: 12px;
+}
+.root .action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 2px 8px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-13);
+  &:hover:not(:disabled) {
+    background-color: var(--wiki-color-surface-hover);
+    color: var(--wiki-color-text-primary);
+  }
+}
+.root .actionBox {
+  border-color: var(--wiki-color-border-control);
+  color: var(--wiki-color-text-primary);
+}
+.downloadMenu {
+  position: relative;
+}
+.formatMenu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 10px;
+  background-color: var(--wiki-color-surface-canvas);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+}
+.root .formatItem {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wiki-color-text-primary);
+  font-size: var(--wiki-font-size-13);
+  text-align: left;
+  &:hover {
+    background-color: var(--wiki-color-surface-hover);
+  }
+}
+.root .citation {
+  padding-inline: var(--wiki-space-8);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepSpinner {
+    animation: none;
+  }
+}
+
+.fileText .previewTrigger {
+  padding: 0;
+  min-height: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-align: start;
+  font-weight: 700;
+  &:hover {
+    text-decoration: underline;
+  }
+}

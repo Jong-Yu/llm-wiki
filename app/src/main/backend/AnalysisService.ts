@@ -1,9 +1,12 @@
-import { personalAi } from './personalAi';
+import { ExecutionStarts } from './ExecutionStarts';
+import type { AiActivity } from '@contracts/aiSessions.contract';
+import { sameAccessRevision } from '@contracts/connection.contract';
+import type { WorkspaceMembership } from '@contracts/connection.contract';
+import { aiModelArguments, personalAi } from './personalAi';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
-import { app } from 'electron';
+import { resolve, join, dirname } from 'node:path';
 import { z } from 'zod';
 import {
   analysisJobSchema,
@@ -25,7 +28,7 @@ import type {
 } from '@contracts/analysis.contract';
 import type { ConnectionService } from './ConnectionService';
 import type { AnalysisContext } from './ConnectionService';
-import { apiFailure, readApiJson } from './readApi';
+import { apiFailure, readScopedApiJson } from './readApi';
 import type { ApiFailure, ReadApiResult } from './readApi';
 import {
   readProcessJournal,
@@ -38,6 +41,7 @@ import {
   assertPersonalRuntime,
   createPrivateExecution,
   spawnPersonalProcess,
+  observePersonalProcess,
   stopPersonalProcess,
 } from './personalProcess';
 
@@ -47,6 +51,14 @@ const accessSchema = z.object({
   user_id: z.string(),
   tenant: z.string(),
   policy_revision: hash,
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 const envelopeSchema = z.object({
   data: z.looseObject({ access: accessSchema }),
@@ -71,6 +83,7 @@ type Running = {
   jobId: string;
   closed: Promise<void>;
   stopping: boolean;
+  activity: AiActivity;
 };
 type Creation = {
   context: AnalysisContext;
@@ -90,7 +103,7 @@ function runKey(context: AnalysisContext, jobId: string): string {
   return JSON.stringify([
     context.active.connectionId,
     context.active.serverUrl,
-    context.active.policyRevision,
+    context.active.accessRevision ?? context.active.policyRevision,
     context.active.userId,
     context.selection.tenant,
     context.selection.profile,
@@ -105,34 +118,47 @@ function serverBase(context: AnalysisContext): string {
 export class AnalysisService {
   #connection: ConnectionService;
   #recovery: ProcessRecovery | undefined;
-  #running: Running | null = null;
-  #starting = false;
+  #running = new Map<string, Running>();
+  #starts = new ExecutionStarts();
   #epoch = 0;
-  #startSettled: Promise<void> = Promise.resolve();
-  #finishStart: (() => void) | undefined;
   #local = new Map<string, AnalysisLocal>();
   #creation: Creation | null = null;
   #requests = new Set<AbortController>();
+  readonly #privateRoot: string | undefined;
 
   /** 창·연결 수명과 프로세스 수명을 묶되 화면을 닫는 것만으로 새 실행을 만들지 않습니다. */
-  constructor(connection: ConnectionService, recovery?: ProcessRecovery) {
+  constructor(
+    connection: ConnectionService,
+    recovery?: ProcessRecovery,
+    privateRoot?: string,
+  ) {
     this.#recovery = recovery;
     this.#connection = connection;
+    this.#privateRoot = privateRoot;
     connection.onScopeChanged((): void => {
       for (const controller of this.#requests) controller.abort();
       void this.stop();
     });
   }
 
-  /** 종료를 기다려 토큰 파일을 지운 뒤 앱을 닫을 수 있게 합니다. */
+  /** 모든 시작과 실행이 임시 인증 파일을 정리한 뒤 종료합니다. */
   async stop(): Promise<void> {
     this.#epoch += 1;
-    await this.#startSettled;
-    const running = this.#running;
+    await this.#starts.settled();
+    await Promise.all(
+      [...this.#running.keys()].map((key: string): Promise<void> =>
+        this.#stopOne(key),
+      ),
+    );
+  }
+
+  /** 선택한 분석만 중단하고 다른 문서의 실행은 유지합니다. */
+  async #stopOne(key: string): Promise<void> {
+    const running = this.#running.get(key);
     if (!running) return;
     if (!running.stopping) {
       running.stopping = true;
-      this.#local.set(runKey(running.context, running.jobId), {
+      this.#local.set(key, {
         status: 'stopped',
         message:
           '로컬 실행을 중단했습니다. 이미 저장한 결과는 서버에 보존됩니다.',
@@ -141,50 +167,44 @@ export class AnalysisService {
     await stopPersonalProcess(running.child, running.closed);
   }
 
+  /** 공개 활동에는 인증정보나 원문을 포함하지 않습니다. */
+  activities(): AiActivity[] {
+    return [...this.#running.values()]
+      .filter((run: Running): boolean =>
+        this.#connection.isAnalysisCurrent(run.context),
+      )
+      .map((run: Running): AiActivity => ({
+        ...run.activity,
+        status: run.stopping ? 'stopping' : 'running',
+      }));
+  }
+
+  /** 접수 중인 작업도 명시 종료 확인에 포함합니다. */
+  get activeCount(): number {
+    return this.#running.size + this.#starts.size;
+  }
+
   /** 같은 인증 범위에서만 요청하며 연결이 바뀐 뒤 도착한 응답은 버립니다. */
   async #api(
     context: AnalysisContext,
     path: string,
-    body?: unknown,
+    body?: Record<string, unknown>,
   ): Promise<ReadApiResult> {
-    if (!this.#connection.isAnalysisCurrent(context)) return changed();
-    const controller = new AbortController();
-    this.#requests.add(controller);
-    const result = await readApiJson(
-      `${context.active.serverUrl}tenants/${encodeURIComponent(context.selection.tenant)}/${path}`,
-      context.token,
-      controller,
-      body === undefined ? {} : { method: 'POST', body },
-    );
-    this.#requests.delete(controller);
-    if (!this.#connection.isAnalysisCurrent(context)) return changed();
-    if (!result.ok) {
-      this.#connection.analysisAccessFailure(result);
-      return result;
-    }
-    try {
-      const envelope = envelopeSchema.parse(result.value);
-      const accessValue = envelope.data.access;
-      // 작업 API는 서버 기본 관점으로 조회합니다. 선택 관점은 실제 CLI 입력에 따로 고정합니다.
-      if (
-        accessValue.user_id !== context.active.userId ||
-        accessValue.tenant !== context.selection.tenant ||
-        accessValue.policy_revision !== context.active.policyRevision
-      ) {
+    return readScopedApiJson(this.#connection, this.#requests, context, path, {
+      body,
+      schema: envelopeSchema,
+      changed,
+      invalidMessage: '서버의 분석 응답 형식을 확인할 수 없습니다.',
+      // 작업 API의 서버 기본 관점을 유지하며 선택 관점은 실제 CLI 입력에 고정합니다.
+      accessChanged: (): ApiFailure => {
         const failure = apiFailure(
           'scope_changed',
           '서버의 사용자·작업 공간·권한 기준이 변경되었습니다. 다시 연결해 주세요.',
         );
         this.#connection.analysisAccessFailure(failure);
         return failure;
-      }
-      return { ok: true, value: envelope.data };
-    } catch {
-      return apiFailure(
-        'invalid_response',
-        '서버의 분석 응답 형식을 확인할 수 없습니다.',
-      );
-    }
+      },
+    });
   }
 
   /** 서버가 반환한 작업의 소유권을 응답의 access와 별도로 확인합니다. */
@@ -397,7 +417,7 @@ export class AnalysisService {
       blockers.push(
         '유효한 실행 사용권이 있습니다. 현재 실행 종료 또는 만료를 확인해 주세요.',
       );
-    if (this.#running)
+    if (this.#running.has(runKey(context, job.job_id)))
       blockers.push(
         '이 앱에서 실행 중인 분석을 먼저 중단하거나 완료해 주세요.',
       );
@@ -405,7 +425,7 @@ export class AnalysisService {
       job.analysis_basis_ref?.profile.profile_id ?? job.actor.profile_id;
     if (profile !== context.selection.profile)
       blockers.push(
-        '작업의 고정 관점과 현재 선택 관점이 다릅니다. 같은 관점을 선택해 주세요.',
+        '이전 조회 기준으로 시작한 작업입니다. 원래 기록을 보존하고 현재 작업 공간에서 새 작업을 시작해 주세요.',
       );
     if (job.targets.length !== 1)
       blockers.push('현재 개인 실행기는 문서별 단일 대상 작업을 지원합니다.');
@@ -463,16 +483,15 @@ export class AnalysisService {
   async execute(
     request: AnalysisExecuteRequest,
   ): Promise<AnalysisDetailResult> {
-    if (this.#starting || this.#running)
+    const finish = this.#starts.begin(
+      JSON.stringify([request.connectionId, request.jobId]),
+    );
+    if (!finish)
       return apiFailure(
         'analysis_busy',
         '이 앱의 기존 분석 실행을 먼저 확인해 주세요.',
       );
-    this.#starting = true;
     const epoch = this.#epoch;
-    this.#startSettled = new Promise<void>((done: () => void): void => {
-      this.#finishStart = done;
-    });
     try {
       const context = await this.#connection.analysisContext(
         request.connectionId,
@@ -513,9 +532,7 @@ export class AnalysisService {
         '기존 작업 실행을 확인하지 못했습니다. 작업과 저장 영수증을 다시 조회해 주세요. 자동 재실행하지 않았습니다.',
       );
     } finally {
-      this.#starting = false;
-      this.#finishStart?.();
-      this.#finishStart = undefined;
+      finish();
     }
   }
 
@@ -525,16 +542,12 @@ export class AnalysisService {
       request.connectionId,
     );
     if ('ok' in context) return context;
-    if (
-      !this.#running ||
-      runKey(context, request.jobId) !==
-        runKey(this.#running.context, this.#running.jobId)
-    )
+    if (!this.#running.has(runKey(context, request.jobId)))
       return apiFailure(
         'local_execution_missing',
         '이 앱에서 실행 중인 해당 작업이 없습니다. 서버 상태를 확인해 주세요.',
       );
-    await this.stop();
+    await this.#stopOne(runKey(context, request.jobId));
     return this.#detail(context, request.jobId);
   }
 
@@ -558,22 +571,30 @@ export class AnalysisService {
 
   /** 명시된 원본·단일 문서로 한 번 접수한 뒤 기존 개인 AI 어댑터를 실행합니다. */
   async start(request: AnalysisStartRequest): Promise<AnalysisDetailResult> {
-    if (this.#starting || this.#running)
+    const finish = this.#starts.begin('registration');
+    if (!finish)
       return apiFailure(
         'analysis_busy',
         '이 앱에서 이미 분석을 실행하고 있습니다. 기존 작업을 먼저 확인해 주세요.',
       );
-    this.#starting = true;
     const epoch = this.#epoch;
-    this.#startSettled = new Promise<void>((done: () => void): void => {
-      this.#finishStart = done;
-    });
     try {
       const context = await this.#connection.analysisContext(
         request.connectionId,
         true,
       );
       if ('ok' in context) return context;
+      if (
+        request.registration &&
+        context.active.workspaces.find(
+          (workspace: WorkspaceMembership): boolean =>
+            workspace.id === context.selection.tenant,
+        )?.defaultProfile !== context.selection.profile
+      )
+        return apiFailure(
+          'registration_profile_mismatch',
+          '작업 공간의 기본 조회 설정이 변경되었습니다. 설정에서 작업 공간을 다시 적용한 뒤 진행해 주세요.',
+        );
       await this.#restoreCreation(context);
       let created: z.infer<typeof createdSchema>;
       if (this.#creation) {
@@ -583,8 +604,7 @@ export class AnalysisService {
           previous.context.active.userId !== context.active.userId ||
           previous.context.selection.tenant !== context.selection.tenant ||
           previous.context.selection.profile !== context.selection.profile ||
-          previous.context.active.policyRevision !==
-            context.active.policyRevision
+          !sameAccessRevision(previous.context.active, context.active)
         )
           return apiFailure(
             'creation_unconfirmed',
@@ -609,14 +629,17 @@ export class AnalysisService {
             'creation_unconfirmed',
             '같은 분석 접수의 영수증을 아직 확인하지 못했습니다.',
           );
-        await removeProcessJournal(this.#recovery, context, previous.journal);
-        this.#creation = null;
-        return this.#detail(context, created.job_id);
+        const detail = await this.#detail(context, created.job_id);
+        if (detail.ok) {
+          await removeProcessJournal(this.#recovery, context, previous.journal);
+          this.#creation = null;
+        }
+        return detail;
       }
-      const runtime = await this.#runtime();
-      if ('ok' in runtime) return runtime;
-      const { root, python } = runtime;
-      const requestId = randomUUID().replaceAll('-', '');
+      const runtime = request.registration ? null : await this.#runtime();
+      if (runtime && 'ok' in runtime) return runtime;
+      const requestId =
+        request.registration?.requestId ?? randomUUID().replaceAll('-', '');
       const journal = await writeProcessJournal(
         this.#recovery,
         context,
@@ -631,15 +654,41 @@ export class AnalysisService {
         },
       );
       this.#creation = { context, requestId, journal };
-      const response = await this.#api(context, 'analysis-jobs', {
-        request_id: requestId,
-        source_id: request.sourceId,
-        source_version: request.sourceVersion,
-        source_sha256: request.sourceSha256,
-        expected_registration_revision: request.registrationRevision,
-        targets: [request.targetDocument],
-        outputs: request.outputs,
-      });
+      const response = await this.#api(
+        context,
+        request.registration ? 'analysis-jobs/registrations' : 'analysis-jobs',
+        request.registration
+          ? {
+              request_id: requestId,
+              source_ref: {
+                source_id: request.sourceId,
+                source_version: request.sourceVersion,
+                source_sha256: request.sourceSha256,
+                registration_revision: request.registrationRevision,
+              },
+              document: request.targetDocument,
+              title: request.registration.title,
+              ...(request.registration.conversionRef
+                ? {
+                    conversion_ref: {
+                      conversion_id:
+                        request.registration.conversionRef.conversionId,
+                      conversion_revision:
+                        request.registration.conversionRef.conversionRevision,
+                    },
+                  }
+                : {}),
+            }
+          : {
+              request_id: requestId,
+              source_id: request.sourceId,
+              source_version: request.sourceVersion,
+              source_sha256: request.sourceSha256,
+              expected_registration_revision: request.registrationRevision,
+              targets: [request.targetDocument],
+              outputs: request.outputs,
+            },
+      );
       if (!response.ok) {
         // 명확한 거부만 새 접수를 허용합니다. 전송 오류/5xx는 같은 request_id를 보존합니다.
         if (
@@ -654,18 +703,25 @@ export class AnalysisService {
       }
       created = createdSchema.parse(response.value);
       if (created.request_id !== requestId) throw new Error('invalid_response');
-      if (created.state === 'complete') {
+      const detail = await this.#detail(context, created.job_id);
+      if (created.state === 'complete' && detail.ok) {
         await removeProcessJournal(this.#recovery, context, journal);
         this.#creation = null;
       }
-      const detail = await this.#detail(context, created.job_id);
-      if (!detail.ok || created.state !== 'complete') return detail;
+      if (!detail.ok || created.state !== 'complete' || !runtime) return detail;
       if (detail.data.job.source_ref.size_bytes > 4 * 1024 * 1024)
         return apiFailure(
           'source_too_large',
           '현재 개인 AI 실행은 UTF-8 원본 4 MiB까지 지원합니다. 접수된 작업은 목록에 보존됩니다.',
         );
-      await this.#spawn(context, detail.data.job, python, root, false, epoch);
+      await this.#spawn(
+        context,
+        detail.data.job,
+        runtime.python,
+        runtime.root,
+        false,
+        epoch,
+      );
       return this.#detail(context, created.job_id);
     } catch {
       return apiFailure(
@@ -673,9 +729,7 @@ export class AnalysisService {
         '분석을 시작하지 못했습니다. 작업 목록과 서버 저장 상태를 먼저 확인해 주세요.',
       );
     } finally {
-      this.#starting = false;
-      this.#finishStart?.();
-      this.#finishStart = undefined;
+      finish();
     }
   }
 
@@ -689,7 +743,10 @@ export class AnalysisService {
     epoch: number = this.#epoch,
   ): Promise<void> {
     const stateKey = runKey(context, job.job_id);
-    const privateRoot = join(app.getPath('userData'), 'analysis');
+    // 웹 시험은 별도 임시 경로를 주입하고 데스크톱 기본 경로는 그대로 사용합니다.
+    const privateRoot =
+      this.#privateRoot ??
+      join((await import('electron')).app.getPath('userData'), 'analysis');
     const runtime = { projectRoot, python };
     const execution = await createPrivateExecution(
       runtime,
@@ -718,6 +775,8 @@ export class AnalysisService {
         execution.tokenFile,
         '--work-dir',
         execution.workDirectory,
+        '--session-registry',
+        join(dirname(privateRoot), 'ai-session-refs'),
         '--profile',
         context.selection.profile,
         '--run-ai',
@@ -725,9 +784,9 @@ export class AnalysisService {
         ai.provider,
         '--ai-cli',
         ai.cli,
+        ...aiModelArguments(ai),
       ];
       child = spawnPersonalProcess(runtime, args);
-      child.stdout?.resume();
     } catch {
       await execution.cleanupAuth();
       throw new Error('spawn_failed');
@@ -737,29 +796,30 @@ export class AnalysisService {
       message:
         '개인 AI가 분석 중입니다. 저장 완료 여부는 서버 영수증으로 확인합니다.',
     });
-    // 종료 직전 stdin이 닫혀도 EventEmitter 오류가 앱 종료로 번지지 않습니다.
-    child.stdin?.on('error', (): void => {});
-    let stderr = '';
-    child.stderr?.on('data', (chunk: Buffer): void => {
-      if (stderr.length < 4096)
-        stderr += chunk.toString('utf8').slice(0, 4096 - stderr.length);
-    });
     const running: Running = {
       child,
       context,
       jobId: job.job_id,
       stopping: false,
+      activity: {
+        kind: 'analysis',
+        id: job.job_id,
+        connectionId: context.active.connectionId,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        document: job.targets[0]?.document,
+      },
       closed: Promise.resolve(),
     };
-    running.closed = new Promise<void>((done: () => void): void => {
-      child.on('error', (): void => {
+    running.closed = observePersonalProcess(child, {
+      onError: (): void => {
         this.#local.set(stateKey, {
           status: 'failed',
           message:
             'Python 분석 실행기를 열 수 없습니다. 실행 환경을 확인해 주세요.',
         });
-      });
-      child.on('close', (code: number | null): void => {
+      },
+      onClose: (code: number | null, stderr: string): void => {
         const local = this.#local.get(stateKey);
         if (local?.status === 'running') {
           let message =
@@ -821,23 +881,21 @@ export class AnalysisService {
             message,
           });
         }
-        // 프로세스가 완전히 닫힌 뒤 이번 실행의 임시 자격 증명만 삭제합니다.
-        void execution
-          .cleanupAuth()
-          .catch((): void => {
-            this.#local.set(stateKey, {
-              status: this.#local.get(stateKey)?.status ?? 'failed',
-              message:
-                '실행은 종료되었지만 임시 인증 파일을 정리하지 못했습니다. 앱의 로컬 저장소를 확인해 주세요.',
-            });
-          })
-          .finally((): void => {
-            if (this.#running === running) this.#running = null;
-            done();
-          });
-      });
+      },
+      cleanup: (): Promise<void> => execution.cleanupAuth(),
+      onCleanupError: (): void => {
+        this.#local.set(stateKey, {
+          status: this.#local.get(stateKey)?.status ?? 'failed',
+          message:
+            '실행은 종료되었지만 임시 인증 파일을 정리하지 못했습니다. 앱의 로컬 저장소를 확인해 주세요.',
+        });
+      },
+      onFinished: (): void => {
+        if (this.#running.get(stateKey) === running)
+          this.#running.delete(stateKey);
+      },
     });
-    this.#running = running;
+    this.#running.set(stateKey, running);
   }
 
   /** 서버의 현재 CAS로 취소합니다. 서버 취소 실패와 로컬 중단을 구분하며 결과는 보존합니다. */
@@ -856,11 +914,7 @@ export class AnalysisService {
       },
     );
     if (!result.ok) return result;
-    if (
-      this.#running?.jobId === request.jobId &&
-      this.#running.context.active.connectionId === context.active.connectionId
-    )
-      await this.stop();
+    await this.#stopOne(runKey(context, request.jobId));
     return this.#detail(context, request.jobId);
   }
 }

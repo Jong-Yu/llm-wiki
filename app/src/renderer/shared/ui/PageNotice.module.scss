@@ -1,0 +1,52 @@
+.line {
+  align-items: center;
+  margin-block: var(--wiki-space-8);
+  border-inline-start: 0;
+  border: 1px solid var(--notice-accent);
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  padding: 48px var(--wiki-space-16);
+  text-align: center;
+  p {
+    margin: 0;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.emptyTitle {
+  color: var(--wiki-color-text-primary);
+  font-size: var(--wiki-font-size-16);
+}
+.emptyIcon {
+  flex-shrink: 0;
+  color: var(--wiki-color-action-primary);
+}
+.detail {
+  font-size: var(--wiki-font-size-12);
+}
+.emptyAction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wiki-space-8);
+  margin-top: var(--wiki-space-4);
+}
+// 공통 틀의 패널과 같은 카드 모양으로 남은 영역을 채웁니다.
+.framed {
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  justify-content: center;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-canvas);
+  overflow: auto;
+}
+.chatLine {
+  align-items: center;
+  margin-bottom: var(--wiki-space-8);
+}

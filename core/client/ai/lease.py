@@ -8,6 +8,7 @@ import asyncio
 from contextlib import suppress
 
 from core.client.transport import AnalysisClientError, api_call
+from core.client.supervision import supervise
 
 
 HEARTBEAT_SECONDS = 30
@@ -50,14 +51,4 @@ class LeaseKeeper:
 
     async def guard(self, operation):
         """AI 실행과 사용권 실패를 함께 기다린다. 먼저 실패하면 이번 실행만 취소한다."""
-        work = asyncio.create_task(operation)
-        failure = asyncio.create_task(self.failed.wait())
-        try:
-            await asyncio.wait((work, failure), return_when=asyncio.FIRST_COMPLETED)
-            self.check()
-            return await work
-        finally:
-            # runner는 취소를 받으면 자신이 만든 프로세스 그룹을 종료·회수한다.
-            work.cancel()
-            failure.cancel()
-            await asyncio.gather(work, failure, return_exceptions=True)
+        return await supervise(operation, self.failed.wait(), check=self.check)

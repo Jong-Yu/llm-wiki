@@ -45,11 +45,30 @@ const errorSchema = z.object({
   status: z.number().int().min(100).max(599).optional(),
   traceId: traceSchema.optional(),
 });
+const documentMetadataSchema = z.record(z.string(), z.json());
+const authorshipSchema = z.object({
+  status: z.string(),
+  created: z.record(z.string(), z.json()).nullable(),
+  updated: z.record(z.string(), z.json()).nullable(),
+});
+const documentExtras = {
+  metadata: documentMetadataSchema.optional(),
+  bodyRevision: textSchema.optional(),
+  documentId: z.string().nullable().optional(),
+  authorship: authorshipSchema.optional(),
+};
+const rawDocumentExtras = {
+  metadata: documentMetadataSchema.optional(),
+  body_revision: textSchema.optional(),
+  document_id: z.string().nullable().optional(),
+  authorship: authorshipSchema.optional(),
+};
 const wikiItemSchema = z.object({
   kind: z.literal('wiki'),
+  ...documentExtras,
   document: textSchema,
   revision: textSchema,
-  sourceStatus: z.enum(['unlinked', 'unknown']),
+  sourceStatus: z.enum(['unlinked', 'linked', 'unknown']),
 });
 export const sourceFormatSchema = z.enum([
   'md',
@@ -86,6 +105,7 @@ const accessSchema = z.object({
   domain: z.string().max(4096).nullable(),
   viewpoint: z.string().max(4096).nullable(),
   policyRevision: textSchema,
+  accessRevision: z.string().min(1).optional(),
 });
 const scopeSchema = z.object({
   tenant: textSchema,
@@ -124,6 +144,9 @@ export const documentContentRequestSchema = z.strictObject({
   document: documentPathSchema,
 });
 export const documentContentSchema = z.object({
+  ...documentExtras,
+  body: contentBodySchema.optional(),
+  bodyStartLine: z.number().int().min(1).optional(),
   connectionId: textSchema,
   document: documentPathSchema,
   content: contentBodySchema,
@@ -196,9 +219,10 @@ export type DocumentsBridge = {
 };
 
 const rawWikiSchema = z.strictObject({
+  ...rawDocumentExtras,
   document: textSchema,
   revision: textSchema,
-  source_status: z.literal('unlinked'),
+  source_status: z.enum(['unlinked', 'linked', 'unknown']),
 });
 const rawSourceSchema = z.strictObject({
   kind: z.literal('source'),
@@ -219,6 +243,14 @@ const rawAccessSchema = z.strictObject({
   domain: z.string().max(4096).nullable(),
   viewpoint: z.string().max(4096).nullable(),
   policy_revision: textSchema,
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 const sourceCatalogEnvelopeSchema = z.object({
   data: z.object({
@@ -253,6 +285,9 @@ const envelopeSchema = z.strictObject({
 });
 const contentEnvelopeSchema = z.strictObject({
   data: z.strictObject({
+    ...rawDocumentExtras,
+    body: z.string().optional(),
+    body_start_line: z.number().int().min(1).optional(),
     document: documentPathSchema,
     content: z.string(),
     revision: textSchema,
@@ -296,6 +331,10 @@ export function parseDocumentListResponse(
           }
         : {
             kind: 'wiki',
+            metadata: item.metadata,
+            bodyRevision: item.body_revision,
+            documentId: item.document_id,
+            authorship: item.authorship,
             document: item.document,
             revision: item.revision,
             sourceStatus: item.source_status,
@@ -309,6 +348,9 @@ export function parseDocumentListResponse(
       domain: data.access.domain,
       viewpoint: data.access.viewpoint,
       policyRevision: data.access.policy_revision,
+      ...(data.access.access_revision
+        ? { accessRevision: data.access.access_revision }
+        : {}),
     },
     catalogRevision: data.catalog_revision,
     nextCursor: data.next_cursor,
@@ -352,6 +394,12 @@ export function parseDocumentContentResponse(
     connectionId,
     document: data.document,
     content: data.content,
+    metadata: data.metadata,
+    body: data.body,
+    bodyStartLine: data.body_start_line,
+    bodyRevision: data.body_revision,
+    documentId: data.document_id,
+    authorship: data.authorship,
     revision: data.revision,
     access: {
       userId: data.access.user_id,
@@ -360,6 +408,9 @@ export function parseDocumentContentResponse(
       domain: data.access.domain,
       viewpoint: data.access.viewpoint,
       policyRevision: data.access.policy_revision,
+      ...(data.access.access_revision
+        ? { accessRevision: data.access.access_revision }
+        : {}),
     },
     traceId: meta.trace_id,
   };
@@ -412,6 +463,9 @@ export function parseSourceCatalog(
       domain: data.access.domain,
       viewpoint: data.access.viewpoint,
       policyRevision: data.access.policy_revision,
+      ...(data.access.access_revision
+        ? { accessRevision: data.access.access_revision }
+        : {}),
     },
     traceId: meta.trace_id,
   };

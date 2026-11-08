@@ -1,3 +1,5 @@
+import { matchesExpectedScope } from './readApi';
+import { sameAccessRevision } from '@contracts/connection.contract';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access, writeFile } from 'node:fs/promises';
@@ -63,7 +65,7 @@ function key(
     context.active.userId,
     context.selection.tenant,
     context.selection.profile,
-    context.active.policyRevision,
+    context.active.accessRevision ?? context.active.policyRevision,
     request.sourceId,
     request.sourceVersion,
     request.sourceSha256,
@@ -120,16 +122,10 @@ export class SourceConversionService {
       write,
     );
     if ('ok' in context) return context;
-    const scope = request.expectedScope;
-    if (
-      context.active.userId !== scope.userId ||
-      context.selection.tenant !== scope.tenant ||
-      context.selection.profile !== scope.profileId ||
-      context.active.policyRevision !== scope.policyRevision
-    )
+    if (!matchesExpectedScope(request.expectedScope, context))
       return apiFailure(
         'scope_changed',
-        '원본을 선택한 작업 공간·관점이 변경되었습니다. 다시 선택해 주세요.',
+        '원본을 선택한 작업 공간 또는 조회 설정이 변경되었습니다. 원본을 다시 선택해 주세요.',
       );
     return context;
   }
@@ -470,7 +466,13 @@ export class SourceConversionService {
         data.access.user_id !== context.active.userId ||
         data.access.tenant !== context.selection.tenant ||
         data.access.profile_id !== context.selection.profile ||
-        data.access.policy_revision !== context.active.policyRevision
+        !sameAccessRevision(
+          {
+            policyRevision: data.access.policy_revision,
+            accessRevision: data.access.access_revision,
+          },
+          context.active,
+        )
       )
         throw new Error('invalid_receipt');
       const report = conversionReportSchema.parse({

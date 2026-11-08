@@ -39,7 +39,8 @@ def dependencies():
 
 
 def access_match(api, mcp, tenant=None, profile=None):
-    if any(api.get(key) != mcp.get(key) for key in ("user_id", "policy_revision", "memberships")):
+    revision = "access_revision" if api.get("access_revision") and mcp.get("access_revision") else "policy_revision"
+    if any(api.get(key) != mcp.get(key) for key in ("user_id", revision, "memberships")):
         return {"status": "error", "code": "api_mcp_access_mismatch"}
     if not isinstance(api.get("user_id"), str) or not isinstance(api.get("memberships"), dict):
         return {"status": "error", "code": "invalid_access_context"}

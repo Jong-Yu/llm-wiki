@@ -1,0 +1,9 @@
+.mark {
+  display: inline-block;
+  width: 32px;
+  height: 24px;
+  flex-shrink: 0;
+  background: var(--wiki-color-action-primary);
+  mask: url('../../../../design/brand/llm-wiki-mark.svg') center / contain
+    no-repeat;
+}

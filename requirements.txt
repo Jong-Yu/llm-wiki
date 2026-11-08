@@ -6,6 +6,9 @@ markdown-it-py==4.2.0
 fastapi==0.162.0
 # Bounded multipart original uploads (also pinned in requirements.lock).
 python-multipart==0.0.32
+# Encrypted recoverable user credentials and safe document Front Matter parsing.
+cryptography==50.0.2
+PyYAML==6.0.2
 # Validate raw analysis submissions against the published schema (already locked).
 jsonschema==4.26.0
 # Native Windows personal runner: protected ACL files and owned process jobs.

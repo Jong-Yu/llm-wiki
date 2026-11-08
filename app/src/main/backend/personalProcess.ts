@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import {
   lstat,
   mkdir,
@@ -19,6 +20,28 @@ export type PrivateExecution = {
   workDirectory: string;
   cleanupAuth: () => Promise<void>;
 };
+
+/** 저장 설정이 적용된 공통 환경에서 개인 실행기 경로를 같은 우선순위로 고릅니다. */
+export function personalRuntimePaths(): PersonalRuntime {
+  const projectRoot =
+    process.env.WIKI_CLIENT_ROOT ||
+    process.env.WIKI_ANALYSIS_PROJECT_ROOT ||
+    resolve(import.meta.dirname, '../../..');
+  return {
+    projectRoot,
+    python:
+      process.env.WIKI_CLIENT_PYTHON ||
+      process.env.WIKI_PYTHON ||
+      process.env.WIKI_ANALYSIS_PYTHON ||
+      join(
+        projectRoot,
+        process.platform === 'win32'
+          ? '.venv/Scripts/python.exe'
+          : '.venv/bin/python',
+      ),
+  };
+}
+
 const ownedProcesses = new WeakSet<ChildProcess>();
 const closedProcesses = new WeakSet<ChildProcess>();
 const stoppingProcesses = new WeakMap<ChildProcess, Promise<void>>();
@@ -274,6 +297,133 @@ export function spawnPersonalProcess(
   });
   child.stdin?.on('error', (): void => {});
   return child;
+}
+
+type PersonalOutputOptions = {
+  maxBytes: number;
+  timeoutMs: number;
+  signal?: AbortSignal;
+};
+
+type ProcessObserver = {
+  onEvent?: (event: unknown) => void;
+  onError?: () => void;
+  onClose: (code: number | null, stderr: string) => void;
+  cleanup: () => Promise<void>;
+  onCleanupError: () => void;
+  onFinished: () => void;
+};
+
+/** JSONL은 완성된 한 줄만 해석하고 과도한 줄·잘못된 원문은 공개하지 않습니다. */
+function observeJsonLines(
+  child: ChildProcess,
+  onEvent: (event: unknown) => void,
+): void {
+  const decoder = new StringDecoder('utf8');
+  let buffer = '';
+  let discard = false;
+  child.stdout?.on('data', (chunk: Buffer): void => {
+    buffer += decoder.write(chunk);
+    for (;;) {
+      const index = buffer.indexOf('\n');
+      if (index < 0) break;
+      const line = buffer.slice(0, index);
+      buffer = buffer.slice(index + 1);
+      if (!discard && line.length <= 1024 * 1024) {
+        try {
+          onEvent(JSON.parse(line));
+        } catch {
+          /* CLI 원문과 잘못된 이벤트는 오류 안내에 반사하지 않습니다. */
+        }
+      }
+      discard = false;
+    }
+    if (buffer.length > 1024 * 1024) {
+      buffer = '';
+      discard = true;
+    }
+  });
+}
+
+/** 종료·협력 취소·인증 정리의 순서를 공유하며 업무별 상태 투영은 호출자가 맡습니다. */
+export function observePersonalProcess(
+  child: ChildProcess,
+  observer: ProcessObserver,
+): Promise<void> {
+  if (observer.onEvent) observeJsonLines(child, observer.onEvent);
+  else child.stdout?.resume();
+  // 종료 직전 닫힌 stdin에 쓰는 취소 명령이 앱의 미처리 오류가 되지 않게 합니다.
+  child.stdin?.on('error', (): void => {});
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer): void => {
+    if (stderr.length < 4096)
+      stderr += chunk.toString('utf8').slice(0, 4096 - stderr.length);
+  });
+  return new Promise<void>((done: () => void): void => {
+    child.once('error', (): void => observer.onError?.());
+    child.once('close', (code: number | null): void => {
+      observer.onClose(code, stderr);
+      void Promise.resolve()
+        .then(observer.cleanup)
+        .catch(observer.onCleanupError)
+        .finally((): void => {
+          observer.onFinished();
+          done();
+        });
+    });
+  });
+}
+export type PersonalOutput = {
+  output: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  tooLarge: boolean;
+};
+
+/** 한 번 응답하는 개인 도구의 UTF-8 출력·시간·취소 한도를 같은 프로세스 경계에서 관리합니다. */
+export async function runPersonalCommand(
+  runtime: PersonalRuntime,
+  args: string[],
+  options: PersonalOutputOptions,
+): Promise<PersonalOutput> {
+  if (options.signal?.aborted) throw new Error('personal_command_aborted');
+  const child = spawnPersonalProcess(runtime, args);
+  const decoder = new StringDecoder('utf8');
+  let output = '';
+  let bytes = 0;
+  let timedOut = false;
+  const closed = new Promise<void>((done: () => void): void => {
+    child.once('close', done);
+    child.once('error', done);
+  });
+  const stop = (): void => {
+    void stopPersonalProcess(child, closed, 1_000).catch((): void => {});
+  };
+  child.stdout?.on('data', (chunk: Buffer): void => {
+    bytes += chunk.length;
+    if (bytes <= options.maxBytes) output += decoder.write(chunk);
+    else stop();
+  });
+  child.stderr?.resume();
+  options.signal?.addEventListener('abort', stop);
+  const timer = setTimeout((): void => {
+    timedOut = true;
+    stop();
+  }, options.timeoutMs);
+  try {
+    if (options.signal?.aborted) stop();
+    await closed;
+    if (options.signal?.aborted) throw new Error('personal_command_aborted');
+    return {
+      output: output + decoder.end(),
+      exitCode: child.exitCode,
+      timedOut,
+      tooLarge: bytes > options.maxBytes,
+    };
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', stop);
+  }
 }
 
 /** 종료된 PID를 재사용하지 않으며 이 helper가 시작한 그룹에만 신호를 보냅니다. */

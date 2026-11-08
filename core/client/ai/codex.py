@@ -13,10 +13,10 @@ import math
 import os
 from pathlib import Path
 import re
-import shutil
 import signal
 import stat
 import time
+from uuid import UUID
 
 from jsonschema import Draft202012Validator
 
@@ -202,7 +202,7 @@ def _preview_event(line, callback):
         raise AIAdapterError("ai_invalid_events") from None
 
 
-def _events(raw, trace):
+def _events(raw, trace, *, web_search=False):
     completed, reported_model = False, None
     try:
         lines = raw.decode("utf-8").splitlines()
@@ -221,10 +221,22 @@ def _events(raw, trace):
             # 오류 본문은 남기지 않지만 짧은 ASCII 타입 이름은 남겨 실패와 도구 호출을 구분한다.
             safe_type = item_type if isinstance(item_type, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", item_type) else None
             trace.append({"type": kind, "item_type": safe_type})
+            if kind == "thread.started" and event.get("thread_id") is not None:
+                trace[-1]["session_id"] = str(UUID(event["thread_id"]))
+            if kind == "turn.completed":
+                from .observations import reported_usage
+                usage = reported_usage(event.get("usage"))
+                if usage is not None:
+                    trace[-1]["token_usage"] = usage
             if kind in {"error", "turn.failed"} or (kind.startswith("item.") and item_type == "error"):
                 raise AIAdapterError("ai_execution_failed")
-            if kind.startswith("item.") and item_type not in {"reasoning", "agent_message"}:
+            allowed_items = {"reasoning", "agent_message"} | ({"web_search"} if web_search else set())
+            if kind.startswith("item.") and item_type not in allowed_items:
                 raise AIAdapterError("ai_unexpected_tool_activity")
+            if kind == "item.completed" and item_type == "web_search":
+                if item.get("status") in {"failed", "cancelled"}:
+                    raise AIAdapterError("ai_web_search_failed")
+                trace[-1]["web_search_completed"] = True
             if kind == "turn.started":
                 completed = False
             if kind == "turn.completed":
@@ -259,6 +271,10 @@ class CodexAdapter:
         self.cli, self.model, self.timeout_seconds = cli, model, timeout_seconds
         self._capabilities = None
         self.on_event = on_event
+        self.persist_session = False
+        self.session_id = None
+        self._session_usage = {}
+        self._question_profile_checked = False
 
     async def _check(self, environment):
         try:
@@ -289,10 +305,34 @@ class CodexAdapter:
         return {"provider": "codex", "cli_version": version, "requested_model": self.model,
                 "capabilities_checked": True, "login_checked": False}
 
-    async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None):
+    async def _check_question_profile(self, executable, environment):
+        """축소 질문의 필수 기능만 읽기 전용으로 확인하고 성공한 확인만 재사용한다."""
+        if self._question_profile_checked:
+            return
+        from .question_profile import FEATURE
+        try:
+            code, output, _ = await _execute([*executable, "features", "list"],
+                                            directory=None, environment=environment)
+        except (OSError, TimeoutError) as error:
+            raise AIAdapterError("ai_cli_unavailable") from error
+        try:
+            supported = any(len(parts := line.split()) >= 3 and parts[0] == FEATURE
+                            and parts[-1] in {"true", "false"}
+                            for line in output.decode("utf-8").splitlines())
+        except UnicodeError as error:
+            raise AIAdapterError("ai_cli_incompatible") from error
+        if code != 0 or not supported:
+            raise AIAdapterError("ai_cli_incompatible")
+        self._question_profile_checked = True
+
+    async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None,
+                  web_search=False, question_profile=False):
         """전체 prompt/schema로 한 번 실행해 {'value': 결과 dict, 'execution': 관측 기록}을 반환한다."""
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
-                or output_schema is not None and not isinstance(output_schema, dict)):
+                or output_schema is not None and not isinstance(output_schema, dict)
+                or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)
+                or type(question_profile) is not bool
+                or question_profile and (self.persist_session or session_id is not None or web_search)):
             raise AIAdapterError("ai_invalid_input")
         prompt_bytes = prompt.encode("utf-8")
         original_schema = canonical_json_bytes(schema)
@@ -305,6 +345,11 @@ class CodexAdapter:
         environment = {name: os.environ[name] for name in _ENVIRONMENT if name in os.environ}
         await self.preflight()
         executable, version = self._capabilities
+        if session_id is not None:
+            try:
+                session_id = str(UUID(session_id))
+            except (ValueError, TypeError, AttributeError) as error:
+                raise AIAdapterError("ai_invalid_session") from error
         directory = Path(directory).absolute()
         if any(path.is_symlink() for path in (directory, *directory.parents)):
             raise AIAdapterError("ai_unsafe_directory")
@@ -313,17 +358,36 @@ class CodexAdapter:
         _write_new(directory / "source-schema.json", original_schema)
         _write_new(directory / "schema.json", schema_bytes)
         result_path = directory / "result.json"
-        arguments = [*executable, "exec", "--ephemeral", "--ignore-user-config", "--skip-git-repo-check", "--json",
-            "--sandbox", "read-only", "-C", str(directory), "--output-schema", str(directory / "schema.json"),
-            "--output-last-message", str(result_path)]
+        arguments = [*executable, "exec", "--sandbox", "read-only", "-C", str(directory)]
+        if session_id is not None:
+            arguments.extend(["resume", session_id])
+        if not self.persist_session and session_id is None:
+            arguments.append("--ephemeral")
+        arguments.extend(["--ignore-user-config", "--skip-git-repo-check", "--json",
+            "--output-schema", str(directory / "schema.json"),
+            "--output-last-message", str(result_path)])
         # 설치된 CLI는 개발 중 기능의 안내도 error 항목으로 보낼 수 있다. 설정 파일을
         # 바꾸지 않고 이번 실행의 안내만 숨기며, 실제 error 이벤트는 계속 실패로 처리한다.
-        for setting in ("project_doc_max_bytes=0", 'web_search="disabled"', "agents.enabled=false",
+        for setting in ("project_doc_max_bytes=0", 'web_search="live"' if web_search else 'web_search="disabled"', "agents.enabled=false",
                         "suppress_unstable_features_warning=true"):
             arguments.extend(["-c", setting])
         for feature in _DISABLED:
             arguments.extend(["--disable", feature])
         arguments.extend(["--enable", "skip_host_skill_discovery"])
+        profile_metadata = None
+        if question_profile:
+            from .question_profile import VERSION, FEATURE, FILENAME, INSTRUCTIONS, SETTINGS
+            instructions = INSTRUCTIONS.encode("utf-8")
+            instructions_path = directory / FILENAME
+            _write_new(instructions_path, instructions)
+            settings = {"model_instructions_file": str(instructions_path), **dict.fromkeys(SETTINGS, False)}
+            arguments.extend(["-c", "model_instructions_file=" + json.dumps(str(instructions_path)),
+                              "--enable", FEATURE])
+            for setting in SETTINGS:
+                arguments.extend(["-c", setting + "=false"])
+            profile_metadata = {"version": VERSION, "instructions_file": FILENAME,
+                "instructions_sha256": sha256(instructions).hexdigest(), "settings": settings,
+                "enabled_features": [FEATURE], "feature_support_checked": False}
         if self.model is not None:
             arguments.extend(["--model", self.model])
         arguments.append("-")
@@ -332,8 +396,13 @@ class CodexAdapter:
             "reported_model": None, "evidence_kind": "client_observed", "semantic_validation": "not_run",
             "prompt_sha256": sha256(prompt_bytes).hexdigest(), "schema_sha256": sha256(schema_bytes).hexdigest(),
             "input_schema_sha256": sha256(original_schema).hexdigest(), "status": "failed"}
+        if profile_metadata is not None:
+            metadata["question_profile"] = profile_metadata
         started = time.monotonic()
         try:
+            if question_profile:
+                await self._check_question_profile(executable, environment)
+                profile_metadata["feature_support_checked"] = True
             code, output, stderr = await _execute(arguments, directory=directory, environment=environment,
                 prompt=prompt_bytes, timeout=self.timeout_seconds, result_path=result_path,
                 on_event=on_event if on_event is not None else self.on_event)
@@ -343,7 +412,36 @@ class CodexAdapter:
                 raise AIAdapterError("ai_login_or_execution_failed")
             trace = []
             try:
-                _, metadata["reported_model"] = _events(output, trace)
+                _, metadata["reported_model"] = _events(output, trace, web_search=web_search)
+                if web_search:
+                    metadata["web_search_completed"] = sum(bool(event.get("web_search_completed")) for event in trace)
+                    if not metadata["web_search_completed"]:
+                        raise AIAdapterError("ai_web_search_not_used")
+                observed_ids = {event["session_id"] for event in trace if "session_id" in event}
+                if self.persist_session or session_id is not None:
+                    if len(observed_ids) != 1 or session_id is not None and session_id not in observed_ids:
+                        raise AIAdapterError("ai_session_mismatch")
+                    self.session_id = next(iter(observed_ids))
+                    metadata["session_id"] = self.session_id
+                    metadata["session_persisted"] = True
+                metadata["token_usage"] = {"origin": "provider_reported", "reports": [
+                    event["token_usage"] for event in trace if "token_usage" in event]} if any(
+                        "token_usage" in event for event in trace) else None
+                if self.persist_session or session_id is not None:
+                    # exec는 대화 누적 사용량을 보고하므로 재개 호출을 합산할 때 앞 턴을 중복 계산하지 않는다.
+                    reports = [event["token_usage"]["tokens"] for event in trace if "token_usage" in event]
+                    current = reports[-1] if reports else None
+                    previous = self._session_usage.get(self.session_id)
+                    metadata["provider_session_usage"] = current
+                    incremental = current if session_id is None else None
+                    if current is not None and previous is not None and all(
+                            key in previous and count >= previous[key] for key, count in current.items()):
+                        incremental = {key: count - previous[key] for key, count in current.items()}
+                    metadata["token_usage"] = ({"origin": "provider_reported", "tokens": incremental,
+                        "calculation": "session_total_difference" if session_id else "initial_session_total"}
+                        if incremental is not None else None)
+                    if current is not None:
+                        self._session_usage[self.session_id] = current
             finally:
                 _write_new(directory / "trace.jsonl", b"".join(canonical_json_bytes(event) for event in trace))
             if is_windows():

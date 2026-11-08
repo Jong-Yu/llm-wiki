@@ -7,6 +7,7 @@ import styles from './ReviewAnalysisProposals.module.scss';
 import type { ProposalRecord } from '../model/analysisProposal.schema';
 import { verifiedProposalReports } from '../model/proposalReports';
 import type { VerifiedReports } from '../model/proposalReports';
+import { DiagnosticFindings } from './DiagnosticFindings';
 
 const rowSchema = z
   .object({
@@ -26,47 +27,83 @@ const labels = {
 type ProposalDiagnosticsProps = {
   report: KnowledgeValue | null;
   record?: ProposalRecord | null;
+  onEditCandidate?: () => void;
+  editingDisabled?: boolean;
 };
 type RuleReportProps = { title: string; report: KnowledgeValue };
+/** 서버 판정만 번역하고 알 수 없는 상태는 확인이 필요함을 표시합니다. */
+function checkLabel(value: unknown): string {
+  if (typeof value !== 'string') return '개별 보고 확인';
+  return (
+    (
+      {
+        pass: '통과',
+        passed: '통과',
+        fail: '실패',
+        not_run: '미실행',
+        client_reported: '제출된 보고',
+      } as Record<string, string>
+    )[value] ?? '상태 확인 필요'
+  );
+}
+type LinkedReportProps = {
+  report: KnowledgeValue;
+  record: ProposalRecord;
+  onEditCandidate?: () => void;
+  editingDisabled: boolean;
+};
 
 /** 실제 JSON 객체인 진단 묶음만 반환하고 필드 부재를 통과로 추정하지 않습니다. */
 function reportObject(value: unknown): KnowledgeValue | null {
   const parsed = knowledgeValueSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
-/** 규칙의 다섯 상태와 검사자·이유를 원래 구분대로 표시합니다. */
+/** 규칙별 검사 상태와 실제 이유를 표시합니다. */
 function RuleReport({ title, report }: RuleReportProps): JSX.Element {
   const parsed = z.array(rowSchema).safeParse(report.rule_results);
   return (
-    <section>
-      <h4>{title}</h4>
+    <details
+      className={styles.ruleReport}
+      open={
+        !parsed.success ||
+        parsed.data.some(
+          (row: z.infer<typeof rowSchema>): boolean =>
+            row.status !== 'pass' && row.status !== 'not_applicable',
+        )
+      }
+    >
+      <summary>
+        {title}
+        {parsed.success ? ` · ${parsed.data.length}개 규칙` : ''}
+      </summary>
       {parsed.success ? (
         <ul>
-          {parsed.data.map((row: z.infer<typeof rowSchema>): JSX.Element => (
-            <li key={row.rule_id}>
-              <strong>
-                {row.rule_id} · {labels[row.status]}
-              </strong>
-              <p>
-                {row.checker} {row.reason}
-              </p>
-            </li>
-          ))}
+          {parsed.data.map(
+            (row: z.infer<typeof rowSchema>, index: number): JSX.Element => (
+              <li key={row.rule_id}>
+                <strong>
+                  검사 {index + 1} · {labels[row.status]}
+                </strong>
+                <p>{row.reason || '검사 이유가 제공되지 않았습니다.'}</p>
+              </li>
+            ),
+          )}
         </ul>
       ) : (
         <p>
           이 응답에는 규칙별 판정이 없습니다. 미실행을 통과로 표시하지 않습니다.
         </p>
       )}
-      <details>
-        <summary>검사 입력·버전·출처·전체 보고</summary>
-        <pre>{JSON.stringify(report, null, 2)}</pre>
-      </details>
-    </section>
+    </details>
   );
 }
 /** 명시적으로 전달된 보고만 표시하며 문서 이름으로 다른 분석 작업의 진단을 연결하지 않습니다. */
-function LinkedReport({ report }: { report: KnowledgeValue }): JSX.Element {
+function LinkedReport({
+  report,
+  record,
+  onEditCandidate,
+  editingDisabled,
+}: LinkedReportProps): JSX.Element {
   const automatic = reportObject(report?.validation_report) ?? report;
   const diagnostics = reportObject(report?.diagnostics);
   const original = reportObject(diagnostics?.report);
@@ -83,39 +120,30 @@ function LinkedReport({ report }: { report: KnowledgeValue }): JSX.Element {
           : '제출된 의미 보고 · 검사자 확인 필요';
   return (
     <section className={styles.diagnostics}>
-      <h3>검사 결과</h3>
-      <p>
-        자동 구조·인용 검사와 AI 자기보고·별도 의미 검사·사람 검토를 구분합니다.
-      </p>
       {automatic ? (
         <>
           <p>
-            자동 검사:{' '}
-            {typeof automatic.automatic === 'string'
-              ? automatic.automatic
-              : '개별 보고 확인'}{' '}
-            · 의미 검사:{' '}
-            {typeof automatic.semantic === 'string'
-              ? automatic.semantic
-              : '개별 보고 확인'}
+            자동 검사: {checkLabel(automatic.automatic)} · 의미 검사:{' '}
+            {checkLabel(automatic.semantic)}
           </p>
-          <RuleReport title="자동 구조·인용 검사" report={automatic} />
         </>
       ) : (
         <p>서버 검증 전입니다. 별도 의미 검사는 미실행입니다.</p>
       )}
-      {semantic && <RuleReport title={kindLabel} report={semantic} />}
-      {diagnostics && (
-        <details>
-          <summary>진단 원본·검증된 의미 보고</summary>
-          <pre>{JSON.stringify(diagnostics, null, 2)}</pre>
-        </details>
+      {original ? (
+        <DiagnosticFindings
+          report={original}
+          record={record}
+          onEditCandidate={onEditCandidate}
+          editingDisabled={editingDisabled}
+        />
+      ) : (
+        <p>원본 진단 보고가 없어 근거·후보 대상을 연결하지 않습니다.</p>
       )}
-      <details>
-        <summary>정확한 실행·결과·후보·제출 참조</summary>
-        <pre>{JSON.stringify(report.reference, null, 2)}</pre>
-      </details>
-      <p>추출안의 client_reported 결과와 형식 통과는 사람 승인이 아닙니다.</p>
+      {automatic && (
+        <RuleReport title="자동 구조·인용 검사" report={automatic} />
+      )}
+      {semantic && <RuleReport title={kindLabel} report={semantic} />}
     </section>
   );
 }
@@ -124,6 +152,8 @@ function LinkedReport({ report }: { report: KnowledgeValue }): JSX.Element {
 export function ProposalDiagnostics({
   report,
   record = null,
+  onEditCandidate,
+  editingDisabled = true,
 }: ProposalDiagnosticsProps): JSX.Element {
   const [checked, setChecked] = useState<{
     record: ProposalRecord;
@@ -159,11 +189,11 @@ export function ProposalDiagnostics({
     report.state_revision === record.state_revision;
   return (
     <section className={styles.diagnostics}>
-      <h3>후보 검사 근거</h3>
+      <h3>후보 검사</h3>
       <p>
         현재 후보의 서버 구조·인용 검증:{' '}
         {valid && typeof report.automatic === 'string'
-          ? report.automatic
+          ? checkLabel(report.automatic)
           : '현재 기준으로 검증 전'}
       </p>
       {!result && (
@@ -182,18 +212,19 @@ export function ProposalDiagnostics({
       {result?.unavailable.map((message: string): JSX.Element => (
         <p key={message}>{message}</p>
       ))}
-      {result?.reports.map(
-        (value: KnowledgeValue, index: number): JSX.Element => (
-          <LinkedReport key={index} report={value} />
-        ),
-      )}
-      {record?.result_links && (
-        <details>
-          <summary>보고 연결·누락·오래된 기준</summary>
-          <pre>{JSON.stringify(record.result_links, null, 2)}</pre>
-        </details>
-      )}
-      <p>검사 통과와 client_reported 보고는 사람 승인이 아닙니다.</p>
+      {record &&
+        result?.reports.map(
+          (value: KnowledgeValue, index: number): JSX.Element => (
+            <LinkedReport
+              key={index}
+              report={value}
+              record={record}
+              onEditCandidate={onEditCandidate}
+              editingDisabled={editingDisabled}
+            />
+          ),
+        )}
+      <p>검사 통과와 제출된 의미 보고는 사람 승인이 아닙니다.</p>
     </section>
   );
 }

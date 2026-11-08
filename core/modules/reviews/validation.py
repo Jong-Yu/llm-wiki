@@ -40,10 +40,17 @@ def _validate_active_event(self, source, machine, event):
         for entity in event["target"]["entities"]:
             if actual_entities.get(entity["id"]) != entity:
                 raise ReviewValidationError("Active review entity differs from its generation")
-        if event["target"]["claim"] not in machine[event["collection"]]:
+        target = next((value for value in machine[event["collection"]]
+                       if value == event["target"]["claim"]), None)
+        if target is None:
             raise ReviewValidationError("Active review target differs from its generation")
+        target_bytes = _encode(target)
         for state in (event["before"], event["after"]):
             value = state["value"]
+            # 현재 원문에서 검증된 기계 주장과 같은 값은 위의 세대·대상 대조로 충분합니다.
+            # 편집된 값은 계속 원문 인용과 위치를 다시 검증합니다.
+            if _encode(value) == target_bytes:
+                continue
             collection = event["collection"]
             if collection == "relation_candidates" and "question" not in value:
                 collection = "relations"
@@ -51,7 +58,7 @@ def _validate_active_event(self, source, machine, event):
                            [_input(value)] if collection == "relations" else [], source.content,
                            [_input(value)] if collection == "relation_candidates" else [],
                            attributes=[_input(value)] if collection == "attributes" else [],
-                           schema_version=machine["schema_version"])
+                           schema_version=machine["schema_version"], body_only=machine.get("evidence_scope") == "body")
             if graph[collection][0] != value:
                 raise ReviewValidationError("Active review evidence locations differ from source")
     except (ValueError, TypeError, KeyError) as error:
@@ -82,7 +89,7 @@ def _normalize(self, source, graph, collection, value):
     target = "attributes" if collection == "attributes" else "relations"
     normalized = _graph(graph["document"], source.revision, _input(graph["entities"]),
                         [value] if target == "relations" else [], source.content,
-                        attributes=[value] if target == "attributes" else [], schema_version=graph["schema_version"])
+                        attributes=[value] if target == "attributes" else [], schema_version=graph["schema_version"], body_only=graph.get("evidence_scope") == "body")
     return normalized[target][0]
 
 
@@ -94,7 +101,7 @@ def _validate_effective(self, source, snapshot):
            _input([item for item in graph["relations"] if not expert(item)]),
            source.content, _input(graph["relation_candidates"]),
            attributes=_input([item for item in graph["attributes"] if not expert(item)]),
-           schema_version=graph["schema_version"])
+           schema_version=graph["schema_version"], body_only=graph.get("evidence_scope") == "body")
     entity_ids = {item["id"] for item in graph["entities"]}
     if len(entity_ids) != len(graph["entities"]):
         raise ReviewValidationError("Effective entities must have unique identities")
@@ -123,6 +130,9 @@ def _validate_all_layers(self, source, graph_raw, ledger, tokens):
     scopes = {(event["scope"]["domain"], event["scope"]["viewpoint"])
               for event in latest.values()
               if _epoch(event) == _epoch(tokens) and event["after"]["decision"] == "active"}
+    scopes.update((event['scope']['domain'], event['scope']['viewpoint'])
+                  for event in ledger.get('relation_events', [])
+                  if event['kind'] == 'policy' and _epoch(event) == _epoch(tokens))
     for domain, viewpoint in scopes:
         self._validate_effective(source, self._render(source, graph_raw, ledger, tokens, domain, viewpoint))
 

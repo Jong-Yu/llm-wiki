@@ -9,6 +9,7 @@ MCP/HTTP의 요청·응답 타입은 사용하지 않는다. 호출자가 먼저
 # 검색은 파일명/본문의 문자열을 찾는 기능이다. 같은 개체라는 의미 판정이나 문서 저장은 하지 않는다.
 
 import os
+import unicodedata
 from pathlib import Path
 from typing import Callable
 
@@ -21,10 +22,16 @@ MAX_SEARCH_BYTES = 16 * 1024 * 1024
 MAX_SKIPPED_FILES = 50
 SNIPPET_CHARACTERS = 200
 
+def fold(text: str) -> str:
+    # 한글을 NFC로 맞춘 뒤 casefold한다. macOS 파일명(NFD)과 입력(NFC)의 조합 차이로 검색이 비는 것을 막는다.
+    return unicodedata.normalize("NFC", text).casefold()
+
+
 def make_snippet(content: str, needle: str) -> str:
     # Keep original text, including characters whose casefold expands (e.g. ß).
     # needle이 나타난 원문 주변 문자열을 반환한다. 대소문자 비교를 바꾸더라도 반환 본문은 원래 글자를 유지한다.
     for line in content.splitlines():
+        line = unicodedata.normalize("NFC", line)
         folded_index = line.casefold().find(needle)
         if folded_index >= 0:
             offset = 0
@@ -46,7 +53,7 @@ def search_documents(
         raise ValueError("query must not be blank")
     if store.wiki_dir.is_symlink():
         raise ValueError("wiki root must not be a symlink")
-    needle = query.casefold()
+    needle = fold(query)
     matches = []
     skipped = []
     scanned = 0
@@ -83,7 +90,7 @@ def search_documents(
                     break
                 continue
             scanned_bytes += len(snapshot.content.encode("utf-8"))
-            if needle not in document.casefold() and needle not in snapshot.content.casefold():
+            if needle not in fold(document) and needle not in fold(snapshot.content):
                 continue
             if len(matches) == limit:
                 truncated = True

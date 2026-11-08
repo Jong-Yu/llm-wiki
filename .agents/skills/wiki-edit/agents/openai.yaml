@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki 본문·판본 편집"
+  short_description: "위키 본문 수정과 과거 판본 비교·복원을 전체 이력과 함께 처리"
+  default_prompt: "$wiki-edit를 사용해 요청한 문서 수정이나 판본 복원을 현재 본문과 이력에 맞춰 처리해줘."

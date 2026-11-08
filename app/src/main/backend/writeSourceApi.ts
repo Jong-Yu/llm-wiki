@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { apiFailure } from './readApi';
+import { apiFailure, readApiJsonBody } from './readApi';
 import type { ApiFailure, ReadApiResult } from './readApi';
 
 const metadataSchema = z.object({
@@ -15,40 +15,6 @@ export function registrationUnknown(traceId?: string): ApiFailure {
     undefined,
     traceId,
   );
-}
-
-/** 등록 응답도 제한된 UTF-8 JSON만 읽고 원격 본문/오류 문구를 반사하지 않습니다. */
-async function registrationJson(response: Response): Promise<unknown> {
-  if (
-    !response.body ||
-    response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !==
-      'application/json'
-  ) {
-    await response.body?.cancel();
-    throw new Error('invalid_response');
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const result = await reader.read();
-      if (result.done) break;
-      total += result.value.byteLength;
-      if (total > 1024 * 1024) throw new Error('response_too_large');
-      chunks.push(result.value);
-    }
-  } finally {
-    await reader.cancel().catch((): void => {});
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 }
 
 /** main이 정한 주소로 한 번만 전송하며 전송 오류/5xx는 성공 여부 미확인으로 보존합니다. */
@@ -73,7 +39,7 @@ export async function writeSourceApi(
       },
       body,
     });
-    const value = await registrationJson(response);
+    const value = await readApiJsonBody(response);
     if (
       response.status === 200 ||
       response.status === 201 ||

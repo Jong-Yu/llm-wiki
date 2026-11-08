@@ -11,7 +11,6 @@ from core.common.json_codec import canonical_json_hash
 from core.modules.analysis_inputs import files as inputs_files, capture
 from core.modules.analysis_inputs.contracts import InputConflictError, InputLimitError, InputCorruptError
 from core.modules.analysis_jobs.store import JobStore
-from core.modules.analysis_jobs import records
 from core.modules.reviews.store import ReviewStore
 from core.modules.sources.store import SourceStore
 from core.modules.sources import files
@@ -87,7 +86,8 @@ class PlanStore:
                 or catalog["registration_revision"] != reference["registration_revision"]
                 or current["source_sha256"] != reference["source_sha256"]):
             raise InputConflictError("source_basis_changed")
-        stream = files.verify_original(self.store, self.sources.sources_dir / reference["source_id"] / reference["source_version"] / "original", current)
+        from core.modules.analysis_jobs.registration import original_path
+        stream = files.verify_original(self.store, original_path(self.sources, reference["source_id"], reference["source_version"]), current)
         return catalog, current, stream
 
     def conversion(self, body, authorize):
@@ -236,7 +236,7 @@ class PlanStore:
         """원래 판본·관점·필수 맥락이 바뀌면 기존 계획을 재라벨하지 않고 충돌로 돌린다."""
         manifest, actual, components = self._load_locked("plans", plan_id, revision)
         if (capture.profile(manifest["actor"]) != capture.profile(self.actor)
-                or manifest["actor"]["policy_revision"] != self.actor["policy_revision"]):
+                or manifest["actor"].get("access_revision", manifest["actor"]["policy_revision"]) != self.actor.get("access_revision", self.actor["policy_revision"])):
             raise InputConflictError("plan_profile_changed")
         validate_context = None
         if input_store is not None and job is not None:

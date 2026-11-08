@@ -4,12 +4,11 @@
 # 파일이 존재한다는 것만 믿지 않고 필수 항목·소속·내용 지문이 서로 일치하는지 확인한다.
 
 from datetime import datetime
-from hashlib import sha256
 from pathlib import PurePosixPath
 import re
 
 from core.common.json_codec import canonical_json_hash
-from .contracts import SourceCorruptError, identifier, metadata, ID, HEX
+from .contracts import SourceCorruptError, identifier, metadata, HEX
 
 
 ACTOR_FIELDS = {"user_id", "tenant", "profile_id", "domain", "viewpoint", "policy_revision"}
@@ -39,10 +38,13 @@ def cleanup_failures(value):
 
 def actor(value, tenant, user_id):
     # actor는 서버가 인증한 행동 주체다. 제출 본문에 적힌 사용자 이름으로 대신할 수 없다.
-    if (type(value) is not dict or set(value) != ACTOR_FIELDS or value["tenant"] != tenant
+    if (type(value) is not dict or not ACTOR_FIELDS <= set(value)
+            or set(value) - (ACTOR_FIELDS | {"access_revision", "display_name"}) or value["tenant"] != tenant
             or value["user_id"] != user_id or type(value["policy_revision"]) is not str
             or not HEX.fullmatch(value["policy_revision"])):
         raise SourceCorruptError("The server authorization scope is invalid.")
+    if "access_revision" in value and (type(value["access_revision"]) is not str or not HEX.fullmatch(value["access_revision"])):
+        raise SourceCorruptError("The server access revision is invalid.")
     return dict(value)
 
 

@@ -40,6 +40,9 @@ export default defineConfig({
       files: [
         '**/src/renderer/**/*.{ts,tsx}',
         '**/src/shared/contracts/**/*.ts',
+        '**/src/shared/createWikiBridge.ts',
+        '**/src/web-test/client.ts',
+        '**/src/web-test/browserFiles.ts',
       ],
       env: { browser: true, node: false },
       rules: {

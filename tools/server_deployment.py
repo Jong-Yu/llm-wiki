@@ -102,7 +102,8 @@ def render(config):
     backend = ("[Unit]\nDescription=LLM Wiki authenticated API and MCP\nAfter=network.target\n\n[Service]\nType=simple\n"
         + "User=" + c["service_user"] + "\nWorkingDirectory=" + quote(project) + "\n"
         + "ExecStart=" + " ".join(map(quote, arguments)) + "\n" + common
-        + "ReadWritePaths=" + quote(c["tenant_root"]) + "\n\n[Install]\nWantedBy=multi-user.target\n")
+        + "ReadWritePaths=" + quote(c["tenant_root"]) + " " + quote(str(PurePosixPath(c["access_config"]).parent))
+        + "\n\n[Install]\nWantedBy=multi-user.target\n")
     proxy = ("[Unit]\nDescription=LLM Wiki explicit TLS reverse proxy\nAfter=network-online.target " + name + ".service\nWants=network-online.target\n\n"
         + "[Service]\nType=simple\nUser=" + c["proxy_user"] + "\n"
         + "ExecStart=/usr/bin/caddy run --config " + installed + "/Caddyfile --adapter caddyfile\n"

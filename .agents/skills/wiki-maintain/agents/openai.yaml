@@ -1,4 +1,4 @@
 interface:
-  display_name: "Wiki 수정·검토 반영"
-  short_description: "위키 본문과 검토·정책·문서 대응을 버전과 근거에 맞춰 수정"
+  display_name: "Wiki 변경 절차 연결"
+  short_description: "본문 편집과 판단 변경을 함께 요청할 때 필요한 절차로 연결"
   default_prompt: "$wiki-maintain을 사용해 요청한 위키 수정을 현재 내용과 판단 이력에 맞춰 반영해줘."

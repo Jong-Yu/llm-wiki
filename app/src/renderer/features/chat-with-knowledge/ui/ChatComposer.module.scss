@@ -1,0 +1,183 @@
+// 입력창. 질문과 보내기만 눈에 띄게 두고 나머지는 ＋ 메뉴와 칩으로 접습니다.
+.wrap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-8);
+}
+.composer {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 14px;
+  padding: 10px var(--wiki-space-12) var(--wiki-space-8);
+  background-color: var(--wiki-color-surface-panel);
+  &:has(> .input:focus) {
+    border-color: var(--wiki-color-action-primary);
+    // 바깥으로 번지지 않게 입력창 테두리 안쪽에 2px 링 하나만 그립니다.
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--wiki-color-action-primary);
+  }
+}
+.locked {
+  opacity: 0.55;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.composer > .input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  field-sizing: content;
+  min-height: 22px;
+  max-height: min(176px, 28vh);
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 22px;
+  outline: none;
+  // 초점 표시는 바깥 입력창이 대신하므로 안쪽 글상자에는 따로 그리지 않습니다.
+  &:focus,
+  &:focus-visible {
+    outline: none;
+  }
+}
+.scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.link {
+  color: var(--wiki-color-action-primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--wiki-space-6, 6px);
+}
+.attachments {
+  flex: 1 1 220px;
+  max-height: min(160px, 24vh);
+  overflow-y: auto;
+}
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  padding: 1px 6px 1px 9px;
+  line-height: 18px;
+  border-radius: 99px;
+  color: var(--wiki-color-action-primary);
+  background-color: var(--wiki-color-action-surface);
+  font-size: var(--wiki-font-size-12);
+  button {
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    &:hover {
+      background-color: var(--wiki-color-surface-hover);
+    }
+  }
+}
+.notice {
+  margin: 0;
+  color: var(--wiki-color-status-warning);
+  font-size: var(--wiki-font-size-12);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+}
+.counter {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  font-variant-numeric: tabular-nums;
+}
+.send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin-inline-start: auto;
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  color: var(--wiki-color-button-primary-foreground);
+  background-color: var(--wiki-color-button-primary-background);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  &:disabled {
+    color: var(--wiki-color-text-secondary);
+    background-color: var(--wiki-color-surface-hover);
+    cursor: default;
+  }
+}
+.stop {
+  color: var(--wiki-color-surface-canvas);
+  background-color: var(--wiki-color-text-primary);
+  svg {
+    fill: currentColor;
+  }
+}
+.hint {
+  margin: 0;
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+  font-size: 11px;
+  line-height: 17px;
+}
+.reading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

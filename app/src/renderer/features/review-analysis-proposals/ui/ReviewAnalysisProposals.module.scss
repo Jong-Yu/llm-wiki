@@ -1,93 +1,135 @@
 .workspace {
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  color: var(--wiki-color-text-primary);
+  background: var(--wiki-color-surface-canvas);
+  font: var(--wiki-font-size-13) / var(--wiki-component-control-line-height)
+    var(--wiki-font-family-ui);
+}
+.fieldErrors {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--wiki-space-4);
+  color: var(--wiki-color-status-danger);
+  font-weight: var(--wiki-font-weight-regular);
 }
 .toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--wiki-space-12);
-  padding: var(--wiki-space-12) var(--wiki-space-22);
-  border-bottom: 1px solid var(--wiki-color-border-default);
+  gap: var(--wiki-space-8) var(--wiki-space-12);
+  min-width: 0;
 }
 .toolbar h1 {
-  font-size: var(--wiki-font-size-16);
+  font-size: var(--wiki-font-size-20);
+  line-height: 1.4;
+  font-weight: 600;
   margin: 0;
 }
 .toolbar span {
-  margin-right: auto;
-  font-size: var(--wiki-font-size-12);
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--wiki-color-text-secondary);
 }
-.layout {
-  min-height: 0;
-  display: grid;
-  grid-template-columns: var(--wiki-layout-documents-index-width) minmax(
-      0,
-      1fr
-    ) var(--wiki-layout-documents-inspector-width);
+// 대상 문서와 문서의 AI 작업은 문서 상세와 같은 알약 칩으로 보입니다.
+.toolbarLink {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wiki-space-6);
+  min-height: 28px;
+  padding: 3px 12px;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 999px;
+  font-size: var(--wiki-font-size-13);
+  text-decoration: none;
 }
-.sidebar,
-.content,
-.inspector {
+.toolbarLink {
+  border-color: color-mix(
+    in srgb,
+    var(--wiki-color-action-primary) 35%,
+    transparent
+  );
+  background: var(--wiki-color-action-surface);
+  color: var(--wiki-color-action-primary);
+}
+.toolbar > :nth-child(3) {
+  margin-left: auto;
+}
+.content {
   min-width: 0;
   min-height: 0;
-  height: 100%;
-  overflow: auto;
-  padding: var(--wiki-space-16);
+  padding: var(--wiki-space-24);
   overflow-wrap: anywhere;
 }
-.sidebar,
-.inspector {
-  background: var(--wiki-color-surface-panel);
+.content {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
-.sidebar {
-  border-right: 1px solid var(--wiki-color-border-default);
-}
-.inspector {
-  border-left: 1px solid var(--wiki-color-border-default);
+.content {
+  container-type: inline-size;
 }
 .workspace h2 {
   font-size: var(--wiki-font-size-14);
+  line-height: var(--wiki-component-control-line-height);
+  margin: 0 0 var(--wiki-space-12);
 }
-.workspace h3 {
+.workspace h3,
+.workspace h4 {
   font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-component-control-line-height);
+  margin: 0 0 var(--wiki-space-8);
 }
-.workspace p,
+.workspace p {
+  margin: 0 0 var(--wiki-space-12);
+}
 .workspace label,
 .workspace summary {
-  font-size: var(--wiki-font-size-12);
-  line-height: var(--wiki-font-line-height-body);
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-component-control-line-height);
 }
 .workspace details {
-  margin: var(--wiki-space-12) 0;
+  margin-block: var(--wiki-space-12);
 }
 .workspace summary {
   cursor: pointer;
   font-weight: 600;
+  padding-block: var(--wiki-space-8);
 }
 .workspace pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: var(--wiki-font-size-12);
+  font: var(--wiki-font-size-12) / 1.6 var(--wiki-font-family-mono);
   max-height: 34rem;
   overflow: auto;
   padding: var(--wiki-space-12);
-  background: var(--wiki-color-surface-canvas);
+  background-color: var(--wiki-color-surface-subtle);
   border: 1px solid var(--wiki-color-border-default);
-  border-radius: var(--wiki-radius-8);
+  border-radius: var(--wiki-component-control-radius);
 }
 .workspace code {
-  font-size: var(--wiki-font-size-11);
+  font-size: var(--wiki-font-size-12);
   overflow-wrap: anywhere;
+}
+.workspace :is(input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
 }
 .form {
   display: flex;
   flex-direction: column;
-  gap: var(--wiki-space-12);
-  margin-bottom: var(--wiki-space-20);
+  gap: var(--wiki-space-16);
+  margin-bottom: var(--wiki-space-24);
+  min-width: 0;
+}
+.form > :is(h2, h3, p, details) {
+  margin-block: 0;
+}
+.form > button {
+  align-self: flex-start;
 }
 .form label {
   display: flex;
@@ -99,22 +141,52 @@
 .form select {
   width: 100%;
   min-width: 0;
-  padding: var(--wiki-space-8);
-  border: 1px solid var(--wiki-color-border-default);
-  border-radius: var(--wiki-radius-6);
+  box-sizing: border-box;
+  padding: var(--wiki-space-7) var(--wiki-space-12);
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
   background: var(--wiki-color-surface-canvas);
   color: var(--wiki-color-text-primary);
   font: inherit;
 }
+.form input:not([type='checkbox']),
+.form select {
+  min-height: var(--wiki-component-control-height);
+  line-height: var(--wiki-component-control-line-height);
+}
+.form select {
+  padding-right: var(--wiki-component-control-height);
+}
 .form textarea {
   resize: vertical;
+}
+.form
+  textarea:is(
+    [name='whole'],
+    [name='contexts'],
+    [name='bindings'],
+    [name='replacement']
+  ) {
+  font-family: var(--wiki-font-family-mono);
+}
+.form [aria-invalid='true'] {
+  border-color: var(--wiki-color-status-danger);
+}
+.form [role='alert'] {
+  color: var(--wiki-color-status-danger);
 }
 .form .check {
   flex-direction: row;
   align-items: flex-start;
+  gap: var(--wiki-space-8);
+  min-height: var(--wiki-component-control-height-small);
 }
 .check input {
   flex: 0 0 auto;
+  width: var(--wiki-space-16);
+  height: var(--wiki-space-16);
+  margin: var(--wiki-space-2) 0 0;
+  accent-color: var(--wiki-color-action-primary);
 }
 .check span {
   min-width: 0;
@@ -122,43 +194,27 @@
 .pair {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--wiki-space-12);
+  gap: var(--wiki-space-24);
+  margin-bottom: var(--wiki-space-24);
 }
 .pair > section {
   min-width: 0;
 }
-.queue {
-  list-style: none;
-  padding: 0;
+.pair > section + section {
+  padding-left: var(--wiki-space-24);
+  border-left: 1px solid var(--wiki-color-border-default);
 }
-.queue button {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wiki-space-6);
-  width: 100%;
-  text-align: left;
-  padding: var(--wiki-space-12);
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--wiki-color-border-default);
-  cursor: pointer;
-}
-.queue button[aria-pressed='true'] {
+.pair > section > pre {
   background: var(--wiki-color-surface-canvas);
-  outline: 2px solid var(--wiki-color-border-default);
-  outline-offset: -2px;
-}
-.queue span {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  font-size: var(--wiki-font-size-12);
+  padding: 0;
+  border: 0;
+  font-family: var(--wiki-font-family-ui);
+  font-size: var(--wiki-font-size-13);
 }
 .notice {
-  padding: var(--wiki-space-12);
-  border: 1px solid var(--wiki-color-border-default);
-  margin-bottom: var(--wiki-space-16);
+  padding-block: var(--wiki-space-16);
+  border-block: 1px solid var(--wiki-color-border-default);
+  margin-bottom: var(--wiki-space-24);
 }
 .diagnostics ul {
   padding-left: var(--wiki-space-16);
@@ -166,13 +222,297 @@
 .loading {
   padding: var(--wiki-space-24);
 }
-@container (max-width: 1100px) {
+.claimList {
+  list-style: none;
+  padding: 0;
+  margin: var(--wiki-space-12) 0;
+}
+.claimList li {
+  padding-block: var(--wiki-space-12);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  overflow-wrap: anywhere;
+}
+@container (width < 720px) {
   .pair {
     grid-template-columns: minmax(0, 1fr);
   }
+  .pair > section + section {
+    padding-left: 0;
+    padding-top: var(--wiki-space-16);
+    border-left: 0;
+    border-top: 1px solid var(--wiki-color-border-default);
+  }
 }
-@media (max-width: 900px) {
-  .pair {
+@container workspace (width < 900px) {
+  .content {
+    padding: var(--wiki-space-16);
+  }
+}
+
+.findings {
+  display: grid;
+  gap: var(--wiki-space-12);
+}
+.findings > :is(h4, p, details),
+.reportedItems h5,
+.finding h5 {
+  margin: 0;
+}
+.reportedItems h5,
+.finding h5 {
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-component-control-line-height);
+}
+.reportedItems ul {
+  margin-block: var(--wiki-space-8) 0;
+}
+.findingList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.finding {
+  display: grid;
+  gap: var(--wiki-space-8);
+  padding-block: var(--wiki-space-16);
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.finding > p {
+  margin: 0;
+}
+.finding section > pre {
+  background: var(--wiki-color-surface-canvas);
+  border: 0;
+  border-left: var(--wiki-border-width-selected) solid
+    var(--wiki-color-border-control);
+  border-radius: 0;
+}
+
+.initialWorkspace {
+  box-sizing: border-box;
+  display: block;
+  height: 100%;
+  overflow: auto;
+  padding: var(--wiki-space-24);
+}
+.initialContent {
+  margin: var(--wiki-space-24) 0;
+}
+.emptyCard {
+  display: grid;
+  justify-items: center;
+  gap: var(--wiki-space-12);
+  padding: var(--wiki-space-32) var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  color: var(--wiki-color-text-secondary);
+  text-align: center;
+  h2,
+  p {
+    margin: 0;
+  }
+  h2 {
+    color: var(--wiki-color-text-primary);
+    font-size: var(--wiki-font-size-14);
+  }
+  details {
+    justify-self: stretch;
+    text-align: left;
+  }
+  > :last-child {
+    margin-bottom: 0;
+  }
+}
+// 원문 전체 비교 밖의 기술 정보는 한 묶음으로 접어 두고 필요할 때만 엽니다.
+.advanced > summary {
+  color: var(--wiki-color-text-secondary);
+}
+.advancedBody {
+  display: grid;
+  gap: var(--wiki-space-12);
+  padding-top: var(--wiki-space-12);
+}
+.initialContent > h2 {
+  margin-bottom: var(--wiki-space-16);
+}
+.proposalSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8) var(--wiki-space-24);
+  padding-bottom: var(--wiki-space-16);
+  margin-bottom: var(--wiki-space-24);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  color: var(--wiki-color-text-secondary);
+}
+.reportedSummary {
+  display: grid;
+  gap: var(--wiki-space-12);
+  padding-block: var(--wiki-space-12);
+}
+.findingComparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--wiki-space-24);
+}
+.findingComparison > section {
+  min-width: 0;
+}
+.findings {
+  container-type: inline-size;
+}
+.ruleReport > ul {
+  margin-block: var(--wiki-space-8);
+}
+@container (width < 640px) {
+  .findingComparison {
     grid-template-columns: minmax(0, 1fr);
+    gap: var(--wiki-space-12);
+  }
+}
+@container workspace (width < 900px) {
+  .initialWorkspace {
+    padding: var(--wiki-space-16);
+  }
+}
+
+.claimQuote {
+  margin: var(--wiki-space-12) 0;
+  padding-left: var(--wiki-space-12);
+  border-left: var(--wiki-border-width-selected) solid
+    var(--wiki-color-border-control);
+}
+.diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-16);
+  min-width: 0;
+}
+.diff > section > :is(h2, p) {
+  margin-block: 0 var(--wiki-space-8);
+}
+.diff .proposalSummary {
+  align-items: center;
+  margin-bottom: 0;
+}
+.checkPassed {
+  padding: var(--wiki-space-2) var(--wiki-space-8);
+  border-radius: var(--wiki-component-control-radius);
+  background: var(--wiki-color-status-success-surface);
+  color: var(--wiki-color-status-success);
+}
+.removedList {
+  list-style: none;
+  padding: 0;
+  margin: var(--wiki-space-8) 0;
+}
+.removedList > li {
+  padding: var(--wiki-space-12);
+  margin-bottom: var(--wiki-space-8);
+  border: 1px solid var(--wiki-color-status-danger);
+  border-radius: var(--wiki-component-control-radius);
+  overflow-wrap: anywhere;
+}
+.removedList > li[data-decided='true'] {
+  border-color: var(--wiki-color-border-default);
+}
+.removedRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wiki-space-8) var(--wiki-space-16);
+}
+.removedRow > button {
+  margin-left: auto;
+}
+
+// 결과가 있을 때 위쪽 띠에 화면의 목적과 다음 행동을 한 줄로 안내합니다.
+
+// 결과가 있을 때는 오른쪽 패널 없이 한 열에서 확인 → 판단 → 반영 순서로 내려갑니다.
+.flow {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--wiki-space-24);
+  box-sizing: border-box;
+}
+.flow .content {
+  height: auto;
+  padding: 0;
+  overflow: visible;
+}
+.applyStep {
+  display: grid;
+  gap: var(--wiki-space-12);
+  margin-block: var(--wiki-space-16);
+  padding: var(--wiki-space-16);
+  border: 1.5px solid var(--wiki-color-action-primary);
+  border-radius: var(--wiki-radius-8);
+  background-color: var(--wiki-color-action-surface);
+}
+.applyStep h2 {
+  margin: 0;
+}
+.applyStep .form {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wiki-space-12);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+// 확인 체크를 맨 위 한 줄에 두고 그 아래에 두 버튼을 나란히 놓습니다.
+.applyStep .form label {
+  order: -1;
+  flex: 1 1 100%;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--wiki-space-8);
+}
+// 진단·기록은 접을 수 있는 구역으로 두고 본문처럼 길게 늘어놓지 않습니다.
+.diagSection {
+  margin-block: var(--wiki-space-12);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+}
+.diagSection > summary {
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+}
+.diagBody {
+  padding: 0 var(--wiki-space-16) var(--wiki-space-16);
+}
+
+// 화면 맨 위에서 무엇을 비교했고 지금 무엇을 해야 하는지 말로 알려 줍니다.
+.intro {
+  margin-bottom: var(--wiki-space-16);
+  padding: var(--wiki-space-16);
+  border-radius: var(--wiki-radius-8);
+  background-color: var(--wiki-color-surface-subtle);
+}
+.flow .intro h2 {
+  margin: 0 0 var(--wiki-space-8);
+  font-size: var(--wiki-font-size-16);
+}
+.flow .intro p {
+  margin: 0 0 var(--wiki-space-8);
+}
+.flow .intro p.todo {
+  margin: var(--wiki-space-12) 0 0;
+  padding: var(--wiki-space-8) var(--wiki-space-12);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-surface-canvas);
+  font-weight: 600;
+  &[data-state='todo'] {
+    border-left: 3px solid var(--wiki-color-status-danger);
+  }
+  &[data-state='ready'] {
+    border-left: 3px solid var(--wiki-color-action-primary);
+  }
+  &[data-state='done'] {
+    border-left: 3px solid var(--wiki-color-status-success);
   }
 }

@@ -99,7 +99,7 @@ def _application_context(value):
 
 def _token(owner, cid, revision, dependencies, kind, payload):
     # 대응 자체 revision, 의존 manifest, 요청한 payload를 함께 지문으로 묶는다. token은 인증 토큰이 아니다.
-    return _hash({"contract_version": 1, "tenant": owner.actor["tenant"], "correspondence_id": cid, "correspondence_revision": revision, "access_policy_revision": owner.actor["policy_revision"], "selected_profile": {name: owner.actor[name] for name in ("profile_id", "domain", "viewpoint")}, "payload_digest": _hash({"kind": kind, "payload": payload}), "dependencies": dependencies})
+    return _hash({"contract_version": 1, "tenant": owner.actor["tenant"], "correspondence_id": cid, "correspondence_revision": revision, "access_policy_revision": owner.actor.get("access_revision", owner.actor["policy_revision"]), "selected_profile": {name: owner.actor[name] for name in ("profile_id", "domain", "viewpoint")}, "payload_digest": _hash({"kind": kind, "payload": payload}), "dependencies": dependencies})
 
 
 def _complete(dependencies):

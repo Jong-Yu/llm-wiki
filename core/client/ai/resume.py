@@ -1,5 +1,7 @@
 """재개 전에 실제 저장 영수증과 현재 산출물을 조회한다. 저장을 재전송하지 않는다."""
 
+import re
+
 from core.client.transport import AnalysisClientError, tool_call
 
 
@@ -17,7 +19,10 @@ def fixed_selection(job, profile, context_documents):
     return selected, basis["context_documents"], basis["ruleset_ref"]
 
 
-async def completed_results(client, *, tenant, job, profile):
+async def completed_results(client, *, tenant, job, profile, execution_config_sha256=None):
+    if execution_config_sha256 is not None and (type(execution_config_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", execution_config_sha256) is None):
+        raise AnalysisClientError("invalid_execution_configuration")
     rows = job.get("result_summary", {}).get("results", [])
     if any(row.get("state") == "pending_reconcile" or row.get("saved") is None for row in rows):
         raise AnalysisClientError("analysis_result_unconfirmed")
@@ -39,8 +44,20 @@ async def completed_results(client, *, tenant, job, profile):
                 or result.get("saved") is not True or receipt.get("document") != row["document"]
                 or receipt.get("analysis_basis_revision") != basis["revision"]):
             raise AnalysisClientError("analysis_result_unconfirmed")
-        if result.get("current_output", {}).get("status") != "current":
+        if (result.get("current_output") or {}).get("status") != "current":
             raise AnalysisClientError("analysis_saved_output_changed")
+        reuse = result.get("reuse_basis") or {}
+        if (reuse.get("status") != "current" or reuse.get("analysis_basis_revision") != basis["revision"]
+                or reuse.get("ruleset_ref") != basis["ruleset_ref"]):
+            raise AnalysisClientError("analysis_reuse_basis_changed")
+        if execution_config_sha256 is not None:
+            execution = receipt.get("execution")
+            # 보존형 Markdown 준비는 고정 전체 문자의 코드 저장이며 모델 실행이 아니다.
+            preserved = (row["stage"] == "prepare_wiki" and execution is None
+                         and (job.get("registration") or {}).get("mode") == "preserve")
+            if not preserved and (not isinstance(execution, dict)
+                    or execution.get("execution_config_sha256") != execution_config_sha256):
+                raise AnalysisClientError("analysis_execution_settings_changed")
         completed.add((row["document"], row["stage"]))
         receipts.append(result)
     return completed, receipts

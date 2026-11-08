@@ -54,3 +54,6 @@ npm-debug.log*
 /output/
 
 # Keep dependency lockfiles and docs/history/.
+
+# github auto update token
+.github_token

@@ -1,0 +1,59 @@
+// 공용 알림 안에서 표시와 버튼 사이에 본문이 줄바꿈될 공간을 남깁니다.
+.card[data-level] {
+  position: relative;
+  align-items: center;
+  gap: var(--wiki-space-14);
+  padding: var(--wiki-space-14) var(--wiki-space-16);
+  padding-inline-start: calc(
+    var(--wiki-space-16) + 30px + var(--wiki-space-14)
+  );
+  border-radius: var(--wiki-radius-12);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  line-height: 1.55;
+  strong {
+    margin: 0;
+    color: var(--wiki-color-text-primary);
+    font-size: var(--wiki-font-size-15);
+    font-weight: 700;
+  }
+}
+.mark {
+  position: absolute;
+  inset-inline-start: var(--wiki-space-16);
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--wiki-color-surface-canvas);
+  background: var(--notice-accent);
+  font-size: 12.5px;
+  font-weight: 700;
+  svg {
+    stroke-width: 3;
+  }
+}
+.card[data-level='verified'] {
+  background: var(--wiki-color-status-success-surface);
+}
+button.actionButton {
+  min-height: 0;
+  padding: var(--wiki-space-4) var(--wiki-space-12);
+  border-radius: var(--wiki-radius-8);
+  font-size: var(--wiki-font-size-12);
+  line-height: 1.55;
+}
+.card[data-level='verified'] .actionButton {
+  background: transparent;
+  &:hover:not(:disabled) {
+    background: var(--wiki-color-surface-hover);
+  }
+}
+@media (pointer: coarse) {
+  button.actionButton {
+    min-height: var(--wiki-component-control-height-touch);
+  }
+}

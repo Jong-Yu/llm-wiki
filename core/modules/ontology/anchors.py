@@ -17,7 +17,7 @@ def is_source_anchor(value):
     return isinstance(value, dict) and value.get('kind') == 'source_anchor'
 
 
-def normalize_anchor(value, *, document=None, source_revision=None, source=None, evidence=None):
+def normalize_anchor(value, *, document=None, source_revision=None, source=None, evidence=None, source_offset=0):
     """Validate shape/binding first; actual source validation requires source.
 
     Historical snapshots may be structurally read without their old source. That
@@ -54,12 +54,12 @@ def normalize_anchor(value, *, document=None, source_revision=None, source=None,
         raise ValueError('source anchor is not bound to the actual source bytes')
     if not isinstance(evidence, str) or not evidence.strip() or len(evidence) > MAX_QUOTE:
         raise ValueError('source anchor relation requires bounded continuous evidence')
-    evidence_offset = source.find(evidence)
+    evidence_offset = source.find(evidence, source_offset)
     if evidence_offset < 0 or source.find(evidence, evidence_offset + 1) >= 0:
         raise ValueError('source anchor relation evidence must have one unique source occurrence')
     line_starts = [0] + [m.end() for m in re.finditer(r'\r\n|\r|\n', source)]
     positions = []
-    offset = source.find(quote)
+    offset = source.find(quote, source_offset)
     while offset >= 0:
         quote_end = offset + len(quote)
         if (bisect_right(line_starts, offset) == start

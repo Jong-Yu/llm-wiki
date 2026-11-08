@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>LLM Wiki 화면 가이드</title>
+    <style>
+      :root { color-scheme: light; --ink: #182b34; --muted: #53656e; --accent: #205b4e; --line: #dce4e4; --paper: #fff; --wash: #f5f8f7; --point: #a73b12; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--wash); color: var(--ink); font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+      button, a, summary { -webkit-tap-highlight-color: transparent; }
+      button, select { font: inherit; }
+      button { cursor: pointer; }
+      a { color: var(--accent); text-underline-offset: 3px; }
+      button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #2863ac; outline-offset: 4px; }
+      button:disabled { cursor: default; opacity: .4; }
+      [hidden] { display: none !important; }
+      .skip { position: absolute; left: 16px; top: -70px; z-index: 20; padding: 8px 16px; background: white; }
+      .skip:focus { top: 12px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 70px; padding: 16px max(24px, calc((100vw - 1500px) / 2)); border-bottom: 1px solid var(--line); background: var(--paper); }
+      .brand { display: flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -.03em; }
+      .brand small { border-left: 1px solid var(--line); padding-left: 12px; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+      .topbar > a:last-child { font-size: 13px; }
+      .guide-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 18px; font-size: 13px; }
+      .intro { max-width: 1500px; margin: auto; padding: 32px 24px 26px; }
+      .eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+      .intro h1 { font-size: clamp(25px, 3vw, 36px); line-height: 1.3; letter-spacing: -.05em; margin: 8px 0 10px; }
+      .intro p { color: var(--muted); margin: 0; max-width: 900px; }
+      .layout { display: grid; grid-template-columns: 222px minmax(0, 1fr); gap: 28px; max-width: 1500px; margin: 0 auto; padding: 0 24px 44px; align-items: start; }
+      aside { position: sticky; top: 18px; max-height: calc(100vh - 36px); overflow: auto; padding: 4px 12px 8px 0; }
+      .toc > summary { color: var(--muted); font-size: 13px; cursor: pointer; padding: 5px 8px; }
+      .course { margin-top: 19px; }
+      .course h2 { margin: 0 8px 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
+      .course ol { margin: 0; padding: 0; list-style: none; }
+      .nav-step { width: 100%; display: flex; gap: 9px; align-items: baseline; text-align: left; background: none; border: 0; padding: 8px; border-radius: 6px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+      .nav-step:hover { background: #e9efed; }
+      .nav-step[aria-current="step"] { background: var(--accent); color: white; font-weight: 600; }
+      .nav-number { font-variant-numeric: tabular-nums; min-width: 20px; font-size: 11px; }
+      .scope { font-size: 12px; color: var(--muted); margin: 24px 8px 0; padding-top: 16px; border-top: 1px solid var(--line); }
+      main { min-width: 0; }
+      .lesson { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+      .lesson-head { padding: 24px 28px 20px; }
+      .lesson-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+      .lesson-meta span:first-child { font-weight: 600; color: var(--accent); }
+      .lesson-head h2 { font-size: clamp(21px, 2.4vw, 28px); line-height: 1.35; letter-spacing: -.035em; margin: 0; }
+      .lesson-head p { margin: 8px 0 0; color: var(--muted); }
+      .preparation { margin: 0 28px 22px; padding: 16px 18px; border-left: 3px solid var(--accent); background: #edf4ef; }
+      .preparation h3 { margin: 0 0 6px; font-size: 16px; }
+      .preparation p { margin: 6px 0; font-size: 13px; }
+      .preparation-links { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; font-size: 13px; }
+      .screen-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 22px; background: #f8faf9; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+      .screen-toolbar span { font-size: 12px; color: var(--muted); }
+      .screen-tools { display: flex; gap: 8px; }
+      .quiet-button { border: 1px solid #cbd6d2; background: var(--paper); border-radius: 6px; padding: 5px 11px; color: var(--ink); font-size: 12px; }
+      .quiet-button:hover { background: #eaf0ed; }
+      .quiet-button[aria-pressed="true"] { background: #eaf1ed; border-color: var(--accent); color: var(--accent); }
+      figure { margin: 0; }
+      .image-stage { position: relative; margin: 18px; background: white; border: 1px solid var(--line); line-height: 0; }
+      .image-stage img { display: block; width: 100%; height: auto; }
+      .image-stage .missing { padding: 50px 20px; line-height: 1.6; color: var(--muted); }
+      .hotspot { position: absolute; padding: 0; border: 2px solid var(--point); border-radius: 4px; background: #ffb58d12; box-shadow: 0 0 0 2px #ffffffd9; min-width: 12px; min-height: 12px; z-index: 1; }
+      .hotspot:hover, .hotspot[aria-pressed="true"] { background: #ffb58d35; box-shadow: 0 0 0 3px #ffffffee, 0 0 0 5px #a73b1240; z-index: 3; }
+      .hotspot b { position: absolute; left: -10px; top: -13px; min-width: 23px; height: 23px; border-radius: 50%; background: var(--point); border: 2px solid white; color: white; font: 700 11px/19px -apple-system, sans-serif; box-shadow: 0 1px 4px #0003; }
+      .caption { padding: 0 24px 16px; font-size: 12px; color: var(--muted); line-height: 1.65; }
+      .point-key { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 0 24px 18px; }
+      .point-button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 4px; background: transparent; padding: 4px 8px; color: var(--muted); font-size: 12px; }
+      .point-button b { color: var(--point); font-size: 11px; }
+      .point-button[aria-pressed="true"] { background: #fff0e7; color: #85330f; }
+      .instructions { padding: 22px 28px 26px; border-top: 1px solid var(--line); }
+      .action-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; list-style: none; padding: 0; margin: 0; counter-reset: action; }
+      .action-list li { counter-increment: action; }
+      .action-list h3 { margin: 0 0 6px; font-size: 15px; }
+      .action-list h3::before { content: counter(action) ". "; color: var(--accent); font-variant-numeric: tabular-nums; }
+      .action-list p { color: var(--muted); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+      .outcome { margin-top: 22px; background: #edf4ef; border-left: 3px solid var(--accent); padding: 12px 16px; }
+      .outcome h3, .tip h3 { display: inline; font-size: 13px; margin: 0 8px 0 0; }
+      .outcome p, .tip p { display: inline; font-size: 13px; margin: 0; }
+      .tip { margin-top: 12px; color: var(--muted); line-height: 1.7; }
+      .detail-link { display: inline-block; margin-top: 16px; font-size: 12px; }
+      .pager { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; }
+      .pager button { min-height: 42px; border: 1px solid #cbd6d2; background: var(--paper); border-radius: 7px; color: var(--ink); padding: 8px 16px; font-size: 13px; }
+      .pager .next { background: var(--accent); border-color: var(--accent); color: white; }
+      .pager p { margin: 0; color: var(--muted); font-size: 12px; }
+      footer { max-width: 1500px; margin: auto; padding: 20px 24px 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+      dialog { padding: 0; width: min(1600px, calc(100vw - 24px)); max-width: none; max-height: calc(100vh - 24px); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); }
+      dialog::backdrop { background: #13272dd9; }
+      .zoom-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 18px; background: var(--paper); border-bottom: 1px solid var(--line); }
+      .zoom-toolbar p { margin: 0; font-weight: 600; }
+      .zoom-scroll { max-height: calc(100vh - 110px); overflow: auto; background: #e9eeeb; }
+      .zoom-scroll .image-stage { margin: 18px; }
+      .zoom-scroll.native .image-stage { width: var(--image-width); max-width: none; }
+      @media (max-width: 1000px) { .layout { grid-template-columns: 190px minmax(0, 1fr); gap: 18px; } .action-list { grid-template-columns: 1fr; gap: 16px; } }
+      @media (max-width: 760px) { .topbar { padding: 14px 18px; } .brand small { display: none; } .intro { padding: 25px 18px 20px; } .layout { display: block; padding: 0 12px 30px; } aside { position: static; max-height: none; padding: 0 6px 18px; } .toc nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 2px 0 8px; } .course { margin-top: 10px; } .course h2 { margin-left: 0; } .nav-step { font-size: 12px; padding: 8px 3px; gap: 4px; } .nav-number { display: none; } .scope { margin: 8px 0 0; padding-top: 10px; } .lesson-head, .instructions { padding: 20px; } .screen-toolbar { padding: 10px 16px; } .image-stage { margin: 12px; } .caption { padding: 0 18px 12px; } .point-key { margin: 0 12px 14px; } .pager { gap: 8px; } .pager p { display: none; } .hotspot b { min-width: 20px; height: 20px; line-height: 16px; left: -5px; top: -10px; font-size: 10px; } footer { padding: 18px; } }
+      @media (max-width: 420px) { .toc nav { grid-template-columns: 1fr; } .course ol { display: flex; flex-wrap: wrap; gap: 4px; } .nav-step { width: auto; padding: 6px 8px; } .course h2 { margin-bottom: 4px; } .lesson-head, .instructions { padding: 18px; } }
+      @media (prefers-reduced-motion: no-preference) { .quiet-button, .hotspot, .point-button { transition: background .12s ease, box-shadow .12s ease; } }
+      @media print { body { background: white; } .topbar, .intro, aside, .screen-tools, .pager, footer, .detail-link { display: none; } .layout { display: block; padding: 0; } .lesson { border: 0; } .image-stage { break-inside: avoid; } .action-list { grid-template-columns: repeat(3, 1fr); } }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#lesson-title">현재 안내로 이동</a>
+    <header class="topbar">
+      <a class="brand" href="#sign-in">LLM Wiki <small>화면으로 익히는 사용자 가이드</small></a>
+      <nav class="guide-links" aria-label="소개와 사용법">
+        <a href="reference.html#llm-wiki-이해하기">LLM Wiki 이해하기 ↗</a>
+        <a href="reference.html#llm-wiki-사용자-가이드">상세 사용법 ↗</a>
+      </nav>
+    </header>
+    <section class="intro" aria-label="가이드 소개">
+      <div class="eyebrow">SCREEN GUIDE · 2026.11.07</div>
+      <h1>한 화면씩 따라 하는 LLM Wiki</h1>
+      <p>누를 위치, 해야 할 일, 완료 모습을 함께 확인하세요. 작업은 실제 LLM Wiki 앱에서 진행합니다.</p>
+    </section>
+    <div class="layout">
+      <aside>
+        <details class="toc" open>
+          <summary>가이드 목차</summary>
+          <nav id="guide-nav" aria-label="가이드 장면"></nav>
+        </details>
+        <p class="scope">실제 앱 화면 · 연습용 자료<br />‘워크스페이스’와 ‘홍길동’은 예시 이름입니다.<br />자료와 AI 답변은 모의 예시입니다.</p>
+      </aside>
+      <main>
+        <article class="lesson" aria-labelledby="lesson-title">
+          <header class="lesson-head">
+            <div class="lesson-meta"><span id="course-label"></span><span id="step-count"></span></div>
+            <h2 id="lesson-title" tabindex="-1"></h2>
+            <p id="lesson-lead"></p>
+          </header>
+          <section class="preparation" id="preparation" aria-labelledby="preparation-title" hidden>
+            <h3 id="preparation-title"></h3>
+            <p id="preparation-text"></p>
+            <p id="preparation-check"></p>
+            <div class="preparation-links" id="preparation-links"></div>
+          </section>
+          <div class="screen-toolbar">
+            <span id="screen-label">실제 앱 화면</span>
+            <div class="screen-tools">
+              <button class="quiet-button" id="toggle-marks" type="button" aria-pressed="true">조작 위치 표시</button>
+              <button class="quiet-button" id="open-zoom" type="button">화면 크게 보기</button>
+            </div>
+          </div>
+          <figure>
+            <div class="image-stage" id="screen-stage"></div>
+            <figcaption class="caption" id="screen-caption"></figcaption>
+          </figure>
+          <div class="point-key" id="point-key" role="group" aria-label="강조한 조작 위치"></div>
+          <section class="instructions" aria-label="실제 앱에서 할 일">
+            <ol class="action-list" id="action-list"></ol>
+            <div class="outcome"><h3>완료 모습</h3><p id="expected"></p></div>
+            <div class="tip"><h3>기억할 점</h3><p id="tip"></p></div>
+            <a class="detail-link" id="detail-link" href="reference.html">상세 설명 읽기 ↗</a>
+          </section>
+        </article>
+        <nav class="pager" aria-label="안내 이동">
+          <button id="previous" type="button">← 이전 안내</button>
+          <p>가이드를 넘겨도 앱의 작업은 실행되지 않습니다.</p>
+          <button class="next" id="next" type="button">다음 안내 →</button>
+        </nav>
+        <noscript><p>화면 가이드를 보려면 JavaScript를 사용하세요. <a href="reference.html">상세 사용자 가이드</a>도 이용할 수 있습니다.</p></noscript>
+      </main>
+    </div>
+    <footer>2026년 11월 7일 저장소의 앱 화면 기준입니다. 설치한 앱·서버의 버전과 권한에 따라 표시되는 행동이 다를 수 있습니다.</footer>
+    <dialog id="zoom-dialog" aria-labelledby="zoom-title">
+      <div class="zoom-toolbar">
+        <p id="zoom-title">화면 크게 보기</p>
+        <div class="screen-tools">
+          <button class="quiet-button" id="native-size" type="button" aria-pressed="false">원본 크기</button>
+          <button class="quiet-button" id="close-zoom" type="button">닫기</button>
+        </div>
+      </div>
+      <div class="zoom-scroll" id="zoom-scroll"><div class="image-stage" id="zoom-stage"></div></div>
+    </dialog>
+    <script src="steps.js"></script>
+    <script src="screens.js"></script>
+    <script>
+      (() => {
+        const guide = window.LLM_WIKI_GUIDE;
+        const screens = window.LLM_WIKI_SCREENS;
+        const byId = (id) => document.getElementById(id);
+        const create = (tag, text, className) => {
+          const item = document.createElement(tag);
+          if (text !== undefined) item.textContent = text;
+          if (className) item.className = className;
+          return item;
+        };
+        let index = 0;
+        let selectedPoint = -1;
+        let showMarks = true;
+        let marks = [];
+        const dialog = byId('zoom-dialog');
+        const nav = byId('guide-nav');
+        const stepButtons = [];
+
+        for (const course of guide.courses) {
+          const group = create('section', undefined, 'course');
+          group.append(create('h2', course.title));
+          const list = create('ol');
+          guide.steps.forEach((step, stepIndex) => {
+            if (step.course !== course.id) return;
+            const row = create('li');
+            const button = create('button', undefined, 'nav-step');
+            button.type = 'button';
+            button.append(create('span', String(stepIndex + 1).padStart(2, '0'), 'nav-number'), create('span', step.title));
+            button.addEventListener('click', () => go(stepIndex, true));
+            row.append(button);
+            list.append(row);
+            stepButtons[stepIndex] = button;
+          });
+          group.append(list);
+          nav.append(group);
+        }
+
+        function selectPoint(pointIndex) {
+          selectedPoint = pointIndex;
+          document.querySelectorAll('[data-point]').forEach((button) => {
+            button.setAttribute('aria-pressed', String(Number(button.dataset.point) === selectedPoint));
+          });
+        }
+
+        function drawScreen(stage, step, shot) {
+          stage.replaceChildren();
+          const img = create('img');
+          img.src = window.LLM_WIKI_IMAGES?.[step.image] ?? step.image;
+          img.alt = `${step.title}. ${shot.description}`;
+          img.width = shot.width;
+          img.height = shot.height;
+          img.addEventListener('error', () => {
+            img.hidden = true;
+            stage.append(create('p', '화면 파일을 열 수 없습니다. guide 폴더의 assets 파일을 함께 보관하세요.', 'missing'));
+          }, { once: true });
+          stage.append(img);
+          marks.forEach((mark, pointIndex) => {
+            const button = create('button', undefined, 'hotspot');
+            button.type = 'button';
+            button.dataset.point = String(pointIndex);
+            button.setAttribute('aria-label', `조작 위치 ${String.fromCharCode(65 + pointIndex)}: ${mark.label}`);
+            button.setAttribute('aria-pressed', String(selectedPoint === pointIndex));
+            button.title = mark.label;
+            button.style.left = `${mark.rect.x / shot.width * 100}%`;
+            button.style.top = `${mark.rect.y / shot.height * 100}%`;
+            button.style.width = `${mark.rect.width / shot.width * 100}%`;
+            button.style.height = `${mark.rect.height / shot.height * 100}%`;
+            button.hidden = !showMarks;
+            button.append(create('b', String.fromCharCode(65 + pointIndex)));
+            button.addEventListener('click', () => selectPoint(pointIndex));
+            stage.append(button);
+          });
+        }
+
+        function go(nextIndex, moveFocus = false) {
+          index = Math.max(0, Math.min(guide.steps.length - 1, nextIndex));
+          const step = guide.steps[index];
+          const shot = screens[step.image];
+          selectedPoint = -1;
+          marks = shot.hotspots.filter((mark) => step.focus.includes(mark.label));
+          byId('course-label').textContent = guide.courses.find((course) => course.id === step.course).title;
+          byId('step-count').textContent = `안내 ${index + 1} / ${guide.steps.length}`;
+          byId('lesson-title').textContent = step.title;
+          byId('lesson-lead').textContent = step.lead;
+          byId('preparation').hidden = !step.preparation;
+          byId('preparation-links').replaceChildren();
+          if (step.preparation) {
+            byId('preparation-title').textContent = step.preparation.title;
+            byId('preparation-text').textContent = step.preparation.text;
+            byId('preparation-check').textContent = step.preparation.check;
+            for (const link of step.preparation.links) {
+              const anchor = create('a', `${link.label} ↗`);
+              anchor.href = link.href;
+              anchor.target = '_blank';
+              anchor.rel = 'noopener noreferrer';
+              byId('preparation-links').append(anchor);
+            }
+          }
+          byId('screen-label').textContent = shot.label;
+          byId('screen-caption').textContent = `${shot.description} A·B·C는 조작 위치입니다. 실제 작업은 앱에서 진행하세요.`;
+          byId('expected').textContent = step.expected;
+          byId('tip').textContent = step.tip;
+          byId('detail-link').href = step.anchor.replace('../USER_GUIDE.md', 'reference.html');
+          byId('previous').disabled = index === 0;
+          byId('next').textContent = index === guide.steps.length - 1 ? '처음 안내로 →' : '다음 안내 →';
+          stepButtons.forEach((button, buttonIndex) => {
+            if (buttonIndex === index) button.setAttribute('aria-current', 'step');
+            else button.removeAttribute('aria-current');
+          });
+          const list = byId('action-list');
+          list.replaceChildren(...step.actions.map((action) => {
+            const li = create('li');
+            li.append(create('h3', action.title), create('p', action.text));
+            return li;
+          }));
+          drawScreen(byId('screen-stage'), step, shot);
+          byId('point-key').replaceChildren(...marks.map((mark, pointIndex) => {
+            const button = create('button', undefined, 'point-button');
+            button.type = 'button';
+            button.dataset.point = String(pointIndex);
+            button.setAttribute('aria-pressed', 'false');
+            button.append(create('b', String.fromCharCode(65 + pointIndex)), create('span', mark.label));
+            button.addEventListener('click', () => {
+              if (!showMarks) byId('toggle-marks').click();
+              selectPoint(pointIndex);
+            });
+            return button;
+          }));
+          try {
+            history.replaceState(null, '', `#${step.id}`);
+          } catch (error) {
+            // 앱 안의 격리된 안내 프레임에서도 장면 이동은 유지합니다.
+            if (!(error instanceof DOMException && error.name === 'SecurityError')) throw error;
+          }
+          try { localStorage.setItem('llm-wiki-guide-scene', step.id); } catch {}
+          if (moveFocus) {
+            byId('lesson-title').focus({ preventScroll: true });
+            byId('lesson-title').scrollIntoView({ block: 'start', behavior: 'instant' });
+          }
+        }
+
+        byId('previous').addEventListener('click', () => go(index - 1, true));
+        byId('next').addEventListener('click', () => go(index === guide.steps.length - 1 ? 0 : index + 1, true));
+        byId('toggle-marks').addEventListener('click', () => {
+          showMarks = !showMarks;
+          byId('toggle-marks').setAttribute('aria-pressed', String(showMarks));
+          document.querySelectorAll('.hotspot').forEach((button) => { button.hidden = !showMarks; });
+        });
+        byId('open-zoom').addEventListener('click', () => {
+          const step = guide.steps[index];
+          const shot = screens[step.image];
+          byId('zoom-title').textContent = step.title;
+          byId('zoom-scroll').style.setProperty('--image-width', `${shot.width}px`);
+          byId('zoom-scroll').classList.remove('native');
+          byId('native-size').setAttribute('aria-pressed', 'false');
+          byId('native-size').textContent = '원본 크기';
+          drawScreen(byId('zoom-stage'), step, shot);
+          dialog.showModal();
+        });
+        byId('native-size').addEventListener('click', () => {
+          const native = byId('zoom-scroll').classList.toggle('native');
+          byId('native-size').setAttribute('aria-pressed', String(native));
+          byId('native-size').textContent = native ? '화면에 맞추기' : '원본 크기';
+        });
+        byId('close-zoom').addEventListener('click', () => dialog.close());
+        dialog.addEventListener('close', () => byId('open-zoom').focus());
+        window.addEventListener('hashchange', () => {
+          const nextIndex = guide.steps.findIndex((step) => step.id === location.hash.slice(1));
+          if (nextIndex >= 0) go(nextIndex);
+        });
+        if (window.matchMedia('(max-width: 760px)').matches) document.querySelector('.toc').open = false;
+        let initial = location.hash.slice(1);
+        if (!initial) { try { initial = localStorage.getItem('llm-wiki-guide-scene'); } catch {} }
+        const initialIndex = guide.steps.findIndex((step) => step.id === initial);
+        go(initialIndex < 0 ? 0 : initialIndex);
+      })();
+    </script>
+  </body>
+</html>

@@ -10,6 +10,7 @@ import type {
   RuntimeResult,
 } from '@contracts/runtime.contract';
 import { RuntimeSettingsService } from '@main/settings/RuntimeSettingsService';
+import { discoverBundledRuntime } from '@main/settings/bundledRuntime';
 import { isAppSender } from './isAppSender';
 
 /** 시작 시 설정을 한 번 적용하고 허용 창의 제한된 환경 작업만 연결합니다. */
@@ -17,6 +18,12 @@ export async function registerRuntimeHandlers(
   getWindow: () => BrowserWindow | null,
   rendererLocation: string,
 ): Promise<void> {
+  const bundled = await discoverBundledRuntime({
+    packaged: app.isPackaged,
+    platform: process.platform,
+    architecture: process.arch,
+    resourcesPath: process.resourcesPath,
+  });
   const service = new RuntimeSettingsService(
     join(app.getPath('userData'), 'runtime-settings'),
     app.isPackaged ? '' : resolve(app.getAppPath(), '..'),
@@ -26,15 +33,20 @@ export async function registerRuntimeHandlers(
       const result = await dialog.showOpenDialog(parent, {
         title:
           kind === 'root'
-            ? '개인 실행 환경 프로젝트 폴더'
-            : `${kind} 경로 선택`,
+            ? '문서 처리 프로그램 폴더 선택'
+            : kind === 'tessdata'
+              ? '문자 인식 언어 폴더 선택'
+              : `${kind === 'python' ? 'Python' : kind === 'codex' ? 'Codex' : kind === 'claude' ? 'Claude Code' : 'Tesseract'} 실행 파일 선택`,
         properties:
           kind === 'root' || kind === 'tessdata'
             ? ['openDirectory']
-            : ['openFile'],
+            : kind === 'python'
+              ? ['openFile', 'showHiddenFiles']
+              : ['openFile'],
       });
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
+    bundled,
   );
   await service.initialize();
   ipcMain.handle(
@@ -53,14 +65,27 @@ export async function registerRuntimeHandlers(
         const request = runtimeRequestSchema.parse(args[0]);
         const data =
           request.operation === 'select-provider'
-            ? service.selectProvider(request.provider)
-            : request.operation === 'choose'
-              ? await service.choose(request.kind)
-              : request.operation === 'save'
-                ? await service.save()
-                : request.operation === 'diagnose'
-                  ? await service.diagnose()
-                  : service.snapshot();
+            ? (service.selectProvider(request.provider),
+              await service.refreshConnection())
+            : request.operation === 'select-model'
+              ? await service.selectModel(request.provider, request.model)
+              : request.operation === 'choose'
+                ? await service.choose(request.kind)
+                : request.operation === 'save'
+                  ? await service.save()
+                  : request.operation === 'diagnose'
+                    ? await service.diagnose()
+                    : request.operation === 'discover-cli'
+                      ? await service.discoverCli()
+                      : request.operation === 'connect-cli'
+                        ? await service.connectCli()
+                        : request.operation === 'check-cli-login'
+                          ? await service.checkCliLogin()
+                          : request.operation === 'cancel-cli-login'
+                            ? service.cancelCliLogin()
+                            : request.operation === 'test-ai'
+                              ? await service.testAi()
+                              : await service.refreshConnection();
         return { ok: true, data };
       } catch {
         return {

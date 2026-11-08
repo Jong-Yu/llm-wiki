@@ -72,6 +72,9 @@ export async function removeProcessJournal(
       tenant: context.selection.tenant,
       profileId: context.selection.profile,
       policyRevision: context.active.policyRevision,
+      ...(context.active.accessRevision
+        ? { accessRevision: context.active.accessRevision }
+        : {}),
     },
     operation: 'remove',
     kind: entry.kind,

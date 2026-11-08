@@ -7,6 +7,8 @@ owner는 공용 Store의 저장소·actor·같은 잠금 안의 협력 메서드
 # query는 대응 하나의 현재 판단/근거를, find는 제한된 목록의 후보를 돌려준다.
 # _result는 저장된 판단과 현재 적용 범위·누락 정보를 분리해 화면에서 확인할 수 있는 결과로 만든다.
 
+from contextlib import closing
+from core.modules.ontology.storage import storage_entries
 from . import contracts as limits
 from . import identifiers
 from . import schema
@@ -19,7 +21,6 @@ from copy import deepcopy
 from core.common.json_codec import canonical_json_bytes as _encode
 from core.common.json_codec import canonical_json_hash as _hash
 from hashlib import sha256
-import os
 import unicodedata
 
 
@@ -82,12 +83,7 @@ def find(owner, documents, text=None, application_context=None, as_of=None, limi
     with owner.store._write_lock():
         ctx = _Capture(owner, application_context=application_context, as_of=as_of, byte_limit=min(limits.MAX_CAPTURE_BYTES, limits.MAX_FIND_BYTES))
         result = {"ok": True, "scope": {"documents": deepcopy(documents), "text": text, "limit": limit}, "results": [], "access": deepcopy(owner.actor), "complete": True, "truncated": False, "skipped": [], "application_context": ctx.application_context, "evaluated_at": ctx.at.isoformat()}
-        owner.store._check_path(owner.correspondence_dir)
-        try:
-            entries = os.scandir(owner.correspondence_dir)
-        except FileNotFoundError:
-            return result
-        with entries:
+        with closing(storage_entries(owner.store, owner.correspondence_dirs)) as entries:
             scanned = 0
             for index, entry in enumerate(entries):
                 if index >= limits.MAX_FIND_ENTRIES or scanned >= limits.MAX_FIND_FILES:

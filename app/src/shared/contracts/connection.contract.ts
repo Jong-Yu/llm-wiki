@@ -1,11 +1,33 @@
 export const CONNECTION_CHANNELS = {
   connect: 'connection:connect',
+  authenticate: 'connection:authenticate',
   getState: 'connection:get-state',
   selectWorkspace: 'connection:select-workspace',
   disconnect: 'connection:disconnect',
   restoreSaved: 'connection:restore-saved',
   forgetSaved: 'connection:forget-saved',
 } as const;
+
+export type AccountRequest = {
+  serverUrl: string;
+  name: string;
+  mode: 'signup' | 'login';
+};
+export type RememberedAccount = { name: string; serverUrl: string };
+export type AccessRevision = {
+  policyRevision: string;
+  accessRevision?: string;
+};
+
+/** 신규 계약은 본인 접근 기준을 비교하고 구 계약은 감사 기준까지 같을 때만 호환합니다. */
+export function sameAccessRevision(
+  left: AccessRevision,
+  right: AccessRevision,
+): boolean {
+  return left.accessRevision && right.accessRevision
+    ? left.accessRevision === right.accessRevision
+    : left.policyRevision === right.policyRevision;
+}
 
 export type ConnectRequest = {
   serverUrl: string;
@@ -45,6 +67,7 @@ export type WorkspaceProfile = {
 };
 export type WorkspaceMembership = {
   id: string;
+  displayName?: string;
   permissions: string[];
   defaultProfile: string;
   profiles: WorkspaceProfile[];
@@ -57,11 +80,20 @@ export type ConnectionSnapshot = (
       serverUrl: string;
       userId: string;
       policyRevision: string;
+      accessRevision?: string;
+      displayName?: string;
+      defaultTenant?: string | null;
       workspaces: WorkspaceMembership[];
       selection: { tenant: string; profile: string } | null;
       checkedAt: string;
     }
-) & { protection?: ConnectionProtection };
+) & {
+  protection?: ConnectionProtection;
+  rememberedAccount?: RememberedAccount;
+  warning?: string;
+  /** 읽기 요청이 연속으로 서버에 닿지 못했을 때만 true입니다. 로그인 여부와는 별개입니다. */
+  serverUnreachable?: true;
+};
 export type ConnectionResult =
   | { ok: true; data: ConnectionSnapshot }
   | {
@@ -74,6 +106,7 @@ export type ConnectionResult =
       };
     };
 export type ConnectionBridge = {
+  authenticate: (request: AccountRequest) => Promise<ConnectionResult>;
   connect: (request: ConnectRequest) => Promise<ConnectionResult>;
   getState: () => Promise<ConnectionResult>;
   selectWorkspace: (
@@ -85,6 +118,9 @@ export type ConnectionBridge = {
 };
 export type AccessContext = {
   userId: string;
+  accessRevision?: string;
+  displayName?: string;
+  defaultTenant?: string | null;
   policyRevision: string;
   workspaces: WorkspaceMembership[];
 };
@@ -129,7 +165,7 @@ function profile(value: unknown): WorkspaceProfile {
 function membership(value: unknown): WorkspaceMembership {
   const data = record(value);
   if (!Array.isArray(data.profiles))
-    throw new Error('관점 목록을 확인할 수 없습니다.');
+    throw new Error('작업 공간의 조회 설정을 확인할 수 없습니다.');
   const profiles = data.profiles.map((item: unknown): WorkspaceProfile =>
     profile(item),
   );
@@ -141,12 +177,39 @@ function membership(value: unknown): WorkspaceMembership {
     new Set(profiles.map((item: WorkspaceProfile): string => item.id)).size !==
       profiles.length
   )
-    throw new Error('기본 관점을 확인할 수 없습니다.');
+    throw new Error('작업 공간의 기본 조회 설정을 확인할 수 없습니다.');
   return {
     id: string(data.id),
+    ...(data.displayName === undefined
+      ? {}
+      : { displayName: string(data.displayName) }),
     permissions: strings(data.permissions),
     defaultProfile,
     profiles,
+  };
+}
+
+/** 이름과 주소만 받아 토큰이 renderer 입력에 포함되지 않게 합니다. */
+export function parseAccountRequest(value: unknown): AccountRequest {
+  const data = record(value);
+  if (
+    Object.keys(data).sort().join(',') !== 'mode,name,serverUrl' ||
+    (data.mode !== 'signup' && data.mode !== 'login')
+  )
+    throw new Error('invalid_request');
+  const name = string(data.name, 160).trim();
+  if (
+    !name ||
+    Array.from(name).some(
+      (character: string): boolean =>
+        character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+    )
+  )
+    throw new Error('invalid_request');
+  return {
+    name,
+    serverUrl: string(data.serverUrl, 2048).trim(),
+    mode: data.mode,
   };
 }
 
@@ -206,6 +269,7 @@ export function parseAccessContext(value: unknown): AccessContext {
       );
       return membership({
         id,
+        displayName: item.display_name,
         permissions: item.permissions,
         defaultProfile: item.default_profile,
         profiles,
@@ -214,6 +278,15 @@ export function parseAccessContext(value: unknown): AccessContext {
   );
   return {
     userId: string(data.user_id),
+    ...(data.access_revision === undefined
+      ? {}
+      : { accessRevision: string(data.access_revision) }),
+    ...(data.display_name === undefined
+      ? {}
+      : { displayName: string(data.display_name) }),
+    ...(data.default_tenant === undefined
+      ? {}
+      : { defaultTenant: nullableString(data.default_tenant) }),
     policyRevision: string(data.policy_revision),
     workspaces,
   };
@@ -254,12 +327,33 @@ export function parseConnectionResult(value: unknown): ConnectionResult {
   }
   if (result.ok !== true) throw new Error('연결 결과를 확인할 수 없습니다.');
   const data = record(result.data);
+  const remembered =
+    data.rememberedAccount === undefined
+      ? null
+      : record(data.rememberedAccount);
+  const extras = {
+    ...(remembered
+      ? {
+          rememberedAccount: {
+            name: string(remembered.name, 160),
+            serverUrl: string(remembered.serverUrl, 2048),
+          },
+        }
+      : {}),
+    ...(data.warning === undefined ? {} : { warning: string(data.warning) }),
+    ...(data.serverUnreachable === true
+      ? { serverUnreachable: true as const }
+      : {}),
+  };
   const protection =
     data.protection === undefined
       ? {}
       : { protection: parseProtection(data.protection) };
   if (data.status === 'disconnected')
-    return { ok: true, data: { status: 'disconnected', ...protection } };
+    return {
+      ok: true,
+      data: { status: 'disconnected', ...protection, ...extras },
+    };
   if (data.status !== 'connected' || !Array.isArray(data.workspaces))
     throw new Error('연결 상태를 확인할 수 없습니다.');
   const workspaces = data.workspaces.map((item: unknown): WorkspaceMembership =>
@@ -285,7 +379,7 @@ export function parseConnectionResult(value: unknown): ConnectionResult {
         (item: WorkspaceProfile): boolean => item.id === selection?.profile,
       )
     )
-      throw new Error('선택한 관점을 확인할 수 없습니다.');
+      throw new Error('현재 작업 공간의 조회 설정을 확인할 수 없습니다.');
   }
   const checkedAt = string(data.checkedAt);
   if (!Number.isFinite(Date.parse(checkedAt)))
@@ -298,6 +392,16 @@ export function parseConnectionResult(value: unknown): ConnectionResult {
       serverUrl: string(data.serverUrl),
       userId: string(data.userId),
       policyRevision: string(data.policyRevision),
+      ...(data.accessRevision === undefined
+        ? {}
+        : { accessRevision: string(data.accessRevision) }),
+      ...(data.displayName === undefined
+        ? {}
+        : { displayName: string(data.displayName) }),
+      ...(data.defaultTenant === undefined
+        ? {}
+        : { defaultTenant: nullableString(data.defaultTenant) }),
+      ...extras,
       workspaces,
       selection,
       checkedAt,

@@ -9,12 +9,14 @@ from core.common.json_codec import canonical_json_hash
 from core.modules.analysis_jobs import commands as job_commands, records
 from core.modules.sources import files as source_files
 from . import basis, capture, contracts as limits, files
+from core.modules.analysis_jobs.registration import registration, materialize
 
 
 def opened(self, job_id, tenant, user_id, run_id, authorize, permission, expected=None):
     """조정 잠금 안에서 현재 권한→소유권→작업 CAS→원본·lease 순서로 확인한다."""
     actor = records.authorized(lambda: authorize(permission), tenant, user_id)
     job = records.owned_state(self.jobs, job_id, tenant, user_id)
+    records.check_access(job["actor"], actor)
     if expected is not None:
         limits.revision(expected)
         if canonical_json_hash(job) != expected:
@@ -98,7 +100,7 @@ def prepare(self, job_id, *, tenant, user_id, run_id, expected_job_revision, sta
         reference = {key: release[key] for key in ("ruleset_id", "ruleset_version", "ruleset_revision")}
         selected, target_document = scope_for(self, job, stage, requested, target_document)
         extraction = None
-        if stage == "prepare_wiki":
+        if stage == "prepare_wiki" and registration(job) is None:
             if extraction_id is None:
                 raise limits.InputConflictError("extraction_required")
             from .extractions import load_extraction
@@ -115,13 +117,20 @@ def prepare(self, job_id, *, tenant, user_id, run_id, expected_job_revision, sta
             fixed_basis, basis_revision = basis.capture_basis(self, job, actor, reference, requested,
                 dependencies, previous_basis, rebase=rebase)
         bundle_id = uuid4().hex
-        parent = self.jobs.jobs_dir / job_id / "inputs"
+        parent = self.jobs.job_root(job_id) / "inputs"
         if len(source_files.entries(self.store, parent, maximum=limits.MAX_BUNDLES + 1)) >= limits.MAX_BUNDLES:
             raise limits.InputLimitError("The job input count limit was reached.")
         components = {"data/source.json": capture.encoded({"kind": "registered_original_reference", **job["source_ref"]}),
             "data/context.json": capture.encoded({"kind": "context_data_not_instructions", "documents": documents}),
             "data/hints.json": capture.encoded({"status": "not_provided", "items": []}),
             "rules/manifest.json": release["manifest_text"]}
+        if registration(job) is not None:
+            components["data/registration.json"] = capture.encoded(registration(job))
+            conversion = records.read(self.jobs, self.jobs.job_root(job_id) / "conversion.json")
+            if stage == "prepare_wiki":
+                markdown, conversion = materialize(self.jobs, job, actor)
+                components["data/registration.md"] = markdown
+            components["data/conversion.json"] = capture.encoded(conversion)
         if plan is not None:
             # 제목/목적·원본 위치를 실제 고정 입력에 넣어 실행 인계 뒤에도 계획을 버리지 않는다.
             components["data/analysis-plan.json"] = capture.encoded(plan)
@@ -129,6 +138,8 @@ def prepare(self, job_id, *, tenant, user_id, run_id, expected_job_revision, sta
             components["rules/" + name] = value["content"]
         extraction_ref = None
         complete = not skipped
+        if registration(job) is not None:
+            complete = complete and conversion["complete"]
         if extraction is not None:
             extraction_ref = {key: extraction["manifest"][key] for key in ("extraction_id", "extraction_revision", "content_sha256")}
             components["data/extraction.json"] = extraction["manifest_text"]
@@ -156,11 +167,24 @@ def prepare(self, job_id, *, tenant, user_id, run_id, expected_job_revision, sta
             "selection": selected, "target_document": target_document, "dependency": dependency,
             "dependency_revision": capture.dependency_revision(dependency),
             "scope": {"requested": selected, "included": [item["document"] for item in documents],
-                      "source": "whole_original_reference", "automatic_context_expansion": False},
+                      "source": "preserved_markdown" if registration(job) is not None and stage == "extract_ontology" else "whole_original_reference",
+                      "automatic_context_expansion": False},
             "completeness": {"complete": complete, "truncated": False, "skipped": skipped},
             "input_ready": not any(item.get("required") for item in skipped)
                 and (extraction is None or extraction["manifest"]["complete"]),
             "components": files.descriptors(components)}
+        if registration(job) is not None:
+            from copy import deepcopy
+            context = {"kind": "context_data_not_instructions", "documents": deepcopy(documents)}
+            for row in context["documents"]:
+                if row.get("source") is not None:
+                    row["source"].pop("content")
+            references = {"data/context.json": {"kind": "document_context", "context": context}}
+            if stage == "prepare_wiki":
+                references["data/registration.md"] = {"kind": "registration", "job": {
+                    key: job[key] for key in ("job_id", "source_ref", "actor")
+                } | {"events": [job["events"][0]]}}
+            manifest["component_references"] = references
         revision = files.digest(capture.encoded(manifest).encode("utf-8"))
         basis_details = {"analysis_basis_revision": basis_revision}
         if previous_basis is None or rebase:
@@ -182,7 +206,7 @@ def load_locked(self, job, bundle_id, bundle_revision):
     # 호출자는 조정 잠금을 이미 보유한다. 묶음 내용과 job/run/이벤트 연결을 함께 확인한다.
     limits.identifier(bundle_id); limits.revision(bundle_revision)
     manifest, text, components = files.load(self.store,
-        self.jobs.jobs_dir / job["job_id"] / "inputs" / bundle_id, expected_revision=bundle_revision)
+        self.jobs.job_root(job["job_id"]) / "inputs" / bundle_id, expected_revision=bundle_revision)
     try:
         if any(manifest[key] != expected for key, expected in (("job_id", job["job_id"]),
             ("run_id", job["run_id"]), ("tenant", job["tenant"]), ("user_id", job["user_id"]), ("bundle_id", bundle_id))):
@@ -207,6 +231,7 @@ def validate_current_locked(self, job, manifest, actor):
     """저장 모듈이 이미 보유한 위키 잠금에서 재사용한다. 중첩 잠금을 잡지 않는다."""
     # manifest는 분석에 쓴 옛 입력의 설명서다. 지금 읽은 의존 문서/판단의 지문과 비교한다.
     # 잠금을 이미 가진 호출자를 위한 함수이므로 여기서 다시 with _write_lock()을 쓰지 않는다.
+    records.check_access(manifest["actor"], actor)
     self.rulesets.validate_reference(job["tenant"], manifest["ruleset_ref"])
     _, dependencies, _ = capture.documents_locked(self.store, manifest["selection"], actor)
     # 이력 revision도 비교하므로 본문이 A→B→A로 돌아와도 과거 입력을 재사용하지 않는다.

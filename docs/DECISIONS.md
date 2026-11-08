@@ -4,7 +4,7 @@
 
 ## 현재 기준 찾기
 
-[도메인별 시작점](PLAN.md#도메인별-시작점)을 사용합니다. 기존 결정 전체 원문·미결정 표는 [이관 전 기록](history/2026-10-25-before-domain-split/README.md)에 보존합니다. 상세 계약은 각 도메인 본문에서 유지하며 과거의 시험/운영 정정 기록을 새 결과로 승격하지 않습니다.
+[도메인별 시작점](PLAN.md#도메인별-시작점)을 사용합니다. 기존 결정 전체 원문·미결정 표는 이관 전 기록 (정리로 삭제된 참고 자료)에 보존합니다. 상세 계약은 각 도메인 본문에서 유지하며 과거의 시험/운영 정정 기록을 새 결과로 승격하지 않습니다.
 
 | 결정 | 소유 도메인 | 본문 |
 | --- | --- | --- |
@@ -73,3 +73,62 @@
 | D-063 | `workflow` | [반복 사용하는 v0.1.0 내부 배포판의 지원 범위](domains/workflow/DECISIONS.md#d-063--반복-사용하는-v010-내부-배포판의-지원-범위-2026-10-26) |
 | D-064 | `platform` | [Windows 실행 전 실제 보호 기능 진단](domains/platform/DECISIONS.md#d-064--windows-실행-전-실제-보호-기능-진단-2026-10-26) |
 | D-065 | `analysis` | [Codex·Claude 실행 기록과 고정 규약 호환](domains/analysis/DECISIONS.md#d-065--codexclaude-실행-기록과-고정-규약-호환-2026-10-26) |
+| D-066 | `workflow` | [다섯 기능 중심의 PoC와 원본 보관·Markdown 편집](domains/workflow/DECISIONS.md#d-066--다섯-기능-중심의-poc와-원본-보관markdown-편집-2026-10-26) |
+| D-067 | `ui` | [기존 API/MCP를 전제로 한 화면별 Electron 시안](domains/ui/DECISIONS.md#d-067--기존-apimcp를-전제로-한-화면별-electron-시안-2026-10-26) |
+| D-068 | `ui` | [화면별 새 세션에서 신규 UI 개발](domains/ui/DECISIONS.md#d-068--화면별-새-세션에서-신규-ui-개발-2026-10-27) |
+| D-069 | `platform` | [Windows 설치 파일에 개인 실행기와 OCR 포함](domains/platform/DECISIONS.md#d-069--windows-설치-파일에-개인-실행기와-ocr-포함-2026-10-27) |
+| D-070 | `ui` | [현재 화면을 기본 UI로 통합](domains/ui/DECISIONS.md#d-070--현재-화면을-기본-ui로-통합-2026-10-28) |
+| D-071 | `access` | [소규모 PoC 가입·로그인과 사용자별 영구 토큰](domains/access/DECISIONS.md#d-071--소규모-poc-가입로그인과-사용자별-영구-토큰-2026-10-28) |
+| D-072 | `documents` | [편집 Markdown의 Front Matter와 작성 이력](domains/documents/DECISIONS.md#d-072--편집-markdown의-front-matter와-작성-이력-2026-10-28) |
+| D-073 | `sources` | [원본 판본 보관과 관련 저장 폴더 통합](domains/sources/DECISIONS.md#d-073--원본-판본-보관과-관련-저장-폴더-통합-2026-10-28) |
+| D-074 | `analysis` | [기본 등록의 단일 Markdown과 최소 분석 기록](domains/analysis/DECISIONS.md#d-074--기본-등록의-단일-markdown과-최소-분석-기록-2026-10-28) |
+| D-075 | `ontology` | [판단 원장을 보존하는 문서별 Clean Up](domains/ontology/DECISIONS.md#d-075--판단-원장을-보존하는-문서별-clean-up-2026-10-29) |
+| D-076 | `analysis` | [명시 입력 보기와 검증된 재개로 분석 전송량 제한](domains/analysis/DECISIONS.md#d-076--명시-입력-보기와-검증된-재개로-분석-전송량-제한-2026-10-29) |
+| D-077 | `ontology` | [명시 내용 보존과 추정 검토의 추출 정책 초안](domains/ontology/DECISIONS.md#d-077--명시-내용-보존과-추정-검토의-추출-정책-초안-2026-10-29) |
+| D-078 | `reviews` | [사람이 추가하는 독립 관계와 현재 UI의 검토 복원](domains/reviews/DECISIONS.md#d-078--사람이-추가하는-독립-관계와-현재-ui의-검토-복원-2026-10-29) |
+| D-079 | `ui` | [같은 화면과 업무 서비스를 사용하는 로컬 웹 테스트 모드](domains/ui/DECISIONS.md#d-079--같은-화면과-업무-서비스를-사용하는-로컬-웹-테스트-모드-2026-10-29) |
+| D-080 | `sources` | [개인 PC의 Pandoc 기본 DOCX 변환과 기존 보고 호환](domains/sources/DECISIONS.md#d-080--개인-pc의-pandoc-기본-docx-변환과-기존-보고-호환-2026-10-29) |
+| D-081 | `ontology` | [저장 없는 초안 검사와 제한된 끝점 역할 규칙](domains/ontology/DECISIONS.md#d-081--저장-없는-초안-검사와-제한된-끝점-역할-규칙-2026-10-29) |
+| D-082 | `ui` | [대상 주소와 초안을 유지하는 화면 이동 및 업무 모달 제거](domains/ui/DECISIONS.md#d-082--대상-주소와-초안을-유지하는-화면-이동-및-업무-모달-제거-2026-10-29) |
+| D-083 | `access` | [PoC에서 역할별 조회 관점 제외](domains/access/DECISIONS.md#d-083--poc에서-역할별-조회-관점-제외-2026-10-29) |
+| D-084 | `ontology` | [IMP05 별도 시간 장부와 조회 엔진의 도입 제외](domains/ontology/DECISIONS.md#d-084--imp05-별도-시간-장부와-조회-엔진의-도입-제외-2026-10-30) |
+| D-085 | `ui` | [VS Code 기반 공통 작업 화면](domains/ui/DECISIONS.md#d-085--vs-code-기반-공통-작업-화면-2026-10-31) |
+| D-086 | `ui` | [연속된 작업 면을 기준으로 색상 구성 선택](domains/ui/DECISIONS.md#d-086--연속된-작업-면을-기준으로-색상-구성-선택-2026-10-31) |
+| D-087 | `ui` | [전체 UI의 설계 규칙과 완료 기준 확정](domains/ui/DECISIONS.md#d-087--전체-ui의-설계-규칙과-완료-기준-확정-2026-10-31) |
+| D-088 | `ui` | [공통 틀의 바깥 패널 분리와 사이드바 호버 펼침](domains/ui/DECISIONS.md#d-088--공통-틀의-바깥-패널-분리와-사이드바-호버-펼침-2026-11-01) |
+| D-089 | `ui` | [화면 사용성 시안의 구현 선택](domains/ui/DECISIONS.md#d-089--화면-사용성-시안의-구현-선택-2026-11-01) |
+| D-090 | `ui` | [보류 기능의 구현 선택](domains/ui/DECISIONS.md#d-090--보류-기능의-구현-선택-2026-11-02) |
+| D-091 | `ui` | [Header의 제목·주 버튼 규칙과 점검 의견의 구현 선택](domains/ui/DECISIONS.md#d-091--header의-제목주-버튼-규칙과-점검-의견의-구현-선택-2026-11-02) |
+| D-092 | `ui` | [채팅 질문의 AI 세션 이어 가기(resume)와 폴백](domains/ui/DECISIONS.md#d-092--채팅-질문의-ai-세션-이어-가기resume와-폴백-2026-11-03) |
+| D-093 | `ui` | [AI 제공자별 모델 선택](domains/ui/DECISIONS.md#d-093--ai-제공자별-모델-선택-2026-11-03) |
+| D-094 | `ui` | [채팅 답변의 결과물 복사본은 내려받을 때만 만든다](domains/ui/DECISIONS.md#d-094--채팅-답변의-결과물-복사본은-내려받을-때만-만든다-2026-11-03) |
+| D-095 | `platform` | [Pandoc 사용 중단과 문서 변환의 대체](domains/platform/DECISIONS.md#d-095--pandoc-사용-중단과-문서-변환의-대체-2026-11-03) |
+| D-096 | `ui` | [관련 위키 문서가 없어도 질문을 AI에 보내 "위키에 없음"을 답한다](domains/ui/DECISIONS.md#d-096--관련-위키-문서가-없어도-질문을-ai에-보내-위키에-없음을-답한다-2026-11-04) |
+| D-097 | `ui` | [설정 화면의 "연결됨"은 로그인 확인이며, 실제 호출은 별도 시험으로 확인한다](domains/ui/DECISIONS.md#d-097--설정-화면의-연결됨은-로그인-확인이며-실제-호출은-별도-시험으로-확인한다-2026-11-04) |
+| D-098 | `ui` | [AI 화면 재디자인의 범위와 연결 상태 4단계](domains/ui/DECISIONS.md#d-098--ai-화면-재디자인의-범위와-연결-상태-4단계-2026-11-04) |
+| D-099 | `knowledge` | [질문별 외부 웹 근거 선택과 출처 보존](domains/knowledge/DECISIONS.md#d-099--질문별-외부-웹-근거-선택과-출처-보존-2026-11-05) |
+| D-100 | `documents` | [원문을 보존하는 SQLite 조회 인덱스 1단계](domains/documents/DECISIONS.md#d-100--원문을-보존하는-sqlite-조회-인덱스-1단계-2026-11-06) |
+| D-101 | `documents` | [변경 원장과 요청 계측으로 조회 인덱스 증분 갱신](domains/documents/DECISIONS.md#d-101--변경-원장과-요청-계측으로-조회-인덱스-증분-갱신-2026-11-06) |
+| D-102 | `analysis` | [통합 이력의 작업 이벤트 조회와 상세 결과 검증 분리](domains/analysis/DECISIONS.md#d-102--통합-이력의-작업-이벤트-조회와-상세-결과-검증-분리-2026-11-06) |
+| D-103 | `knowledge` | [전체 문서 검색과 판본 고정 관계 페이지로 시작하는 지도](domains/knowledge/DECISIONS.md#d-103--전체-문서-검색과-판본-고정-관계-페이지로-시작하는-지도-2026-11-06) |
+| D-104 | `ui` | [온톨로지 검색의 화면 한정 조회 캐시 시범 적용](domains/ui/DECISIONS.md#d-104--온톨로지-검색의-화면-한정-조회-캐시-시범-적용-2026-11-06) |
+| D-105 | `ui` | [인증 화면 트리에 속한 조회 캐시와 편집 기준 분리](domains/ui/DECISIONS.md#d-105--인증-화면-트리에-속한-조회-캐시와-편집-기준-분리-2026-11-06) |
+| D-106 | `knowledge` | [Python 서버의 기동 전·변경 후 온톨로지 색인 준비](domains/knowledge/DECISIONS.md#d-106--python-서버의-기동-전변경-후-온톨로지-색인-준비-2026-11-06) |
+| D-107 | `knowledge` | [기존 근거에서 읽는 선택 용어 카드와 기본 채팅 분리](domains/knowledge/DECISIONS.md#d-107--기존-근거에서-읽는-선택-용어-카드와-기본-채팅-분리-2026-11-06) |
+| D-108 | `knowledge` | [전체 근거를 보존하고 필요한 부분을 읽는 질문 실행](domains/knowledge/DECISIONS.md#d-108--전체-근거를-보존하고-필요한-부분을-읽는-질문-실행-2026-11-06) |
+| D-109 | `knowledge` | [인용 ID 렌더링과 읽기 범위 명시](domains/knowledge/DECISIONS.md#d-109--인용-id-렌더링과-읽기-범위-명시-2026-11-06) |
+| D-110 | `knowledge` | [질문 항목과 원문 맥락 보존의 개발 검증](domains/knowledge/DECISIONS.md#d-110--질문-항목과-원문-맥락-보존의-개발-검증-2026-11-07) |
+| D-111 | `knowledge` | [동일 근거의 무손실 입력 참조](domains/knowledge/DECISIONS.md#d-111--동일-근거의-무손실-입력-참조-2026-11-07) |
+| D-112 | `knowledge` | [짧은 문서 전문 읽기의 단일 자동 이어읽기](domains/knowledge/DECISIONS.md#d-112--짧은-문서-전문-읽기의-단일-자동-이어읽기-2026-11-07) |
+| D-113 | `knowledge` | [선택적 묶음 조회와 사후 계획 재생의 구분](domains/knowledge/DECISIONS.md#d-113--선택적-묶음-조회와-사후-계획-재생의-구분-2026-11-07) |
+| D-114 | `ui` | [지도 주제 추가와 관계 중심 이동의 분리](domains/ui/DECISIONS.md#d-114--지도-주제-추가와-관계-중심-이동의-분리-2026-11-07) |
+| D-115 | `ui` | [사용자 과업에 따른 내부 참조와 원시 응답 표시 제거](domains/ui/DECISIONS.md#d-115--사용자-과업에-따른-내부-참조와-원시-응답-표시-제거-2026-11-07) |
+| D-116 | `knowledge` | [질문 전용 CLI 입력 축소의 실제 비교와 품질 채택 기준](domains/knowledge/DECISIONS.md#d-116--질문-전용-cli-입력-축소의-실제-비교와-품질-채택-기준-2026-11-07) |
+| D-117 | `ui` | [지도 범위와 판본에 연결된 근거 탐색](domains/ui/DECISIONS.md#d-117--지도-범위와-판본에-연결된-근거-탐색-2026-11-07) |
+| D-118 | `knowledge` | [같은 호출의 완결성 안내와 질문 전용 기본 연결](domains/knowledge/DECISIONS.md#d-118--같은-호출의-완결성-안내와-질문-전용-기본-연결-2026-11-07) |
+| D-119 | `knowledge` | [전체 지도에서 이어 읽는 원문 앵커 관계](domains/knowledge/DECISIONS.md#d-119--전체-지도에서-이어-읽는-원문-앵커-관계-2026-11-07) |
+| D-120 | `knowledge` | [사용자 원문을 우선하는 질문 문맥과 조건 변경 유지](domains/knowledge/DECISIONS.md#d-120--사용자-원문을-우선하는-질문-문맥과-조건-변경-유지-2026-11-08) |
+| D-121 | `knowledge` | [첫 호출의 도구 선택과 상세 안내의 지연 제공](domains/knowledge/DECISIONS.md#d-121--첫-호출의-도구-선택과-상세-안내의-지연-제공-2026-11-08) |
+| D-122 | `knowledge` | [첫 검색어 정밀 안내의 소규모 비교와 기본 도입 보류](domains/knowledge/DECISIONS.md#d-122--첫-검색어-정밀-안내의-소규모-비교와-기본-도입-보류-2026-11-08) |
+| D-123 | `knowledge` | [검색 후보를 보존하는 일치 구절 우선 페이지와 도입 보류](domains/knowledge/DECISIONS.md#d-123--검색-후보를-보존하는-일치-구절-우선-페이지와-도입-보류-2026-11-08) |
+| D-124 | `knowledge` | [기존 관계·판단 색인과 첫 답변 전 고정 근거 제공](domains/knowledge/DECISIONS.md#d-124--기존-관계판단-색인과-첫-답변-전-고정-근거-제공-2026-11-08) |

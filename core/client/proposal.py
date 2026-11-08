@@ -20,6 +20,7 @@ from core.client.ai.assembly import assemble_input
 from core.client.ai.lease import LeaseKeeper
 from core.client.inputs import receive_input, load_input
 from core.client.transport import AnalysisClientError, tool_call, client_error_code
+from core.client.supervision import supervise
 from core.client.proposal_records import (PROTOCOL, CandidatePreview, checked_result, record,
                                          read_record, result_reference)
 from core.common.json_codec import canonical_json_hash
@@ -137,19 +138,8 @@ class ProposalExecution:
             while True:
                 await asyncio.sleep(2)
                 await self.current()
-        work = asyncio.create_task(lease.guard(operation))
-        watch = asyncio.create_task(monitor())
-        cancel = asyncio.create_task(self.cancel_event.wait())
-        try:
-            await asyncio.wait((work, watch, cancel), return_when=asyncio.FIRST_COMPLETED)
-            self.check_cancel()
-            if watch.done():
-                await watch
-            return await work
-        finally:
-            for task in (work, watch, cancel):
-                task.cancel()
-            await asyncio.gather(work, watch, cancel, return_exceptions=True)
+        return await supervise(lease.guard(operation), monitor(), self.cancel_event.wait(),
+                               check=self.check_cancel)
 
     async def submit_result(self, name, arguments):
         """서버 초안 보존과 정확한 payload 지문 확인. 기존 요청은 GET만 수행한다."""
@@ -352,7 +342,7 @@ class ProposalExecution:
             async with Client(streamable_http_client(self.base + "/mcp", http_client=self.http), mode="legacy") as client:
                 self.client = client
                 mcp_access = await tool_call(client, "access_context", {})
-                if any(mcp_access.get(key) != access.get(key) for key in ("user_id", "policy_revision")):
+                if (mcp_access.get("user_id") != access.get("user_id") or mcp_access.get("access_revision", mcp_access.get("policy_revision")) != access.get("access_revision", access.get("policy_revision"))):
                     raise AnalysisClientError("api_mcp_access_mismatch")
                 job = await tool_call(client, "analysis_job_query", {"tenant": self.tenant, "job_id": self.job_id})
                 _same_job(self.execution["job"], job, job_id=self.job_id, tenant=self.tenant, user=access["user_id"])

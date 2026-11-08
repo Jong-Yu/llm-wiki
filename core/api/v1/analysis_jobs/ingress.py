@@ -7,7 +7,7 @@ import json
 from anyio import to_thread
 from pydantic import ValidationError
 from core.api.errors import error_response
-from core.api.ingress import bounded_stream, content_type
+from core.api.ingress import bounded_stream, content_type, _unique_object as _object
 
 
 MAX_JOB_REQUEST_BYTES = 256 * 1024
@@ -16,16 +16,6 @@ MAX_JOB_REQUEST_BYTES = 256 * 1024
 class JobInputError(Exception):
     def __init__(self, status, code, message):
         self.status, self.code, self.message = status, code, message
-
-
-# JSON에서 같은 키가 두 번 나온 경우를 거부한다. 마지막 값만 남기면 제출 뜻이 달라질 수 있다.
-def _object(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError("duplicate key")
-        value[key] = item
-    return value
 
 
 # 바이트를 UTF-8 JSON으로 읽고 요청 모델로 검사한다. 메타데이터도 실제 UTF-8로 저장 가능한지 확인한다.

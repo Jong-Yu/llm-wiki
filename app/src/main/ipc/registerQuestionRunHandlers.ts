@@ -9,14 +9,25 @@ import {
   questionReadSchema,
   questionStartSchema,
   questionCancelSchema,
+  questionResumableSchema,
+  questionSearchTermsSchema,
+  questionWebSearchSchema,
 } from '@contracts/questionRuns.contract';
 import type {
   QuestionDetailResult,
   QuestionPageResult,
+  QuestionResumableResult,
+  QuestionSearchTermsResult,
+  QuestionWebSearchResult,
 } from '@contracts/questionRuns.contract';
 import { isAppSender } from './isAppSender';
 
-type Result = QuestionDetailResult | QuestionPageResult;
+type Result =
+  | QuestionDetailResult
+  | QuestionPageResult
+  | QuestionResumableResult
+  | QuestionSearchTermsResult
+  | QuestionWebSearchResult;
 /** 질문 전용 채널만 등록하고 신뢰하는 앱 창과 엄격한 요청 스키마를 확인합니다. */
 export function registerQuestionRunHandlers(
   getWindow: () => BrowserWindow | null,
@@ -83,6 +94,18 @@ export function registerQuestionRunHandlers(
   );
   register(QUESTION_RUN_CHANNELS.cancel, (value: unknown): Promise<Result> =>
     service.cancel(questionCancelSchema.parse(value)),
+  );
+  // 사전 확인은 읽기 전용이며 실패해도 오류 없이 false로 응답합니다.
+  register(QUESTION_RUN_CHANNELS.resumable, (value: unknown): Promise<Result> =>
+    service.resumable(questionResumableSchema.parse(value)),
+  );
+  register(
+    QUESTION_RUN_CHANNELS.searchTerms,
+    (value: unknown): Promise<Result> =>
+      service.searchTerms(questionSearchTermsSchema.parse(value)),
+  );
+  register(QUESTION_RUN_CHANNELS.webSearch, (value: unknown): Promise<Result> =>
+    service.webSearch(questionWebSearchSchema.parse(value)),
   );
   return (): void => {
     for (const channel of Object.values(QUESTION_RUN_CHANNELS))

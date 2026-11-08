@@ -198,7 +198,7 @@ export const completionFieldsSchema = z.object({
 });
 export type CompletionFields = z.infer<typeof completionFieldsSchema>;
 
-/** 서버의 현재 검사판본이 화면에 표시한 후보와 모두 같아야 적용 버튼을 엽니다. */
+/** 서버의 현재 검사 버전이 화면에 표시한 후보와 모두 같아야 적용 버튼을 엽니다. */
 export function canApplyProposal(
   record: ProposalRecord | null,
   validation: ProposalValidation | null,
@@ -216,7 +216,7 @@ export function canApplyProposal(
       record.candidate_ref?.candidate_revision
   );
 }
-/** 실제 저장 함수의 영수증이 없는 pending/false 응답을 완료로 해석하지 않습니다. */
+/** 실제 저장 함수의 확인 기록이 없는 pending/false 응답을 완료로 해석하지 않습니다. */
 export function confirmedApplication(receipt: KnowledgeValue | null): boolean {
   return z
     .object({

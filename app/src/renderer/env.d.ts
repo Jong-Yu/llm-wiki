@@ -1,3 +1,4 @@
+import '../shared/js-yaml';
 import type { WikiBridge } from '@contracts/app.contract';
 
 declare global {

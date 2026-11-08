@@ -13,6 +13,17 @@ def _is_policy(event):
     return event.get("action") in contracts._POLICY_ACTIONS
 
 
+def _source_layer_matches(ledger, domain, viewpoint):
+    """Both read layers have the same graph only in this conservative case.
+
+    Any policy history, including inactive/old/undone policies, keeps the
+    independent source-layer render. The shared result is internal to validation.
+    """
+    return (domain is None and viewpoint is None
+            and not any(_is_policy(event) for event in ledger["events"])
+            and not any(event["kind"] == "policy" for event in ledger.get("relation_events", [])))
+
+
 def _scope(actor):
     return {"domain": actor["domain"], "viewpoint": actor["viewpoint"]}
 

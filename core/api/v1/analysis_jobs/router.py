@@ -19,7 +19,7 @@ from core.api.concurrency import run_owned_thread
 from core.modules.access.policy import AccessScope
 from core.modules.analysis_jobs.store import JobStore
 from .ingress import JobInputError, input_error, read_json
-from .schemas import Cancel, CreatedJob, CreateJob, EmptyQuery, Heartbeat, Job, JobPage, ListQuery
+from .schemas import Cancel, CreatedJob, CreateJob, CreateRegistration, EmptyQuery, Heartbeat, Job, JobPage, ListQuery
 
 
 router = APIRouter(tags=["analysis-jobs"])
@@ -53,7 +53,7 @@ async def mutate(request, scope, token, model, operation, *, job_id=None):
         return input_error(error)
     except ClientDisconnect:
         return error_response(400, "request_disconnected", "The job request was interrupted.")
-    if operation == "create":
+    if operation in {"create", "create_registration"}:
         status = 202 if result["state"] == "pending_reconcile" else 200 if result["replayed"] else 201
         payload = Envelope[CreatedJob].model_validate(envelope({**result, "access": access}))
     else:
@@ -70,6 +70,15 @@ async def create_job(request: Request, query: Annotated[EmptyQuery, Query()],
                      token: Annotated[str, Depends(credential)]):
     """고정 원본의 작업을 접수한다. AI 실행이나 위키 저장 완료가 아니다."""
     return await mutate(request, scope, token, CreateJob, "create")
+
+
+@router.post("/analysis-jobs/registrations", status_code=201, response_model=Envelope[CreatedJob],
+             responses={200: {"model": Envelope[CreatedJob]}, 202: {"model": Envelope[CreatedJob]}},
+             openapi_extra=body_schema(CreateRegistration))
+async def create_registration(request: Request, query: Annotated[EmptyQuery, Query()],
+                              scope: Annotated[AccessScope, Depends(authorize_source)],
+                              token: Annotated[str, Depends(credential)]):
+    return await mutate(request, scope, token, CreateRegistration, "create_registration")
 
 
 # 현재 사용자 범위의 작업 페이지를 조회한다. cursor와 scope_key로 다른 범위의 페이지를 섞지 않는다.

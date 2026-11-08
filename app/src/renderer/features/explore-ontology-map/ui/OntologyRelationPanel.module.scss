@@ -1,0 +1,23 @@
+// 새 관계 패널은 지도 오른쪽 상세 패널 안에 들어가므로 작업 페이지 여백 대신 패널 여백을 씁니다.
+.panel {
+  min-width: 0;
+  padding: 16px;
+  overflow-wrap: anywhere;
+  font: 13px/20px var(--wiki-font-family-ui);
+  &:focus {
+    outline: none;
+  }
+  // 공통 폼의 위쪽 구분선·여백은 작업 페이지용이라 패널에서는 없앱니다.
+  form,
+  .plain {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+}
+.document {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}

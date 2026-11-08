@@ -38,6 +38,14 @@ const actorSchema = z.object({
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
   policy_revision: revision,
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 export const analysisListRequestSchema = z.strictObject({
   connectionId: text,
@@ -55,13 +63,6 @@ export const analysisExecuteRequestSchema = analysisReadRequestSchema.extend({
   expectedJobRevision: revision,
   mode: z.enum(['start', 'resume']),
 });
-export type AnalysisExecutionScope = {
-  connectionId: string;
-  userId: string;
-  tenant: string;
-  profileId: string;
-  policyRevision: string;
-};
 export const analysisStartRequestSchema = z.strictObject({
   connectionId: text,
   sourceId: id,
@@ -69,6 +70,15 @@ export const analysisStartRequestSchema = z.strictObject({
   sourceSha256: revision,
   registrationRevision: revision,
   targetDocument: text.refine(isDocumentPath),
+  registration: z
+    .strictObject({
+      requestId: id,
+      title: z.string().trim().min(1).max(200),
+      conversionRef: z
+        .strictObject({ conversionId: id, conversionRevision: revision })
+        .optional(),
+    })
+    .optional(),
   outputs: z
     .array(output)
     .min(1)
@@ -78,6 +88,35 @@ export const analysisStartRequestSchema = z.strictObject({
     ),
 });
 export const analysisJobSchema = z.object({
+  registration: z
+    .object({
+      mode: z.literal('preserve'),
+      title: text,
+      conversion_ref: z
+        .object({ conversion_id: id, conversion_revision: revision })
+        .nullable(),
+    })
+    .nullable()
+    .optional(),
+  conversion: z
+    .object({
+      method: text,
+      complete: z.boolean(),
+      unread_ranges: z.array(z.string()),
+      warnings: z.array(z.string()),
+      author: text,
+      actor: actorSchema,
+      first_markdown: z
+        .object({
+          document: text,
+          revision,
+          body_revision: revision,
+          document_id: id,
+        })
+        .nullable(),
+    })
+    .nullable()
+    .optional(),
   actor: actorSchema,
   job_id: id,
   tenant: text,
@@ -309,8 +348,6 @@ export const analysisAutomaticRuleSchema = z
     reason: text,
   })
   .catchall(z.json());
-export type AnalysisSemanticRule = z.infer<typeof analysisSemanticRuleSchema>;
-export type AnalysisAutomaticRule = z.infer<typeof analysisAutomaticRuleSchema>;
 // 규약·추출물·증거 출처의 세대별 한정 필드를 자르지 않고 전체 고정 기준을 보존합니다.
 const diagnosticBasis = z
   .object({
@@ -440,14 +477,8 @@ export type AnalysisReadRequest = z.infer<typeof analysisReadRequestSchema>;
 export type AnalysisCancelRequest = z.infer<typeof analysisCancelRequestSchema>;
 export type AnalysisJob = z.infer<typeof analysisJobSchema>;
 export type AnalysisReceipt = z.infer<typeof analysisReceiptSchema>;
-export type AnalysisDiagnostics = z.infer<typeof analysisDiagnosticsSchema>;
-export type AnalysisDiagnosticReport = z.infer<
-  typeof analysisDiagnosticReportSchema
->;
-export type AnalysisDiagnosticFinding = z.infer<typeof diagnosticFinding>;
 export type AnalysisLocal = z.infer<typeof analysisLocalSchema>;
 export type AnalysisDetail = z.infer<typeof analysisDetailSchema>;
-export type AnalysisPage = z.infer<typeof analysisPageSchema>;
 export type AnalysisDetailResult = z.infer<typeof detailResultSchema>;
 export type AnalysisPageResult = z.infer<typeof pageResultSchema>;
 export type AnalysisBridge = {

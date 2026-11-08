@@ -12,6 +12,7 @@ class Profile(Model):
 
 # permissions는 허용 행동, profiles는 관점 정의, default_profile은 생략했을 때 선택할 관점이다.
 class Membership(Model):
+    display_name: str
     permissions: list[str]
     profiles: dict[str, Profile]
     default_profile: str
@@ -19,8 +20,19 @@ class Membership(Model):
 
 class AccessContext(Model):
     user_id: str
+    display_name: str
+    default_tenant: str | None
     memberships: dict[str, Membership]
     policy_revision: str
+    access_revision: str
+
+
+class AuthRequest(Model):
+    name: str = Field(min_length=1, max_length=160)
+
+
+class AuthResult(AccessContext):
+    token: str
 
 
 # 필드가 없는 모델도 의미가 있다. 허용하지 않은 query 항목이 들어오는 것을 거부한다.

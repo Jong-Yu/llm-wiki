@@ -1,6 +1,6 @@
 ---
 name: wiki-query
-description: LLM Wiki MCP로 현재 지식·전문가 판단·문서 간 대응·변경 영향을 근거와 함께 조회한다. 위키 질문과 탐색에 사용하며 서버 개발이나 자료 변경에는 사용하지 않는다.
+description: LLM Wiki MCP로 현재 지식·질문 근거·검토함·이력·문서 간 대응·변경 영향을 근거와 함께 조회한다. 위키 질문과 탐색에 사용하며 서버 개발이나 자료 변경에는 사용하지 않는다.
 ---
 
 # Wiki 지식 조회
@@ -17,11 +17,18 @@ description: LLM Wiki MCP로 현재 지식·전문가 판단·문서 간 대응�
 
 | 요청 | 호출과 선택 |
 | --- | --- |
-| 문서 검색·문서의 현재 내용 | `wiki_search`로 관련 문서를 찾고, 답변에 사용할 각 문서에 `ontology_review_query`를 호출한다. 원문 전체·정확한 인용이 필요하면 `wiki_read`를 함께 사용한다. |
+| 문서·원본 목록과 과거 판본 | `wiki_list`로 자료 종류를 구별하고 `wiki_versions` → 정확한 `history_id`의 `wiki_version_read`로 과거 파일을 읽는다. 현재 내용은 `wiki_read`와 대조하며 복원은 실행하지 않는다. |
+| 문서 검색·문서의 현재 내용 | `wiki_search`로 관련 문서를 찾고, 선택 문서의 `knowledge_context_prepare` 또는 각 문서의 `ontology_review_query`로 현재 검토 맥락을 읽는다. 정확한 전체 파일은 `wiki_read`를 사용한다. |
+| 질문의 정의·조건·예외와 원본 근거 묶기 | `knowledge_context_prepare`에 문서, 필수 문서, 실제 claim ID·state revision, 정확한 원본 판본/hash를 명시한다. 각 입력 한도를 지키며 이 조회는 모델 실행이나 영구 저장이 아니다. |
+| 지금 검토할 항목·최근 변경 이력 | `ontology_review_queue` 또는 `wiki_history_query`를 사용한다. 허용 공간 집계는 `coverage: tenant`, 선택 집계는 `coverage: selected`와 문서 1~8개 및 필요한 참조를 전달한다. |
 | 개념·용어의 현재 의미, 전문가 판단에만 있는 표현 | `ontology_concept_find` → 문서·일치 위치·버전을 보고 정확한 `target_ref` 선택 → 그대로 `ontology_concept_query(target=...)`. 서로 다른 대상을 이름만으로 합치지 않는다. 모호하면 후보를 제시한다. |
 | 문서 A의 조건이 B의 개념에 해당하는지 | `ontology_correspondence_find`로 명시한 문서 범위를 탐색하고 ID별 `ontology_correspondence_query`를 읽는다. B의 주변 규칙은 B의 `ontology_review_query`도 확인한다. |
-| 정의·조건·예외 문서를 함께 읽기 | 필요한 문서를 명시한 `ontology_context`와 각 문서의 `ontology_review_query`를 함께 사용한다. `focus`뿐 아니라 `other_context`·`unclassified`도 읽는다. |
+| 기계 추출의 문서별 맥락을 함께 읽기 | `ontology_context`의 `focus`뿐 아니라 `other_context`·`unclassified`도 읽는다. 현재 판단은 별도 검토 조회나 질문 근거 묶음으로 확인한다. |
 | 문서 연결·변경 영향 | 연결은 `ontology_connections`, 재검토 권고는 `ontology_impact`. [연결·영향 규칙](../../../docs/domains/knowledge/RULES.md)을 적용한다. |
+
+목록·검토함·이력의 `next_cursor`는 같은 사용자·tenant·profile·선택/판본에서만 이어 읽는다. `catalog_changed`이면 새 조회로 시작하고 이전 페이지에 다른 기준을 이어 붙이지 않는다. 집계의 tenant 모드에는 명시 문서/대응/job 선택을 섞지 않는다. 선택 history 조회에도 문서가 필요하므로 job ID만으로 조회하지 않는다. 문서/집계 cursor는 생략하거나 문자열이며 JSON null 대신 생략·빈 문자열을 사용한다.
+
+질문 근거의 `can_prepare`, `complete`, `truncated`, `skipped`는 지정한 근거 범위에 대한 값이다. 오래된 claim·필수 문서 누락을 다른 판본으로 대신 채우지 않는다. 검토함의 미검토·보류·이전 판단·추출 상태를 구별하며 조회 결과를 자동 승인·재추출 지시로 해석하지 않는다. 통합 이력의 과거 승인과 현재 효력은 별개다.
 
 개념 통합 조회의 `expansion` 기본값은 `none`이다. 질문이 직접 연결까지 요구할 때만 `direct_confirmed`를 사용하고 방향·범위·조건을 유지한다. 버전이 바뀐 대상은 다시 발견·선택한다. 조회용 target/hash는 쓰기 CAS가 아니다.
 

@@ -154,9 +154,9 @@ def _ledger(owner, raw, cid):
 
 def _publish(owner, cid, encoded, existing, cleanup):
     # 임시 파일의 전체 바이트를 준비한 뒤 새 파일 공개 또는 교체를 수행한다.
-    owner.store._mkdir(owner.correspondence_dir)
     path = owner._path(cid)
-    with owner.store._staged_file(owner.correspondence_dir, encoded, cleanup) as staged:
+    owner.store._mkdir(path.parent)
+    with owner.store._staged_file(path.parent, encoded, cleanup) as staged:
         if existing:
             os.replace(staged.path, path)
             staged.consumed = True

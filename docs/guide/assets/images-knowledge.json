@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "capturedAt": "2026-11-07",
+  "viewport": {
+    "width": 1440,
+    "height": 960
+  },
+  "deviceScaleFactor": 1,
+  "theme": "light",
+  "images": [
+    {
+      "file": "chat.png",
+      "width": 1440,
+      "height": 960,
+      "description": "가상 요청 처리 절차에 질문하고 답변을 내려받는 화면",
+      "highlights": [
+        {
+          "label": "질문 입력",
+          "rect": {
+            "x": 487,
+            "y": 814,
+            "width": 906,
+            "height": 22
+          }
+        },
+        {
+          "label": "질문 보내기",
+          "rect": {
+            "x": 1365,
+            "y": 842,
+            "width": 28,
+            "height": 28
+          }
+        },
+        {
+          "label": "답변 내려받기",
+          "rect": {
+            "x": 673,
+            "y": 419,
+            "width": 103,
+            "height": 26
+          }
+        }
+      ],
+      "fixture": "Generic in-memory chat fixture adapted from app/tests/chat-states/renderer.tsx; current KnowledgeChatPage/AppShell",
+      "mockData": true,
+      "mockAiResponse": true,
+      "productionRenderer": true
+    },
+    {
+      "file": "evidence.png",
+      "width": 1440,
+      "height": 960,
+      "description": "예시 운영 안내의 인용과 원문 위치를 펼친 화면",
+      "highlights": [
+        {
+          "label": "답변 근거",
+          "rect": {
+            "x": 1063,
+            "y": 77,
+            "width": 360,
+            "height": 840
+          }
+        },
+        {
+          "label": "근거 칩",
+          "rect": {
+            "x": 537,
+            "y": 387,
+            "width": 118,
+            "height": 24
+          }
+        }
+      ],
+      "fixture": "Generic in-memory chat fixture; document 예시-운영-안내.md",
+      "mockData": true,
+      "mockAiResponse": true,
+      "productionRenderer": true
+    },
+    {
+      "file": "ontology.png",
+      "width": 1440,
+      "height": 960,
+      "description": "예시 운영 안내의 요청 접수와 내용 확인 및 보완 요청 관계와 원문 설명",
+      "highlights": [
+        {
+          "label": "원문 열기",
+          "rect": {
+            "x": 1187,
+            "y": 439,
+            "width": 45,
+            "height": 24
+          }
+        },
+        {
+          "label": "개념 상세",
+          "rect": {
+            "x": 1072,
+            "y": 100,
+            "width": 360,
+            "height": 786
+          }
+        },
+        {
+          "label": "화면에 맞춤",
+          "rect": {
+            "x": 1328,
+            "y": 889,
+            "width": 91,
+            "height": 32
+          }
+        }
+      ],
+      "fixture": "Generic synthetic document created with WikiStore/OntologyStore in isolated /private/tmp/wiki-guide-generic- workspace; current App renderer",
+      "mockData": true,
+      "mockAiResponse": false,
+      "productionRenderer": true
+    },
+    {
+      "file": "review.png",
+      "width": 1440,
+      "height": 960,
+      "description": "가상 요청 처리 관계의 원문을 확인하고 판단과 이유를 작성한 화면",
+      "highlights": [
+        {
+          "label": "판단 선택",
+          "rect": {
+            "x": 634,
+            "y": 341,
+            "width": 751,
+            "height": 32
+          }
+        },
+        {
+          "label": "검토 이유",
+          "rect": {
+            "x": 634,
+            "y": 415,
+            "width": 751,
+            "height": 54
+          }
+        },
+        {
+          "label": "판단 저장",
+          "rect": {
+            "x": 634,
+            "y": 479,
+            "width": 49,
+            "height": 32
+          }
+        }
+      ],
+      "fixture": "Same generic isolated document and current review queue API; approval form only, no review write",
+      "mockData": true,
+      "mockAiResponse": false,
+      "productionRenderer": true
+    }
+  ],
+  "captureMethod": "Current React App renderer, generic mock chat bridge and synthetic isolated ontology API; no recreated HTML screens or image editing",
+  "exampleAccount": "홍길동",
+  "exampleWorkspace": "워크스페이스",
+  "liveAiCalls": 0,
+  "productionDataAccessed": false,
+  "reviewSaved": false,
+  "browserErrors": []
+}

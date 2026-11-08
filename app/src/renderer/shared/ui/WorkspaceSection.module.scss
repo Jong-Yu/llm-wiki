@@ -1,0 +1,54 @@
+.root {
+  min-width: 0;
+  color: var(--wiki-color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.root + .root {
+  margin-top: var(--wiki-space-24);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8) var(--wiki-space-16);
+  min-width: 0;
+  padding: 0;
+  margin-bottom: var(--wiki-space-12);
+}
+
+.header .title {
+  margin: 0;
+  font-size: var(--wiki-font-size-14);
+  font-weight: var(--wiki-font-weight-semibold);
+  line-height: var(--wiki-component-control-line-height);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  min-width: 0;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--wiki-space-12);
+  padding: 0;
+}
+
+.body > :where(p, ul, ol, dl, details, pre, blockquote) {
+  margin-block: 0;
+}
+
+.body > .root + .root {
+  margin-top: 0;
+}
+
+.body > :where(button, a) {
+  align-self: flex-start;
+}

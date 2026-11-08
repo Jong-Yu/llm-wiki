@@ -53,7 +53,7 @@ def failure(report, code):
     rule = report.pop("active_rule", None)
     if code.startswith("ruleset_"):
         rule = "R-A01"
-    elif code in {"access_denied", "access_unavailable", "job_cancelled", "lease_expired", "run_changed", "run_conflict", "lease_conflict"}:
+    elif code in {"access_denied", "access_unavailable", "access_basis_changed", "job_cancelled", "lease_expired", "run_changed", "run_conflict", "lease_conflict"}:
         rule = "R-A02"
     elif code in {"conflict", "input_basis_changed", "analysis_basis_changed", "source_basis_changed", "analysis_basis_required"}:
         rule = "R-A03"

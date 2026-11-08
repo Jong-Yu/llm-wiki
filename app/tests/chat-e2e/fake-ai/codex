@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""채팅 E2E 전용 가짜 Codex CLI. 실제 AI를 호출하지 않고 질문의 #키워드로 정해진 응답을 만든다.
+
+어댑터(core/client/ai/codex.py)가 요구하는 규약만 흉내 낸다: --version, exec --help,
+stdin 프롬프트, --output-schema, --output-last-message, JSONL 이벤트(thread_id 포함).
+앱은 자식 프로세스의 환경변수를 걸러 전달하므로 설정은 이 파일 옆의 config.json에서 읽는다
+(log_dir, slow_seconds, delay_seconds). log_dir이 있으면 호출마다 인자와 시나리오를 한 줄씩 기록한다.
+"""
+import json
+import os
+import re
+import sys
+import time
+import uuid
+
+HELP = """Run Codex non-interactively
+Usage: codex exec [OPTIONS] [PROMPT] [COMMAND]
+Options:
+  -C, --cd <DIR>
+      --sandbox <MODE>
+      --ephemeral
+      --ignore-user-config
+      --output-schema <FILE>
+      --output-last-message <FILE>
+      --json
+      --skip-git-repo-check
+      --disable <FEATURE>
+      --enable <FEATURE>
+  -c, --config <key=value>
+  -m, --model <MODEL>
+"""
+
+
+def config():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), "config.json"), encoding="utf-8") as stream:
+            return json.load(stream)
+    except (OSError, ValueError):
+        return {}
+
+
+def log(entry):
+    directory = config().get("log_dir")
+    if directory:
+        with open(os.path.join(directory, "calls.jsonl"), "a", encoding="utf-8") as stream:
+            stream.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def emit(value):
+    print(json.dumps(value, ensure_ascii=False), flush=True)
+
+
+def option(arguments, name):
+    return arguments[arguments.index(name) + 1] if name in arguments else None
+
+
+def question_of(prompt):
+    """검색어 확장 프롬프트와 답변 프롬프트에서 현재 질문만 꺼낸다. 이전 대화의 키워드는 무시한다."""
+    if "QUESTION:\n" in prompt:
+        return prompt.split("QUESTION:\n", 1)[1]
+    match = re.search(r'"question"\s*:\s*("(?:[^"\\]|\\.)*")', prompt)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except ValueError:
+            pass
+    return prompt
+
+
+def scenario_of(question):
+    match = re.search(r"#([가-힣A-Za-z0-9_]+)", question)
+    return match.group(1) if match else "정상"
+
+
+def document_texts(prompt):
+    """프롬프트의 고정 근거 JSON에서 문서별 본문을 꺼낸다. 인용문은 본문의 정확한 일부여야 한다."""
+    for line in prompt.splitlines():
+        if line.startswith('{"basis"'):
+            try:
+                basis = json.loads(line)["basis"]
+            except (ValueError, KeyError):
+                return {}
+            return {item["document"]: item["content"] for item in basis.get("documents", []) if "content" in item}
+    return {}
+
+
+def quote_of(text):
+    """제목이 아닌 첫 문장 한 줄을 그대로 쓴다."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return text.strip()[:50]
+
+
+def citations_for(schema, texts=None, with_quote=True):
+    """스키마가 허용한 인용(enum으로 고정된 근거)을 그대로 사용한다."""
+    spec = schema.get("properties", {}).get("citations", {})
+    if spec.get("maxItems") == 0:
+        return []
+    result = []
+    for branch in spec.get("items", {}).get("anyOf", []):
+        properties = branch.get("properties", {})
+        # 서버가 고정한 근거(enum)만 인용한다. 고정되지 않은 일반 템플릿은 인용하지 않는다.
+        if not all("enum" in item or key == "quote" for key, item in properties.items()):
+            continue
+        value = {key: item["enum"][0] if "enum" in item else "발췌 문장입니다." for key, item in properties.items()}
+        if "quote" in value and value.get("document") in (texts or {}):
+            value["quote"] = quote_of(texts[value["document"]])
+        result.append(value)
+    return result if with_quote else []
+
+
+def grounded_step(schema, prompt, answer, scenario):
+    """새 질문 규약은 실제로 읽어 반환된 근거 ID만 사용한다. 기존 답변 규약은 바꾸지 않는다."""
+    data = json.loads(prompt.rsplit("\n", 1)[-1])
+    step = dict.fromkeys(schema["required"])
+    step.update(action="answer", content=answer.get("content"), evidence_ids=[])
+    if scenario in {"근거", "정상"}:
+        reads = data.get("evidence_reads", [])
+        identifiers = list(dict.fromkeys(identifier for read in reads
+            for identifier in read.get("result", {}).get("evidence_ids", [])))
+        materials = data.get("materials", {})
+        documents = materials.get("documents", [])
+        if identifiers:
+            step["evidence_ids"] = identifiers
+            step["content"] += " " + " ".join(f"[[{identifier}]]" for identifier in identifiers)
+        elif not reads and documents:
+            step.update(action="read", material_id=documents[0]["id"], start_line=1,
+                        line_count=60, content=None)
+    elif scenario == "인용위조":
+        step.update(content="존재하지 않는 근거를 인용합니다. [[s999:1:1]]",
+                    evidence_ids=["s999:1:1"])
+    return step
+
+
+ANSWERS = {
+    "정상": "## 확인한 내용\n\n문서에 따르면 센서는 설정 범위를 벗어나면 경고를 보냅니다.\n\n- 상한 초과\n- 하한 미달\n\n경고 해제 조건은 문서에서 확인되지 않았습니다.",
+    "근거": "근거 문서를 확인했습니다. 센서 경고는 온도 이탈 시 발생합니다.",
+    "긴답변": "\n\n".join(f"## 항목 {n}\n\n" + "긴 답변을 확인하기 위한 문단입니다. " * 20 for n in range(1, 13)),
+    "마크다운": "# 제목\n\n**굵게**와 *기울임*, `코드`\n\n1. 첫째\n2. 둘째\n\n| 열A | 열B |\n| --- | --- |\n| 1 | 2 |\n\n```python\nprint('안녕')\n```\n\n> 인용문",
+    "스크립트": "<script>window.__injected = true</script><img src=x onerror=\"window.__injected = true\"> 위 태그는 문자로만 보여야 합니다.",
+    "한글영문": "Sensor alarm 조건: threshold 초과 시 ALARM. 이모지 확인 ✅ 😀",
+    "후속": "이전 질문을 이어서 답합니다.",
+}
+
+
+def main():
+    arguments = sys.argv[1:]
+    if arguments == ["--version"]:
+        print("codex-cli 0.0.0-fake")
+        return 0
+    if arguments[:2] == ["exec", "--help"]:
+        print(HELP)
+        return 0
+    if not arguments or arguments[0] != "exec":
+        return 2
+    prompt = sys.stdin.read()
+    question = question_of(prompt)
+    scenario = scenario_of(question)
+    resumed = "resume" in arguments
+    schema_path = option(arguments, "--output-schema")
+    result_path = option(arguments, "--output-last-message")
+    schema = json.load(open(schema_path, encoding="utf-8")) if schema_path else {}
+    searching = "terms" in schema.get("properties", {})
+    log({"scenario": scenario, "resumed": resumed, "searching": searching, "arguments": arguments,
+         "prompt_chars": len(prompt), "question": question[:200]})
+
+    # 검색어 확장 호출은 모든 시나리오에서 무난히 성공시키되, 실패 시나리오는 이 단계부터 실패시킨다.
+    if scenario == "로그인실패":
+        sys.stderr.write("not logged in\n")
+        return 1
+    if scenario == "비정상종료":
+        emit({"type": "thread.started", "thread_id": str(uuid.uuid4())})
+        return 3
+    if scenario == "느림" and not searching:
+        time.sleep(float(config().get("slow_seconds", 20)))
+    if scenario == "지연" and not searching:
+        time.sleep(float(config().get("delay_seconds", 4)))
+    if scenario == "멈춤":
+        time.sleep(3600)
+
+    thread_id = arguments[arguments.index("resume") + 1] if resumed else str(uuid.uuid4())
+    emit({"type": "thread.started", "thread_id": thread_id})
+    emit({"type": "turn.started"})
+    if scenario == "이벤트오류" and not searching:
+        emit({"type": "error", "message": "boom"})
+        emit({"type": "turn.failed", "error": {"message": "boom"}})
+        return 1
+    if scenario == "도구호출" and not searching:
+        emit({"type": "item.completed", "item": {"id": "i1", "type": "command_execution", "command": "ls"}})
+    if searching:
+        value = {"terms": ["센서", "경고", "온도"]}
+    elif scenario == "빈답변":
+        value = {"content": "", "citations": []}
+    elif scenario == "스키마위반":
+        value = {"text": "형식이 다른 응답"}
+    elif scenario == "인용위조":
+        value = {"content": "존재하지 않는 근거를 인용합니다.", "citations": [
+            {"kind": "document", "document": "없는/문서.md", "source_revision": "0" * 64, "quote": "없음"}]}
+    else:
+        key = "후속" if resumed and scenario == "정상" else scenario
+        text = ANSWERS.get(key, ANSWERS["정상"])
+        value = {"content": text, "citations": citations_for(schema, document_texts(prompt)) if scenario in {"근거", "정상"} else []}
+    if "action" in schema.get("properties", {}) and "evidence_ids" in schema["properties"] and scenario != "스키마위반":
+        value = grounded_step(schema, prompt, value, scenario)
+    raw = json.dumps(value, ensure_ascii=False)
+    if scenario == "깨진JSON" and not searching:
+        raw = raw[:-5]
+    if result_path:
+        with open(result_path, "w", encoding="utf-8") as stream:
+            stream.write(raw)
+    emit({"type": "item.completed", "item": {"id": "m1", "type": "agent_message", "text": raw}})
+    if scenario != "미완료" or searching:
+        emit({"type": "turn.completed", "usage": {"input_tokens": 100, "cached_input_tokens": 0, "output_tokens": 50}})
+    return 0
+
+
+sys.exit(main())

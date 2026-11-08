@@ -7,18 +7,27 @@
   "files": ["out/**/*", "package.json"],
   "asar": true,
   "npmRebuild": false,
-  "publish": null,
+  "publish": {
+    "provider": "github",
+    "owner": "Jong-Yu",
+    "repo": "llm-wiki",
+    "releaseType": "release"
+  },
   "mac": {
     "target": ["dmg", "zip"],
+    "artifactName": "${productName}-${version}.${ext}",
+    "icon": "design/brand/llm-wiki-icon.icns",
     "identity": null,
     "category": "public.app-category.productivity"
   },
   "win": {
     "target": ["nsis"],
+    "icon": "design/brand/llm-wiki-icon.ico",
     "signExecutable": false
   },
   "linux": {
     "target": "tar.gz",
+    "icon": "design/brand/llm-wiki-icon.png",
     "category": "Office"
   },
   "dmg": {

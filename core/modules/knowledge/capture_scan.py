@@ -6,6 +6,7 @@
 from .contracts import ConceptCaptureLimitError
 from core.modules.correspondences.contracts import CorrespondenceCorruptError
 from pathlib import Path
+from core.modules.ontology.storage import legacy_key, validate_document_id
 from core.modules.reviews.contracts import ReviewCorruptError
 from core.modules.ontology.errors import _ContextBudgetError
 from core.modules.ontology.snapshots import _reject_constant
@@ -69,61 +70,53 @@ def scan_documents(self):
     # A policy-only term must remain discoverable through a validated ledger
     # even if its source is missing. Never trust a claimed path before its
     # filename/hash and relative-path boundaries have been checked.
-    known_names = {sha256(name.encode("utf-8")).hexdigest() + ".json": name for name in self._documents | candidates}
-    for entry in self._entries(self.reviews.review_dir, "review_discovery"):
-        if not entry.name.endswith(".json"):
-            continue  # Includes the legitimate correspondences subdirectory.
-        row_key = known_names.get(entry.name, entry.name)
-        row = self._touch("review", row_key, "discovery", "discovery")
-        try:
-            if not entry.is_file(follow_symlinks=False):
-                raise ReviewCorruptError("Document-review discovery does not follow symbolic links")
-            if len(entry.name) != 69:
-                raise ReviewCorruptError("Unexpected document-review filename")
-            if entry.name in known_names:
-                name = known_names[entry.name]
-                raw = self._read("review", name, "discovery", "discovery")
-            else:
-                if len(self._documents) + len(self._unresolved_review_files) >= self.limits["documents"]:
+    for directory in self.reviews.review_dirs:
+        for entry in self._entries(directory, "review_discovery"):
+            if not entry.name.endswith(".json"):
+                continue
+            row_key = str(Path(entry.path).relative_to(self.store.data_dir))
+            row = self._touch("review", row_key, "discovery", "discovery")
+            try:
+                if not entry.is_file(follow_symlinks=False):
+                    raise ReviewCorruptError("Document-review discovery does not follow symbolic links")
+                if len(self._unresolved_review_files) >= self.limits["documents"]:
                     raise ConceptCaptureLimitError("Document-review candidate limit exceeded")
-                self._unresolved_review_files.add(entry.name)
-                # Read an unknown envelope only through its known tenant path;
-                # no path declared inside that envelope is opened beforehand.
+                self._unresolved_review_files.add(row_key)
                 path = Path(entry.path)
-                self.store._check_path(path)
                 before = self.remaining[0]
                 try:
                     raw = self.ontology._context_bytes(path, self.remaining, entry.name, "ontology", max_bytes=contracts.MAX_REVIEW_BYTES)
                 finally:
                     row["captured_bytes"] = before - self.remaining[0]
                 row.update(status="missing" if raw is None else "ready", revision=None if raw is None else sha256(raw).hexdigest())
-            if raw is None:
-                raise FileNotFoundError(entry.name)
-            value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
-            name = value.get("document") if isinstance(value, dict) else None
-            self.store._document_path(self.store.wiki_dir, name)
-            if sha256(name.encode("utf-8")).hexdigest() + ".json" != entry.name:
-                raise ReviewCorruptError("Review filename differs from its document")
-            if entry.name in self._unresolved_review_files:
-                self._unresolved_review_files.remove(entry.name)
+                if raw is None:
+                    raise FileNotFoundError(entry.name)
+                value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+                name = value.get("document") if isinstance(value, dict) else None
+                self.store._document_path(self.store.wiki_dir, name)
+                expected = sha256(name.encode("utf-8")).hexdigest()
+                allowed = {expected} if directory == self.reviews.legacy_review_dir else {legacy_key(name)}
+                if directory == self.reviews.review_dir and value.get("document_id") is not None:
+                    allowed.add(validate_document_id(value["document_id"]))
+                if path.stem not in allowed or self.reviews._path(name) != path:
+                    raise ReviewCorruptError("Review filename differs from its document identity")
+                self._unresolved_review_files.remove(row_key)
                 self._reserve("review", name)
-            if row_key != name:
                 self._rows.pop(("review", row_key), None)
                 previous = row
                 row = self._touch("review", name, "discovery", "discovery")
                 row.update(status=previous["status"], revision=previous["revision"], captured_bytes=previous["captured_bytes"])
                 row_key = name
-            self.raw[("review", name)] = raw
-            if name not in self._parsed_reviews:
-                self._parsed_reviews[name] = self.reviews._ledger(raw, name)
-            candidates.add(name)
-            known_names[entry.name] = name
-        except (OSError, ValueError, TypeError) as error:
-            if isinstance(error, _ContextBudgetError):
-                error = ConceptCaptureLimitError("Shared discovery byte budget exhausted")
-            if not isinstance(error, (OSError, ConceptCaptureLimitError, ReviewCorruptError)):
-                error = ReviewCorruptError("Document-review discovery envelope is malformed")
-            self._validated_error("review", row_key, error, phase="review_discovery")
+                self.raw[("review", name)] = raw
+                if name not in self._parsed_reviews:
+                    self._parsed_reviews[name] = self.reviews._ledger(raw, name)
+                candidates.add(name)
+            except (OSError, ValueError, TypeError) as error:
+                if isinstance(error, _ContextBudgetError):
+                    error = ConceptCaptureLimitError("Shared discovery byte budget exhausted")
+                if not isinstance(error, (OSError, ConceptCaptureLimitError, ReviewCorruptError)):
+                    error = ReviewCorruptError("Document-review discovery envelope is malformed")
+                self._validated_error("review", row_key, error, phase="review_discovery")
     ordered = sorted(candidates)
     if len(ordered) > self.limits["documents"]:
         self._skip("scan", "documents", ConceptCaptureLimitError("Document candidate limit exceeded"), phase="document_discovery")
@@ -136,14 +129,17 @@ def scan_correspondences(self):
     if self._scan_correspondences is not None:
         return list(self._scan_correspondences)
     candidates = []
-    for entry in self._entries(self.correspondences.correspondence_dir, "correspondence_discovery"):
+    for entry in (entry for directory in self.correspondences.correspondence_dirs
+                  for entry in self._entries(directory, "correspondence_discovery")):
         if entry.name.startswith(".wiki-") and entry.name.endswith(".tmp"):
             continue
         try:
             if not entry.name.endswith(".json") or not entry.is_file(follow_symlinks=False):
                 raise CorrespondenceCorruptError("Unexpected correspondence directory entry")
             cid = identifier(entry.name[:-5], "correspondence_id")
-            candidates.append(cid)
+            self.correspondences._path(cid)
+            if cid not in candidates:
+                candidates.append(cid)
         except (OSError, ValueError, TypeError) as error:
             self._skip("scan", entry.name, error, phase="correspondence_discovery")
     if len(candidates) > self.limits["correspondences"]:

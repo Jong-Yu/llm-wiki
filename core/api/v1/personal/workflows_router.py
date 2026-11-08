@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import JsonValue
 from core.api.schemas import Envelope
 from core.api.dependencies import authorized, credential, access_value, envelope, scope_key
-from core.api.operations import body_schema, json_operation, reauthorize
+from core.api.operations import body_schema, json_operation, reauthorize, commit_guard as guard
 from core.modules.personal.drafts import DraftStore
 from core.modules.personal.question_runs import QuestionRunStore
 from core.modules.personal.store import PersonalStore
@@ -29,11 +29,6 @@ def list_question_runs(query: Annotated[PersonalList, Query()], scope=Depends(au
     """재연결 후 자기 질문 실행을 찾는다. 목록 조회는 AI를 다시 실행하지 않는다."""
     return envelope({**PersonalStore(scope).list("question-runs", scope_key=scope_key(scope),
         limit=query.limit, cursor=query.cursor), "access": access_value(scope)})
-
-
-def guard(request, tenant, token, permission, scope):
-    """마지막 저장 시점에도 처음 인가한 주체·관점·현재 권한이 같은지 확인한다."""
-    return lambda: reauthorize(request, tenant, token, permission, scope.profile_id, expected=scope)
 
 
 @router.post("/result-drafts", status_code=201, response_model=Response, openapi_extra=body_schema(models.DraftCreate))
@@ -79,7 +74,7 @@ def application_receipt(draft_id: RecordId, request_id: RecordId, query: Annotat
 async def create_question_run(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """저장된 사용자 질문에 대한 실행 대기 자원을 만들며 서버 AI는 시작하지 않는다."""
     return await json_operation(request, tenant, token, models.RunCreate, "conversation_write",
-        lambda scope, value: QuestionRunStore(scope).create(**value.model_dump(exclude={"profile"}),
+        lambda scope, value: QuestionRunStore(scope, user_dialogue=True).create(**value.model_dump(exclude={"profile"}),
             before_commit=guard(request, tenant, token, "conversation_write", scope)), created=True)
 
 
@@ -134,6 +129,20 @@ async def answer(request: Request, tenant: str, question_run_id: RecordId, token
     return await json_operation(request, tenant, token, models.RunAnswer, "conversation_write",
         lambda scope, value: QuestionRunStore(scope).submit(question_run_id, value.model_dump(exclude={"profile"}),
             authorize=guard(request, tenant, token, "conversation_write", scope)))
+
+
+@router.post("/question-runs/{question_run_id}/evidence", response_model=Response, openapi_extra=body_schema(models.RunEvidence))
+async def question_evidence(request: Request, tenant: str, question_run_id: RecordId, token: Annotated[str, Depends(credential)]):
+    """실행이 요청한 고정 자료만 읽고 작은 조회 결과를 같은 원장에 보존한다."""
+    return await json_operation(request, tenant, token, models.RunEvidence, "conversation_write",
+        lambda scope, value: QuestionRunStore(scope).evidence(question_run_id, value.model_dump(exclude={"profile"}),
+            authorize=guard(request, tenant, token, "conversation_write", scope)))
+
+
+@router.get("/question-runs/{question_run_id}/evidence/{request_id}", response_model=Response)
+def question_evidence_receipt(question_run_id: RecordId, request_id: RecordId, query: Annotated[PersonalProfile, Query()], scope=Depends(authorized)):
+    """조회 응답 유실은 기존 영수증으로 확인하며 AI나 조회 요청을 재실행하지 않는다."""
+    return envelope({**QuestionRunStore(scope).evidence_receipt(question_run_id, request_id), "access": access_value(scope)})
 
 
 @router.get("/question-runs/{question_run_id}/answers/{request_id}", response_model=Response)

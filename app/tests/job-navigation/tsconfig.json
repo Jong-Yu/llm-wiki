@@ -1,0 +1,4 @@
+{
+  "extends": "../../config/typescript/tsconfig.tools.json",
+  "include": ["verify.ts", "renderer.tsx", "../../src/renderer/env.d.ts"]
+}

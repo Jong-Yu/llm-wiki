@@ -7,12 +7,15 @@ from typing import Annotated, Literal
 
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field, StrictStr
+from core.common.access import access_dict
 
-from core.modules.access.policy import AccessDenied
+from core.modules.access.policy import AccessDenied, PolicyError
 from core.mcp.request_context import _authorized_scope
-from core.mcp.results import _invoke
+from core.mcp.results import _access_error, _invoke
 from core.mcp.schemas import SourceRevisionInput
 from core.modules.reviews.store import ReviewStore
+from core.modules.reviews.values import actor_basis
+from .analysis_jobs import _job_authorizer
 
 
 # 검토 조회·변경·되돌림 도구를 같은 ReviewStore에 연결한다.
@@ -26,9 +29,23 @@ def _register_review_tools(server, get_store):
         scope = _authorized_scope.get()
         if scope is None:
             raise AccessDenied()
-        return {"user_id": scope.user_id, "tenant": scope.tenant, "profile_id": scope.profile_id,
-                "domain": scope.domain, "viewpoint": scope.viewpoint,
-                "policy_revision": scope.policy_revision}
+        return access_dict(scope)
+
+    def guard(permission):
+        expected = actor()
+        def recheck():
+            callback = _job_authorizer.get()
+            if callback is None or actor_basis(callback(permission)) != actor_basis(expected):
+                raise AccessDenied()
+        return recheck
+
+    def invoke(store, operation, action, response_mode):
+        try:
+            return _invoke(store, operation, action, response_mode=response_mode)
+        except AccessDenied:
+            return _access_error("access_denied")
+        except PolicyError:
+            return _access_error("access_unavailable")
 
     # 기계층에 검토와 전문가 정책을 반영한 effective_graph 및 보류/과거 판단을 함께 읽는다.
     @server.tool(annotations=read_only, structured_output=False)
@@ -39,9 +56,10 @@ def _register_review_tools(server, get_store):
     ) -> CallToolResult:
         """Read current expert policies, effective knowledge and the complete Action log.
 
-        REQUIRED before answering questions about a document's current knowledge,
+        Current review evidence is REQUIRED before answering a document knowledge question,
         including in a fresh AI session. Discover relevant documents with wiki_search,
-        then query this tool for each document in the chosen authorized profile.
+        then query this tool or knowledge_context_prepare for the selected documents
+        in the chosen authorized profile.
         Use effective_graph, policies and pending_history; machine_graph and source
         text alone can omit or contradict authorized expert decisions. Cite the
         decision event_id and state_revision for expert policies, not a fabricated
@@ -70,9 +88,12 @@ def _register_review_tools(server, get_store):
         claim_id: SourceRevisionInput, expected_state_revision: SourceRevisionInput,
         reason: Annotated[StrictStr, Field(min_length=1, max_length=1000)],
         replacement: dict | None = None,
+        response_mode: Literal["full", "compact"] = "full",
     ) -> CallToolResult:
         """Record an explicitly requested review decision using ontology_review permission.
 
+        response_mode=compact returns the complete changed event and claim, versions,
+        pending status and warnings; query ontology_review_query for the full snapshot.
         Read ontology_review_query and source evidence first. Submit its stable
         claim_id and state_revision. Identity, tenant and profile come from server
         authorization, never caller-supplied actor fields. Edit requires the entire
@@ -88,29 +109,32 @@ def _register_review_tools(server, get_store):
         and reconciliation. Success with cleanup warnings must not be retried.
         """
         store = get_store()
-        return _invoke(store, "ontology_review", lambda: ReviewStore(store).review(
+        return invoke(store, "ontology_review", lambda: ReviewStore(store).review(
             document, action=action, claim_id=claim_id, expected_state_revision=expected_state_revision,
-            reason=reason, replacement=replacement, actor=actor(),
-        ))
+            reason=reason, replacement=replacement, actor=actor(), before_commit=guard("ontology_review"),
+        ), response_mode=response_mode)
 
     # 기존 검토 이벤트를 삭제하지 않고 되돌림을 추가한다. 되돌릴 event_id와 현재 상태 버전이 필요하다.
     @server.tool(annotations=mutation, structured_output=False)
     def ontology_review_undo(
         document: StrictStr, event_id: StrictStr, expected_state_revision: SourceRevisionInput,
         reason: Annotated[StrictStr, Field(min_length=1, max_length=1000)],
+        response_mode: Literal["full", "compact"] = "full",
     ) -> CallToolResult:
         """Undo the latest decision for a claim by appending a new audit event.
 
+        response_mode=compact retains the changed event/claim and state; use
+        ontology_review_query for the complete graph and history.
         Requires ontology_review permission and a fresh ontology_review_query
         state_revision. Existing events are never deleted. Changed source/graph
         or a later decision on the same claim prevents unsafe undo. Reconcile
         conflicts; do not merely exchange revision values or retry a saved undo.
         """
         store = get_store()
-        return _invoke(store, "ontology_review_undo", lambda: ReviewStore(store).undo(
+        return invoke(store, "ontology_review_undo", lambda: ReviewStore(store).undo(
             document, event_id=event_id, expected_state_revision=expected_state_revision,
-            reason=reason, actor=actor(),
-        ))
+            reason=reason, actor=actor(), before_commit=guard("ontology_review"),
+        ), response_mode=response_mode)
 
     # 원문 인용이 없는 업무 판단을 별도 권한/이유로 기록한다. 원문에서 추출한 사실처럼 가짜 인용을 붙이지 않는다.
     @server.tool(annotations=mutation, structured_output=False)
@@ -120,9 +144,12 @@ def _register_review_tools(server, get_store):
         reason: Annotated[StrictStr, Field(min_length=1, max_length=1000)],
         replacement: dict,
         entities: list[dict] | None = None,
+        response_mode: Literal["full", "compact"] = "full",
     ) -> CallToolResult:
         """Record an explicitly requested expert decision without requiring a source quote.
 
+        response_mode=compact retains the changed event/claim, relevant policies and
+        state; use ontology_review_query for the complete graph and history.
         Requires separate ontology_policy permission and a fresh ontology_review_query
         claim_id/state_revision. AI extraction and ordinary review still require source
         evidence. This replaces an existing relation or attribute for the chosen exact
@@ -145,19 +172,22 @@ def _register_review_tools(server, get_store):
         warnings must not be retried. Inspect event_id/state_revision in the result.
         """
         store = get_store()
-        return _invoke(store, "ontology_policy", lambda: ReviewStore(store).policy(
+        return invoke(store, "ontology_policy", lambda: ReviewStore(store).policy(
             document, claim_id=claim_id, expected_state_revision=expected_state_revision,
-            reason=reason, replacement=replacement, entities=entities, actor=actor(),
-        ))
+            reason=reason, replacement=replacement, entities=entities, actor=actor(), before_commit=guard("ontology_policy"),
+        ), response_mode=response_mode)
 
     # 전문가 판단을 되돌리는 새 이벤트를 남긴다. 원문/기계 그래프를 직접 덮어쓰는 기능이 아니다.
     @server.tool(annotations=mutation, structured_output=False)
     def ontology_policy_undo(
         document: StrictStr, event_id: StrictStr, expected_state_revision: SourceRevisionInput,
         reason: Annotated[StrictStr, Field(min_length=1, max_length=1000)],
+        response_mode: Literal["full", "compact"] = "full",
     ) -> CallToolResult:
         """Undo the latest expert policy in its scope with a new Action log event.
 
+        response_mode=compact retains the changed event/claim, relevant policies and
+        state; use ontology_review_query for the complete graph and history.
         Requires ontology_policy permission, the matching authorized profile and a
         fresh ontology_review_query state_revision. Existing log entries remain.
         Ordinary ontology_review_undo cannot undo expert policies. Later decisions
@@ -165,7 +195,7 @@ def _register_review_tools(server, get_store):
         or retry an already successful undo. This is not source-document editing.
         """
         store = get_store()
-        return _invoke(store, "ontology_policy_undo", lambda: ReviewStore(store).policy_undo(
+        return invoke(store, "ontology_policy_undo", lambda: ReviewStore(store).policy_undo(
             document, event_id=event_id, expected_state_revision=expected_state_revision,
-            reason=reason, actor=actor(),
-        ))
+            reason=reason, actor=actor(), before_commit=guard("ontology_policy"),
+        ), response_mode=response_mode)

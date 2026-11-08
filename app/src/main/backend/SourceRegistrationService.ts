@@ -1,3 +1,4 @@
+import { sameAccessRevision } from '@contracts/connection.contract';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
@@ -50,6 +51,7 @@ import {
   sourceFileFormat,
   sourceMediaType,
   sourceSignatureMatches,
+  sourceText,
 } from './sourceOriginal';
 
 export type RegistrationSession = {
@@ -57,6 +59,7 @@ export type RegistrationSession = {
   serverUrl: string;
   userId: string;
   policyRevision: string;
+  accessRevision?: string;
   workspaces: WorkspaceMembership[];
   selection: { tenant: string; profile: string };
   token: string;
@@ -90,6 +93,14 @@ const accessSchema = z.object({
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
   policy_revision: hash,
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 const receiptSchema = z.object({
   request_id: identifier,
@@ -125,7 +136,7 @@ function scopeKey(session: RegistrationSession): string {
     session.connectionId,
     session.serverUrl,
     session.userId,
-    session.policyRevision,
+    session.accessRevision ?? session.policyRevision,
     session.selection.tenant,
     session.selection.profile,
   ]);
@@ -147,6 +158,21 @@ function sessionChanged(): ApiFailure {
     'connection_changed',
     '연결 또는 작업 공간이 변경되었습니다. 현재 선택을 다시 확인해 주세요.',
   );
+}
+
+/** 파일명만 받아 경로·제어 문자와 지원하지 않는 확장자를 거부합니다. */
+function selectedSourceFormat(filename: string): SourceFormat | null {
+  if (
+    filename.length === 0 ||
+    filename.length > 255 ||
+    /[\\/:]/.test(filename) ||
+    Array.from(filename).some(
+      (character: string): boolean =>
+        character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+    )
+  )
+    return null;
+  return sourceFileFormat(filename);
 }
 
 /** 원본 등록은 main의 파일 snapshot·요청 영수증만 소유하고 화면 상태는 보관하지 않습니다. */
@@ -218,7 +244,7 @@ export class SourceRegistrationService {
           item.id === session.selection.tenant,
       );
       if (
-        context.policyRevision !== session.policyRevision ||
+        !sameAccessRevision(context, session) ||
         !workspace ||
         !workspace.profiles.some(
           (profile: WorkspaceProfile): boolean =>
@@ -228,7 +254,7 @@ export class SourceRegistrationService {
       ) {
         const failure = apiFailure(
           'scope_changed',
-          '권한 또는 조회 범위가 변경되었습니다. 작업 공간과 관점을 다시 선택해 주세요.',
+          '권한 또는 조회 범위가 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
         );
         this.#invalidate(failure);
         return failure;
@@ -296,15 +322,8 @@ export class SourceRegistrationService {
       const path = selected.filePaths[0];
       if (!path) return { ok: true, data: null };
       const filename = basename(path);
-      const format = sourceFileFormat(filename);
-      if (
-        format === null ||
-        filename.length > 255 ||
-        /[\\/:]/.test(filename) ||
-        Array.from(filename).some(
-          (character: string): boolean => character.charCodeAt(0) < 32,
-        )
-      )
+      const format = selectedSourceFormat(filename);
+      if (format === null)
         return apiFailure(
           'unsupported_source',
           'MD·TXT·PDF·XLSX·DOCX 또는 PNG·JPEG·GIF·WebP·BMP·TIFF 파일을 선택해 주세요.',
@@ -324,12 +343,6 @@ export class SourceRegistrationService {
             '원본 파일은 20 MiB 이내여야 합니다.',
           );
         const chunks: Buffer[] = [];
-        const decoder = isTextSource(format)
-          ? new TextDecoder('utf-8', {
-              fatal: true,
-              ignoreBOM: true,
-            })
-          : null;
         let total = 0;
         for (;;) {
           const chunk = Buffer.alloc(65536);
@@ -343,28 +356,13 @@ export class SourceRegistrationService {
               '원본 파일은 20 MiB 이내여야 합니다.',
             );
           const value = chunk.subarray(0, read.bytesRead);
-          decoder?.decode(value, { stream: true });
           chunks.push(value);
         }
-        decoder?.decode();
         bytes = Buffer.concat(chunks, total);
       } finally {
         await file.close();
       }
-      if (!sourceSignatureMatches(format, bytes))
-        return apiFailure(
-          'unsupported_source',
-          '파일 내용이 선택한 원본 형식과 일치하지 않습니다.',
-        );
-      if (!this.#current(session)) return sessionChanged();
-      const data: SourceFile = {
-        fileId: randomUUID().replaceAll('-', ''),
-        filename,
-        format,
-        sizeBytes: bytes.byteLength,
-      };
-      this.#file = { ...data, bytes, scope: scopeKey(session) };
-      return { ok: true, data };
+      return this.#retainFile(session, filename, bytes);
     } catch {
       return apiFailure(
         'invalid_source',
@@ -374,6 +372,72 @@ export class SourceRegistrationService {
       this.#controllers.delete(controller);
       this.#choosing = false;
     }
+  }
+
+  /** 브라우저가 전달한 파일은 권한 확인 전에 복사해 대기 중 바이트 변경을 차단합니다. */
+  async acceptFile(
+    request: SourceSessionRequest,
+    filename: string,
+    bytes: Uint8Array,
+  ): Promise<ChooseSourceFileResult> {
+    const session = this.#session();
+    if (!session || session.connectionId !== request.connectionId)
+      return sessionChanged();
+    if (this.#choosing || this.#busy)
+      return apiFailure(
+        'registration_busy',
+        '진행 중인 원본 작업을 기다려 주세요.',
+      );
+    if (bytes.byteLength > MAX_SOURCE_BYTES)
+      return apiFailure('source_limit', '원본 파일은 20 MiB 이내여야 합니다.');
+    this.#choosing = true;
+    const controller = new AbortController();
+    this.#controllers.add(controller);
+    try {
+      const snapshot = Buffer.from(bytes);
+      const allowed = await this.#authorize(session, true, controller);
+      if ('ok' in allowed) return allowed;
+      return this.#retainFile(session, filename, snapshot);
+    } catch {
+      return apiFailure(
+        'invalid_source',
+        '파일을 읽을 수 없습니다. 지원되는 일반 문서·이미지 파일인지, 텍스트는 UTF-8인지 확인해 주세요.',
+      );
+    } finally {
+      this.#controllers.delete(controller);
+      this.#choosing = false;
+    }
+  }
+
+  /** 플랫폼별로 읽은 바이트에도 같은 형식·UTF-8·크기·세대 검사를 적용합니다. */
+  #retainFile(
+    session: RegistrationSession,
+    filename: string,
+    bytes: Buffer,
+  ): ChooseSourceFileResult {
+    const format = selectedSourceFormat(filename);
+    if (format === null)
+      return apiFailure(
+        'unsupported_source',
+        'MD·TXT·PDF·XLSX·DOCX 또는 PNG·JPEG·GIF·WebP·BMP·TIFF 파일을 선택해 주세요.',
+      );
+    if (bytes.byteLength > MAX_SOURCE_BYTES)
+      return apiFailure('source_limit', '원본 파일은 20 MiB 이내여야 합니다.');
+    if (!sourceSignatureMatches(format, bytes))
+      return apiFailure(
+        'unsupported_source',
+        '파일 내용이 선택한 원본 형식과 일치하지 않습니다.',
+      );
+    if (isTextSource(format)) sourceText(bytes);
+    if (!this.#current(session)) return sessionChanged();
+    const data: SourceFile = {
+      fileId: randomUUID().replaceAll('-', ''),
+      filename,
+      format,
+      sizeBytes: bytes.byteLength,
+    };
+    this.#file = { ...data, bytes, scope: scopeKey(session) };
+    return { ok: true, data };
   }
 
   /** 전송할 내용의 지문을 고정하고 파일 경로/바이트를 renderer로 되돌리지 않습니다. */
@@ -489,7 +553,13 @@ export class SourceRegistrationService {
       (attempt.sourceId !== null && data.source_id !== attempt.sourceId) ||
       data.access.user_id !== session.userId ||
       data.access.tenant !== session.selection.tenant ||
-      data.access.policy_revision !== session.policyRevision ||
+      !sameAccessRevision(
+        {
+          policyRevision: data.access.policy_revision,
+          accessRevision: data.access.access_revision,
+        },
+        session,
+      ) ||
       data.access.profile_id !== profile.id ||
       data.access.domain !== profile.domain ||
       data.access.viewpoint !== profile.viewpoint
@@ -506,6 +576,9 @@ export class SourceRegistrationService {
         domain: data.access.domain,
         viewpoint: data.access.viewpoint,
         policyRevision: data.access.policy_revision,
+        ...(data.access.access_revision
+          ? { accessRevision: data.access.access_revision }
+          : {}),
       },
     };
     if (data.state === 'pending_reconcile') {
@@ -558,11 +631,11 @@ export class SourceRegistrationService {
       expected.userId !== session.userId ||
       expected.tenant !== session.selection.tenant ||
       expected.profileId !== session.selection.profile ||
-      expected.policyRevision !== session.policyRevision
+      !sameAccessRevision(expected, session)
     )
       return apiFailure(
         'scope_changed',
-        '등록 초안의 작업 공간 또는 관점이 변경되었습니다. 현재 범위에서 다시 확인해 주세요.',
+        '등록 초안의 작업 공간 또는 조회 설정이 변경되었습니다. 현재 작업 공간에서 다시 확인해 주세요.',
       );
     if (this.#busy || this.#choosing)
       return apiFailure(
@@ -755,7 +828,7 @@ export class SourceRegistrationService {
         data.access.profileId !== profile.id ||
         data.access.domain !== profile.domain ||
         data.access.viewpoint !== profile.viewpoint ||
-        data.access.policyRevision !== session.policyRevision
+        !sameAccessRevision(data.access, session)
       ) {
         const failure = apiFailure(
           'scope_changed',

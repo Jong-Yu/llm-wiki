@@ -9,6 +9,7 @@ import re
 import anyio
 from mcp.types import Tool, ToolAnnotations
 
+from core.common.access import access_dict
 from core.modules.access.policy import AccessDenied, AccessPolicy, PolicyError
 from core.mcp.request_context import _authorized_scope, _bearer
 from core.mcp.results import _access_error, _result
@@ -21,8 +22,21 @@ from core.mcp.tools.concepts import _register_concept_tools
 from core.mcp.tools.correspondences import _register_correspondence_tools
 from core.mcp.tools.ontology import _register_impact_tool
 from core.mcp.tools.reviews import _register_review_tools
+from core.mcp.tools.cleanup import CLEANUP_TOOLS, _register_cleanup_tools
 from core.mcp.tools.analysis_jobs import _job_authorizer, _register_analysis_job_tools, validate_arguments as validate_job_arguments
 from core.mcp.tools.analysis_results import RESULT_TOOLS, _register_result_tools, validate_arguments as validate_result_arguments
+from core.mcp.tools.document_management import (
+    DOCUMENT_MANAGEMENT_TOOLS, _register_document_management_tools,
+    validate_arguments as validate_document_management_arguments,
+)
+from core.mcp.tools.knowledge_queries import (
+    KNOWLEDGE_QUERY_TOOLS, _register_knowledge_query_tools,
+    validate_arguments as validate_knowledge_query_arguments,
+)
+from core.mcp.tools.authored_relations import (
+    AUTHORED_RELATION_TOOLS, _register_authored_relation_tools,
+    validate_arguments as validate_authored_relation_arguments,
+)
 from core.mcp.tools.extraction import (
     EXTRACTION_PROFILE_TOOLS, _register_extraction_tools, initial_permission,
     validate_arguments as validate_extraction_arguments,
@@ -31,7 +45,11 @@ from core.modules.documents.store import WikiStore
 
 
 _TOOL_PERMISSIONS = {
+    **{name: ("write" if name == "wiki_restore" else "read") for name in DOCUMENT_MANAGEMENT_TOOLS},
+    **{name: "read" for name in KNOWLEDGE_QUERY_TOOLS | AUTHORED_RELATION_TOOLS},
+    **{name: ("ontology_review" if name in {"ontology_cleanup_apply", "ontology_cleanup_undo"} else "read") for name in CLEANUP_TOOLS},
     "wiki_read": "read", "wiki_search": "read", "ontology_query": "read",
+    "ontology_validate_draft": "read",
     "ontology_connections": "read", "wiki_write": "write", "ontology_generate": "ontology_write",
     "ontology_context": "read", "ontology_impact": "read",
     "ontology_review_query": "read", "ontology_review": "ontology_review",
@@ -44,6 +62,8 @@ _TOOL_PERMISSIONS = {
     "ontology_concept_find": "read", "ontology_concept_query": "read",
     "analysis_job_claim": "source_write", "analysis_job_query": "read",
     "analysis_job_update": "source_write", "source_read": "read",
+    "analysis_job_list": "read", "analysis_job_cancel": "source_write", "analysis_job_heartbeat": "source_write",
+    "analysis_registration_create": "source_write",
     "extraction_rules_read": "read", "analysis_job_input_prepare": "source_write",
     "analysis_job_input_read": "read", "source_extraction_submit": "source_write",
     "analysis_job_wiki_write": "write", "analysis_job_ontology_generate": "ontology_write",
@@ -66,9 +86,11 @@ class TenantMCPServer(WikiMCPServer):
             "ontology_context keeps selected documents' full text and graphs with profile priorities; "
             "read other_context and unclassified claims for constraints, and report incomplete inputs. "
             "For current concept knowledge use ontology_concept_find, explicitly select a versioned target, then ontology_concept_query. "
-            "For document-only answers find relevant documents with wiki_search, then call ontology_review_query for each document "
-            "in the chosen profile, even in a fresh AI session. "
-            "Use its effective_graph and policies; machine query/context/connections and original text do not apply expert decisions. "
+            "For a compact optional term explanation, copy an entity target's document/entity_id/state_revision into ontology_glossary_query; "
+            "it reads source context and existing knowledge without generating or storing a definition or adding ordinary chat context. "
+            "For document-only answers find relevant documents with wiki_search, then prepare selected current evidence with "
+            "knowledge_context_prepare or call ontology_review_query for each document in the chosen profile, even in a fresh AI session. "
+            "Use the returned effective_graph and policies; machine query/context/connections and original text do not apply expert decisions. "
             "Cite expert decisions with event_id and state_revision, never fabricate source quotations. "
             "Report pending/other-scope decisions and uncertainty; classifications do not imply unstated negations. "
             "Active policy status does not prove its condition/time qualifiers hold; preserve and assess those qualifiers. "
@@ -87,13 +109,21 @@ class TenantMCPServer(WikiMCPServer):
             "For a created analysis job query it, claim your run, and fetch source_read's exact original reference. "
             "Read extraction_rules_read and use analysis_job_input_prepare/read to obtain exact rules and frozen stage input. "
             "CLI reports and input readiness are not saved results or semantic approval."
+            " For basic registration use analysis_registration_create with one exact existing original; "
+            "it preserves one Markdown without creating a derived TXT or mandatory plan. "
+            "wiki_read content/revision describe the full file; body_start_line maps body evidence to full-file lines. "
+            "For direct wiki_write explicitly declare origin when known; transport alone never proves AI authorship."
         ))
         self.policy = policy
         self.rulesets = rulesets
         self._stdio_token = token
         _register_tools(self, self._store)
+        _register_document_management_tools(self, self._store)
+        _register_knowledge_query_tools(self, self._store)
+        _register_authored_relation_tools(self, self._store)
         _register_impact_tool(self, self._store)
         _register_review_tools(self, self._store)
+        _register_cleanup_tools(self, self._store)
         _register_correspondence_tools(self, self._store)
         _register_concept_tools(self, self._store)
         _register_analysis_job_tools(self, self._store)
@@ -161,7 +191,7 @@ class TenantMCPServer(WikiMCPServer):
             }
             schema.setdefault("required", []).append("tenant")
             schema["additionalProperties"] = False
-            if tool.name in RESULT_TOOLS or tool.name in EXTRACTION_PROFILE_TOOLS or tool.name in CONCEPT_TOOLS or tool.name in CORRESPONDENCE_TOOLS or tool.name in ("ontology_query", "ontology_context", "ontology_review_query", "ontology_impact",
+            if tool.name in DOCUMENT_MANAGEMENT_TOOLS or tool.name in KNOWLEDGE_QUERY_TOOLS or tool.name in AUTHORED_RELATION_TOOLS or tool.name in CLEANUP_TOOLS or tool.name in RESULT_TOOLS or tool.name in EXTRACTION_PROFILE_TOOLS or tool.name in CONCEPT_TOOLS or tool.name in CORRESPONDENCE_TOOLS or tool.name in ("ontology_validate_draft", "ontology_query", "ontology_context", "ontology_review_query", "ontology_impact",
                                                                "ontology_review", "ontology_review_undo", "ontology_policy", "ontology_policy_undo"):
                 for field in ("domain", "viewpoint"):
                     schema["properties"].pop(field, None)
@@ -230,7 +260,10 @@ class TenantMCPServer(WikiMCPServer):
             supplied.pop("tenant", None)
             supplied.pop("profile", None)
             if (not validate_job_arguments(name, supplied) or not validate_extraction_arguments(name, supplied)
-                    or not validate_result_arguments(name, supplied)):
+                    or not validate_result_arguments(name, supplied)
+                    or not validate_document_management_arguments(name, supplied)
+                    or not validate_knowledge_query_arguments(name, supplied)
+                    or not validate_authored_relation_arguments(name, supplied)):
                 return _access_error("invalid_argument")
             if name in ("ontology_query", "ontology_context", "ontology_review_query", "ontology_impact"):
                 supplied.update(domain=scope.domain or "", viewpoint=scope.viewpoint or "")
@@ -243,8 +276,7 @@ class TenantMCPServer(WikiMCPServer):
                 if required not in {"read", "source_write", "write", "ontology_write", "ontology_review", "ontology_policy"}:
                     raise AccessDenied()
                 current = self.policy.authorize(credential, tenant, required, profile)
-                actor = {key: getattr(current, key) for key in (
-                    "user_id", "tenant", "profile_id", "domain", "viewpoint", "policy_revision")}
+                actor = access_dict(current)
                 current_job_access.update(actor)
                 return actor
             job_binding = _job_authorizer.set(current_job_actor)
@@ -256,11 +288,7 @@ class TenantMCPServer(WikiMCPServer):
                 _job_authorizer.reset(job_binding)
             if result.structured_content is not None:
                 # 적용한 사용자/tenant/관점/정책 버전만 응답에 덧붙인다. 인증 토큰은 포함하지 않는다.
-                return _result({**result.structured_content, "access": current_job_access or {
-                    "user_id": scope.user_id, "tenant": scope.tenant, "profile_id": scope.profile_id,
-                    "domain": scope.domain, "viewpoint": scope.viewpoint,
-                    "policy_revision": scope.policy_revision,
-                }})
+                return _result({**result.structured_content, "access": current_job_access or access_dict(scope)})
             return result
         except AccessDenied:
             return _access_error("access_denied")

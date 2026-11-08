@@ -7,7 +7,9 @@
 # ReviewStore는 호출할 함수를 모아 둔 입구다. self는 이 Store 객체이며 보조 모듈에 그대로 전달한다.
 # query의 실제 조합은 render.py, 원문 검토 저장은 commands.py, 전문가 판단 저장은 policy_commands.py를 읽는다.
 # 이곳의 짧은 return 함수들은 저장 로직을 복제하지 않고 해당 전문 모듈에 위임한다.
-from hashlib import sha256
+from core.common.storage_layout import knowledge_root
+from core.modules.ontology.storage import document_path
+from .contracts import MAX_REVIEW_BYTES
 from core.modules.ontology.store import OntologyStore
 from . import capture, policy_values, validation, render, commands, policy_commands
 from . import ledger as ledger_ops
@@ -20,13 +22,12 @@ class ReviewStore:
         # 전달받은 WikiStore와 같은 자료 공간의 OntologyStore를 연결한다. 사용자별 Store를 이곳에서 추정하지 않는다.
         self.store = store
         self.ontology = OntologyStore(store)
-        self.review_dir = store.data_dir / "_reviews"
+        self.review_dir = knowledge_root(store.data_dir, "reviews")
+        self.legacy_review_dir = store.data_dir / "_reviews"
+        self.review_dirs = (self.review_dir, self.legacy_review_dir)
 
     def _path(self, document):
-        self.store._document_path(self.store.wiki_dir, document)
-        path = self.review_dir / (sha256(document.encode("utf-8")).hexdigest() + ".json")
-        self.store._check_path(path)
-        return path
+        return document_path(self.store, document, "reviews", max_bytes=MAX_REVIEW_BYTES)
 
     def _read_bytes(self, document):
         return capture._read_bytes(self, document)
@@ -52,16 +53,29 @@ class ReviewStore:
     def _snapshot_locked(self, document):
         return capture._snapshot_locked(self, document)
 
-    def _captured_state(self, document, source, graph_raw, ledger_raw, history_revision):
+    def _captured_ledger(self, document, source, graph_raw, ledger_raw, history_revision, *, machine=None):
+        return capture.captured_ledger(self, document, source, graph_raw, ledger_raw, history_revision, machine=machine)
+
+    def _captured_state(self, document, source, graph_raw, ledger_raw, history_revision, *, validated_capture=None):
+        if validated_capture is not None:
+            return capture._captured_state(self, document, source, graph_raw, ledger_raw, history_revision,
+                                           validated_capture=validated_capture)
         return capture._captured_state(self, document, source, graph_raw, ledger_raw, history_revision)
 
-    def _query_captured(self, document, source, graph_raw, ledger_raw, history_revision, *, domain=None, viewpoint=None):
+    def _query_captured(self, document, source, graph_raw, ledger_raw, history_revision, *, domain=None, viewpoint=None,
+                        validated_capture=None):
+        if validated_capture is not None:
+            return capture._query_captured(self, document, source, graph_raw, ledger_raw, history_revision,
+                                          domain=domain, viewpoint=viewpoint, validated_capture=validated_capture)
         return capture._query_captured(self, document, source, graph_raw, ledger_raw, history_revision, domain=domain, viewpoint=viewpoint)
 
     def guard_generation(self, document, expected_state_revision=None):
         return capture.guard_generation(self, document, expected_state_revision)
 
-    def _render(self, source, graph_raw, ledger, tokens, domain=None, viewpoint=None, *, policies=True):
+    def _render(self, source, graph_raw, ledger, tokens, domain=None, viewpoint=None, *, policies=True, machine_capture=None):
+        if machine_capture is not None:
+            return render._render(self, source, graph_raw, ledger, tokens, domain, viewpoint, policies=policies,
+                                  machine_capture=machine_capture)
         return render._render(self, source, graph_raw, ledger, tokens, domain, viewpoint, policies=policies)
 
     def _apply_policies(self, result, ledger, domain, viewpoint):

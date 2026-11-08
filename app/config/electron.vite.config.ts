@@ -3,6 +3,7 @@ import { defineConfig } from 'electron-vite';
 import type { UserConfig } from 'electron-vite';
 import type { ConfigEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { userGuideAssets } from './userGuideAssets';
 
 const appRoot = resolve(import.meta.dirname, '..');
 
@@ -20,6 +21,7 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => {
     "base-uri 'none'",
     "form-action 'none'",
     "object-src 'none'",
+    "frame-src 'self'",
   ].join('; ');
 
   return {
@@ -56,6 +58,7 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => {
       server: { host: '127.0.0.1', port: 5173, strictPort: true },
       plugins: [
         react(),
+        userGuideAssets(),
         {
           name: 'wiki-content-security-policy',
           transformIndexHtml: (html: string): string =>

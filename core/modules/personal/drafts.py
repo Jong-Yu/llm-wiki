@@ -25,6 +25,8 @@ class DraftStore:
     def __init__(self, scope):
         self.scope, self.personal = scope, PersonalStore(scope)
         self.actor = {key: getattr(scope, key) for key in ("user_id", "tenant", "profile_id", "domain", "viewpoint", "policy_revision")}
+        if getattr(scope, "access_revision", None):
+            self.actor["access_revision"] = scope.access_revision
 
     def create(self, request_id, saved_result_id, *, before_commit):
         """기존 저장 결과에서 당시 전체 근거와 원래 생성문을 그대로 고정한다."""
@@ -58,7 +60,7 @@ class DraftStore:
     def _render(self, record):
         """현재 본문 뒤에 당시 문서/주장/판본·고정 근거 지문을 함께 반영한다."""
         current = current_content(record)
-        basis = record["data"]["basis"]
+        basis = workflow_io.materialize_basis(self.scope.store, record["data"]["basis"], self.actor)
         appendix = {"draft_id": record["id"], "source_result_id": record["data"]["source_result_id"],
             "basis_snapshot_revision": basis["snapshot_revision"], "basis_sha256": canonical_json_hash(basis),
             "documents": [{"document": value["document"], **{key: value["knowledge"][key]
@@ -97,6 +99,13 @@ class DraftStore:
             observation = workflow_io.observe_basis(self.scope.store, record["data"]["basis"], self.actor, coordination_locked=True)
             self._check_observation(observation, expected_basis_observation, acknowledge_changed_basis)
             content = self._render(record)
+            from core.modules.documents.metadata import parse_document, render_document
+            current = parse_document(self.scope.store.read(document).content) if expected_document_revision is not None else None
+            content = render_document(content, title=current.metadata["title"] if current and current.document_id else current_content(record)["title"],
+                document_id=current.document_id if current else None,
+                source=current.metadata.get("source") if current else None,
+                tags=current.metadata.get("tags", []) if current else [],
+                description=current.metadata.get("description") if current else None)
             # WikiStore는 UTF-8 1MiB 제한과 기존 전체 이력/CAS를 다시 검사한다.
             path, intent = workflow_io.start_request(self.personal, "draft-applications", draft_id, request_id,
                 payload, {"document": document, "draft_revision": expected_revision})
@@ -105,7 +114,8 @@ class DraftStore:
                 latest = workflow_io.observe_basis(self.scope.store, record["data"]["basis"], self.actor, wiki_locked=True, coordination_locked=True)
                 self._check_observation(latest, expected_basis_observation, acknowledge_changed_basis)
             try:
-                result = self.scope.store.save(document, content, expected_revision=expected_document_revision, before_commit=guard)
+                result = self.scope.store.save(document, content, expected_revision=expected_document_revision, before_commit=guard,
+                    actor=self.actor, origin={"kind": "ai", "tool": "result-draft"}, reason="Apply personal result draft")
             except (RevisionConflictError, PersonalConflictError, AccessDenied, PolicyError, StorageBusyError, ValueError) as error:
                 files.write_json(self.scope.store, path / "intent.json", {**intent, "state": "rejected", "saved": False})
                 raise error
@@ -113,6 +123,7 @@ class DraftStore:
                 # 파일 교체 후 장애인지 구별하지 못하면 pending을 남기고 쓰기를 반복하지 않는다.
                 return intent
             receipt = {"document": document, "source_revision": result.revision,
+                "audit_status": result.audit_status, "audit_error": result.audit_error,
                 "history_id": result.history_path.name if result.history_path else None, "changed": result.changed,
                 "draft_id": draft_id, "draft_revision": expected_revision,
                 "source_result_id": record["data"]["source_result_id"],

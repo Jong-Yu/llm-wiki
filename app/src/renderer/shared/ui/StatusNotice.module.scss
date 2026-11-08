@@ -1,23 +1,23 @@
 .notice {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--wiki-space-16);
-  padding: var(--wiki-space-16);
-  border: var(--wiki-border-width-default) solid
-    var(--wiki-color-border-default);
+  gap: var(--wiki-space-8) var(--wiki-space-12);
+  padding: var(--wiki-space-12);
+  border: 0;
   border-inline-start: var(--wiki-space-3) solid var(--notice-accent);
-  border-radius: var(--wiki-radius-5);
+  border-radius: var(--wiki-component-control-radius);
   color: var(--wiki-color-text-primary);
   background: var(--notice-background);
   overflow-wrap: anywhere;
 }
 .info {
-  --notice-accent: var(--wiki-color-action-primary);
-  --notice-background: var(--wiki-color-action-surface);
+  --notice-accent: var(--wiki-color-text-secondary);
+  --notice-background: transparent;
 }
 .success {
   --notice-accent: var(--wiki-color-status-success);
-  --notice-background: var(--wiki-color-status-success-surface);
+  --notice-background: transparent;
 }
 .warning {
   --notice-accent: var(--wiki-color-status-warning);
@@ -30,13 +30,64 @@
 .content {
   flex: 1;
   min-width: 0;
+  flex-basis: 160px;
 }
 .title {
   display: block;
   margin-bottom: var(--wiki-space-4);
   color: var(--notice-accent);
-  font-weight: var(--wiki-font-weight-medium);
+  font-weight: var(--wiki-font-weight-semibold);
 }
 .action {
   flex-shrink: 0;
+}
+
+.icon {
+  color: var(--notice-accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+// 동작 버튼을 본문 아래 전체 폭으로 내립니다.
+.stacked .action {
+  flex-basis: 100%;
+}
+
+// 둥근 테두리 상자: 바탕과 테두리를 의미 색으로 옅게 칠합니다.
+.box {
+  border: 1px solid var(--notice-border);
+  border-inline-start-width: 1px;
+  border-radius: 10px;
+  padding: var(--wiki-space-8) var(--wiki-space-12);
+  background: var(--notice-background);
+  &.info {
+    --notice-accent: var(--wiki-color-action-primary);
+    --notice-background: var(--wiki-color-action-surface);
+    --notice-border: color-mix(
+      in srgb,
+      var(--wiki-color-action-primary) 45%,
+      transparent
+    );
+  }
+  &.warning {
+    --notice-border: color-mix(
+      in srgb,
+      var(--wiki-color-status-warning) 55%,
+      transparent
+    );
+  }
+  &.error {
+    --notice-border: color-mix(
+      in srgb,
+      var(--wiki-color-status-danger) 55%,
+      transparent
+    );
+  }
+  &.success {
+    --notice-border: color-mix(
+      in srgb,
+      var(--wiki-color-status-success) 55%,
+      transparent
+    );
+  }
 }

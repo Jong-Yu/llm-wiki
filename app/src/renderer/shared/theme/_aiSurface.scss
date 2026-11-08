@@ -1,0 +1,24 @@
+// 채팅과 AI 설정 안에서만 시안의 색을 공용 상태·입력 부품에 전달한다.
+@mixin palette {
+  --wiki-color-surface-canvas: var(--wiki-color-ai-canvas);
+  --wiki-color-surface-panel: var(--wiki-color-ai-panel);
+  --wiki-color-surface-subtle: var(--wiki-color-ai-card);
+  --wiki-color-border-default: var(--wiki-color-ai-border);
+  --wiki-color-border-control: var(--wiki-color-ai-control);
+  --wiki-color-text-primary: var(--wiki-color-ai-text);
+  --wiki-color-text-secondary: var(--wiki-color-ai-muted);
+  --wiki-color-action-primary: var(--wiki-color-ai-blue);
+  --wiki-color-button-primary-background: var(--wiki-color-ai-fill);
+  --wiki-color-action-surface: var(--wiki-color-ai-blue-surface);
+  --wiki-color-status-success: var(--wiki-color-ai-success);
+  --wiki-color-status-success-surface: var(--wiki-color-ai-success-surface);
+  --wiki-color-status-warning: var(--wiki-color-ai-warning);
+  --wiki-color-status-warning-surface: var(--wiki-color-ai-warning-surface);
+  --wiki-color-status-danger: var(--wiki-color-ai-danger);
+  --wiki-color-status-danger-surface: var(--wiki-color-ai-danger-surface);
+  --wiki-color-relation-machine: var(--wiki-color-ai-blue);
+  --wiki-color-relation-machine-surface: var(--wiki-color-ai-blue-surface);
+  --wiki-color-surface-hover: var(--wiki-color-ai-card);
+  color: var(--wiki-color-text-primary);
+  background-color: var(--wiki-color-surface-canvas);
+}

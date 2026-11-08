@@ -19,7 +19,7 @@ def _document_matches(self, entry, needle, include_history, omissions=None):
     document = entry["document"]
     source = entry.get("source")
     if source:
-        for index, line in enumerate(source["content"].splitlines(), 1):
+        for index, line in enumerate(source.get("body", source["content"]).splitlines(), source.get("body_start_line", 1)):
             if needle not in _normalized(line) and needle not in _normalized(document):
                 continue
             if not line:

@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field, StrictBool, StrictInt, StrictStr
+from core.common.access import access_dict
 
 from core.modules.access.policy import AccessDenied
 from core.modules.knowledge.concepts import ConceptStore
@@ -25,8 +26,7 @@ def _register_concept_tools(server, get_store):
         scope = _authorized_scope.get()
         if scope is None:
             raise AccessDenied()
-        actor = {"user_id": scope.user_id, "tenant": scope.tenant, "profile_id": scope.profile_id,
-                 "domain": scope.domain, "viewpoint": scope.viewpoint, "policy_revision": scope.policy_revision}
+        actor = access_dict(scope)
         return _invoke(store, name, lambda: getattr(ConceptStore(store, actor=actor), method)(
             **arguments, tenant=scope.tenant, policy_revision=scope.policy_revision,
             profile={"profile_id": scope.profile_id, "domain": scope.domain, "viewpoint": scope.viewpoint},

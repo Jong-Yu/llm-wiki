@@ -5,6 +5,8 @@
 # owner/self는 이 Store를 보조 함수에 넘기는 인자이며 각 파일이 제각기 저장소를 새로 만드는 구조가 아니다.
 
 from copy import deepcopy
+from core.common.storage_layout import knowledge_root
+from core.modules.ontology.storage import existing_path
 
 from core.modules.ontology.store import OntologyStore
 from core.modules.reviews.store import ReviewStore
@@ -24,13 +26,14 @@ class CorrespondenceStore:
         self.actor = deepcopy(actor)
         self.reviews = ReviewStore(wiki_store)
         self.ontology = OntologyStore(wiki_store)
-        self.correspondence_dir = wiki_store.data_dir / "_reviews" / "correspondences"
+        self.correspondence_dir = knowledge_root(wiki_store.data_dir, "correspondences")
+        self.legacy_correspondence_dir = wiki_store.data_dir / "_reviews" / "correspondences"
+        self.correspondence_dirs = (self.correspondence_dir, self.legacy_correspondence_dir)
 
     def _path(self, correspondence_id):
         schema.identifier(correspondence_id, "correspondence_id")
         target = self.correspondence_dir / (correspondence_id + ".json")
-        self.store._check_path(target)
-        return target
+        return existing_path(self.store, target, [self.legacy_correspondence_dir / (correspondence_id + ".json")])
 
     def _snapshot_schema(self, value, documents, lane):
         return ledger_ops._snapshot_schema(self, value, documents, lane)

@@ -5,30 +5,46 @@
 """
 
 from typing import Annotated, Literal
+from hashlib import sha256
 from fastapi import APIRouter, Depends, Path, Query, Request
 from core.api.dependencies import authorized, credential, access_value, envelope, scope_key
-from core.api.operations import json_operation, body_schema, reauthorize
+from core.api.operations import json_operation, body_schema, commit_guard as _guard
 from core.api.schemas import Envelope
+from core.common.json_codec import canonical_json_hash
 from pydantic import JsonValue
 from core.modules.access.policy import AccessDenied
 from core.modules.personal.store import PersonalStore, PersonalConflictError
+from core.modules.personal.question_basis import is_basis_reference
+from core.modules.personal.workflow_io import materialize_basis
 from core.modules.knowledge.aggregation import prepare_question
 from core.modules.reviews.store import ReviewStore
 from .schemas import (PersonalProfile, PersonalList, PersonalReceipt, CreateConversation, AppendTurn,
     CreateSavedResult, CreateComparison, CompleteComparison)
+from .comparison_router import router as comparison_router
 
 router = APIRouter(tags=["personal-records"])
 RecordId = Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
 Response = Envelope[dict[str, JsonValue]]
 
 
-def _basis(scope, value):
+def _basis(scope, value, *, question=None):
     """현재 허용 관점으로 전체 근거를 읽으며 누락/부분 준비를 저장하지 않는다."""
     if value.profile is not None and value.profile != scope.profile_id:
         raise AccessDenied()
-    basis = prepare_question(scope.store, access_value(scope), **value.model_dump(exclude={"profile"}))
+    arguments = value.model_dump(exclude={"profile", "mode"})
+    if value.retrieval_scope is not None and question is not None:
+        # 형식 안내/첨부와 분리한 질문은 실제 발언의 정확한 prefix인 경우에만 사용한다.
+        hint = value.lookup_question
+        arguments["lookup_question"] = hint if hint and question.startswith(hint) else question
+    basis = prepare_question(scope.store, access_value(scope), **arguments)
+    if value.retrieval_scope is not None and question is not None:
+        basis["retrieval"]["question_sha256"] = sha256(question.encode()).hexdigest()
+        basis["snapshot_revision"] = canonical_json_hash({k: v for k, v in basis.items() if k != "snapshot_revision"})
     if not basis["can_prepare"]:
         raise ValueError("Question context is incomplete; inspect its preparation first")
+    if value.mode == "on_demand":
+        from core.modules.personal.question_basis import QuestionBasisStore
+        return QuestionBasisStore(scope).freeze(basis)
     return basis
 
 
@@ -38,11 +54,6 @@ def _replayed(store, kind, body, record_id=None):
         return store.receipt(kind, body.request_id, record_id=record_id, payload=body.model_dump())
     except FileNotFoundError:
         return None
-
-
-def _guard(request, tenant, token, permission, scope):
-    """실제 파일 교체 직전 호출할 현재 권한 검사 함수를 만든다."""
-    return lambda: reauthorize(request, tenant, token, permission, scope.profile_id, expected=scope)
 
 
 def _turn(record, turn_id, *, role=None):
@@ -104,11 +115,13 @@ async def append_turn(request: Request, tenant: str, record_id: RecordId, token:
         if replay is not None:
             return replay
         record = store.read("conversations", record_id)["record"]
-        basis = _basis(scope, body.context_request) if body.role == "user" else None
+        basis = _basis(scope, body.context_request, question=body.content) if body.role == "user" else None
         if body.role == "assistant":
             basis = _turn(record, body.reply_to, role="user")["basis"]
         event = {"role": body.role, "content": body.content, "status": body.status, "reply_to": body.reply_to,
             "basis": basis, "origin": "client_reported", "human_approval": False, "basis_storage": "embedded_full_snapshot"}
+        if is_basis_reference(basis):
+            event["basis_storage"] = "immutable_snapshot_reference"
         return store.append("conversations", record_id, body.request_id, body.expected_revision,
             body.model_dump(), event, access_value(scope),
             before_commit=_guard(request, tenant, token, "conversation_write", scope))
@@ -153,6 +166,8 @@ async def save_result(request: Request, tenant: str, token: Annotated[str, Depen
         data = {"title": body.title, "content": content, "basis": basis, "origin": "client_reported",
             "conversation_id": body.conversation_id, "turn_id": body.turn_id, "human_approval": False,
             "basis_storage": "embedded_full_snapshot", "answer_provenance": answer_provenance}
+        if is_basis_reference(basis):
+            data["basis_storage"] = "immutable_snapshot_reference"
         return store.create("saved-results", body.request_id, body.model_dump(), data, access_value(scope),
             before_commit=_guard(request, tenant, token, "result_write", scope))
     return await json_operation(request, tenant, token, CreateSavedResult, "result_write", operation, created=True)
@@ -182,7 +197,9 @@ async def create_comparison(request: Request, tenant: str, token: Annotated[str,
             return replay
         baseline = store.read("saved-results", body.baseline_result_id)["record"]["data"]["basis"]
         current = _basis(scope, body.context_request)
-        old_claims, new_claims = _claims(baseline), _claims(current)
+        actor = access_value(scope)
+        old_claims = _claims(materialize_basis(scope.store, baseline, actor))
+        new_claims = _claims(materialize_basis(scope.store, current, actor))
         old_documents = {item["document"] for item in baseline["documents"]}
         new_documents = {item["document"] for item in current["documents"]}
         if old_documents != new_documents:
@@ -209,13 +226,14 @@ async def complete_comparison(request: Request, tenant: str, record_id: RecordId
         if replay is not None:
             return replay
         record = store.read("comparisons", record_id)["record"]
-        captured = {item["document"]: item["knowledge"] for item in record["data"]["current"]["documents"]}
+        full_current = materialize_basis(scope.store, record["data"]["current"], access_value(scope))
+        captured = {item["document"]: item["knowledge"] for item in full_current["documents"]}
         if len({(item.document, item.claim_id) for item in body.reviewed_claims}) != len(body.reviewed_claims):
             raise ValueError("Select unique reviewed claims")
         evidence = []
         for reference in body.reviewed_claims:
             expected = captured.get(reference.document)
-            if expected is None or (reference.document, reference.claim_id) not in _claims(record["data"]["current"]):
+            if expected is None or (reference.document, reference.claim_id) not in _claims(full_current):
                 raise ValueError("Claim is outside the explicit comparison")
             current = ReviewStore(scope.store).query(reference.document, domain=scope.domain, viewpoint=scope.viewpoint)
             if current["state_revision"] != reference.state_revision or current["source_revision"] != expected["source_revision"] or current["graph_revision"] != expected["graph_revision"]:
@@ -235,7 +253,10 @@ async def complete_comparison(request: Request, tenant: str, record_id: RecordId
 
 
 @router.get("/personal-requests/{kind}/{request_id}", response_model=Response)
-def receipt(kind: Literal["conversations", "saved-results", "comparisons", "result-drafts", "question-runs"], request_id: RecordId,
+def receipt(kind: Literal["conversations", "saved-results", "comparisons", "result-drafts", "question-runs", "knowledge-comparisons"], request_id: RecordId,
             query: Annotated[PersonalReceipt, Query()], scope=Depends(authorized)):
     """생성/추가 응답이 유실됐을 때 자기 요청의 저장 여부만 확인한다."""
     return envelope({**PersonalStore(scope).receipt(kind, request_id, record_id=query.record_id), "access": access_value(scope)})
+
+
+router.include_router(comparison_router)

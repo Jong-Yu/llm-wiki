@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import JsonValue
 from core.api.dependencies import authorized, credential, access_value, envelope
-from core.api.operations import body_schema, json_operation, reauthorize
+from core.api.operations import body_schema, json_operation, reauthorize, commit_guard as guard
 from core.api.schemas import Envelope
 from core.modules.analysis_proposals.store import ProposalStore
 from core.modules.analysis_proposals.executions import ProposalExecutionStore
@@ -18,11 +18,6 @@ Response = Envelope[dict[str, JsonValue]]
 def service(request, scope):
     """현재 서버가 확인한 사용자·관점과 게시 규약만 Store에 넘긴다."""
     return ProposalStore(scope.store, access_value(scope), rulesets=request.app.state.rulesets)
-
-
-def guard(request, tenant, token, permission, scope):
-    """실제 공개 직전 호출할 권한 재확인 함수다. 파일 잠금을 다시 잡지 않는다."""
-    return lambda: reauthorize(request, tenant, token, permission, scope.profile_id, expected=scope)
 
 
 def execution_service(request, scope):

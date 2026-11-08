@@ -34,7 +34,7 @@ export function registerAnalysisProposalHandlers(
           ok: false,
           error: {
             code: 'invalid_request',
-            message: '추출안 요청을 확인해 주세요.',
+            message: '추출 결과 요청을 확인해 주세요.',
           },
         };
       return service.execute(parsed.data);

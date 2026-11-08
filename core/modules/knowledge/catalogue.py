@@ -14,9 +14,10 @@ import json
 from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.modules.documents.listing import (
     CatalogChangedError, InvalidCursorError, MAX_CURSOR_CHARACTERS, MAX_PAGE_SIZE,
-    _decode_cursor, _error_code, _scan, list_documents,
+    _decode_cursor, _error_code, _scan, _indexed_keys, list_documents,
 )
 from core.modules.sources.store import SourceStore
+from core.modules.documents.changes import document_fields
 
 
 def _cursor(value):
@@ -52,7 +53,7 @@ def list_catalogue(store, *, tenant, scope_key, limit=20, cursor=None):
     sources = SourceStore(store)
     scope_hash = sha256(scope_key.encode("utf-8")).hexdigest()
     with sources._coordination_lock():
-        catalogs = sources._capture_catalog_locked()
+        catalogs = sources._capture_summaries_locked()
         if not catalogs:
             if isinstance(cursor, str) and cursor.startswith("sc1_"):
                 raise CatalogChangedError()
@@ -64,23 +65,27 @@ def list_catalogue(store, *, tenant, scope_key, limit=20, cursor=None):
                 "wiki": records, "skipped": skipped, "truncated": truncated})
             entries = []
             for catalog in catalogs:
-                current = next(v for v in catalog["versions"] if v["source_version"] == catalog["current_version"])
-                entries.append(("source:" + catalog["source_id"], {"kind": "source", "source_id": catalog["source_id"],
-                    "title": catalog["title"], "source_version": current["source_version"],
-                    "source_sha256": current["source_sha256"], "size_bytes": current["size_bytes"],
-                    "format": current["format"], "registration_revision": catalog["registration_revision"],
-                    "documents": catalog["documents"], "analysis_status": "not_started"}))
+                entries.append(("source:" + catalog["source_id"], catalog["item"]))
             entries.extend(("wiki:" + record[0], None) for record in records)
             entries.sort(key=lambda entry: entry[0])
             keys = [key for key, _ in entries]
             offset = 0
+            after = None
             if cursor is not None:
                 after = _position(cursor, tenant=tenant, scope_hash=scope_hash, basis=basis)
                 try:
                     offset = keys.index(after) + 1
                 except ValueError:
                     raise InvalidCursorError() from None
-            page = entries[offset:offset + limit]
+            wiki_signatures = {record[0]: canonical_json_hash(record) for record in records}
+            page_keys = _indexed_keys(store, "catalogue", scope_hash,
+                [(key, canonical_json_hash(source) if source is not None else
+                  wiki_signatures[key[len("wiki:"):]])
+                 for key, source in entries],
+                after=after, limit=limit)
+            by_key = dict(entries)
+            page = ([(key, by_key[key]) for key in page_keys] if page_keys is not None
+                    else entries[offset:offset + limit])
             items = []
             for key, source in page:
                 if source is not None:
@@ -89,7 +94,9 @@ def list_catalogue(store, *, tenant, scope_key, limit=20, cursor=None):
                 document = key[len("wiki:"):]
                 try:
                     snapshot = store.read(document)
-                    items.append({"document": document, "revision": snapshot.revision, "source_status": "unlinked"})
+                    fields = document_fields(store, document, snapshot)
+                    items.append({"document": document, "revision": snapshot.revision,
+                        "source_status": "linked" if fields["metadata"].get("source") else "unlinked", **fields})
                 except (OSError, ValueError) as error:
                     skipped.append({"document": document, "code": _error_code(error)})
             more = offset + len(page) < len(entries)

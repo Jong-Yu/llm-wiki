@@ -97,8 +97,42 @@ def examples():
                 "entities": [{"id": identifier, "type": kind, "label": label, "evidence": label}
                              for identifier, kind, label in labels],
                 "relations": [relation], "relation_candidates": [], "attributes": attributes}})
+    rows.append(_policy_example(document))
     return {"kind": "development_example", "examples": rows,
             "note": "버전별 형식/인용 개발 예시이며 실제 의미 정확성 평가나 사람의 승인이 아니다."}
+
+
+def _policy_example(document):
+    """계획 주장·미지원 연결·검토 후보를 구분하는 합성 예시다."""
+    plan = "시험 계획: 시스템 A는 다음 달 장치 B를 사용할 예정이다."
+    replacement = "대체 계획: 시스템 A는 다음 달 시스템 C를 대체할 예정이다."
+    review = "역할 검토: 운영팀 D는 시스템 A의 도입을 검토한다. 장치 B의 운영 책임자는 아직 정하지 않았다."
+    source = "\n".join((plan, replacement, review))
+    context = {"domain": None, "viewpoints": []}
+    provenance = {"source_entity": None, "attributed_to": None, "basis": None}
+    metadata = {"context": context, "provenance": provenance}
+    planned = {**constants._QUALIFIER_DEFAULTS, "modality": "planned", "time": "다음 달"}
+    return {"document": document, "source": source, "source_revision": sha256(source.encode()).hexdigest(),
+        "submission": {"schema_version": 3,
+            "entities": [{"id": identifier, "type": kind, "label": label, "evidence": label}
+                for identifier, kind, label in (("a", "system", "시스템 A"), ("b", "physical_object", "장치 B"),
+                                               ("c", "system", "시스템 C"), ("d", "organization", "운영팀 D"))],
+            "relations": [{"subject": "a", "predicate": "uses", "object": "b", "evidence": plan,
+                           "qualifiers": planned, **metadata}],
+            "attributes": [
+                {"id": "replacement", "subject": "a", "property": "대체 계획", "datatype": "text",
+                 "value": replacement, "unit": None, "evidence": replacement, "qualifiers": planned, **metadata},
+                {"id": "role_review", "subject": "d", "property": "역할 검토", "datatype": "text",
+                 "value": review, "unit": None, "evidence": review,
+                 "qualifiers": dict(constants._QUALIFIER_DEFAULTS), **metadata}],
+            "relation_candidates": [{"id": "operator", "subject": "d", "predicate": "responsible_for", "object": "b",
+                "evidence": review, "qualifiers": dict(constants._QUALIFIER_DEFAULTS), **metadata,
+                "reason": "운영팀 D는 같은 도입 작업을 검토하지만 장치 B의 운영 책임은 미정이다. 책임을 맡는다는 가정에는 담당 지정 자료가 필요하다.",
+                "question": "운영팀 D가 장치 B의 운영 책임을 맡는지 확인·수정·기각·보류해 주세요. 아직 정해지지 않았다면 보류합니다."}]},
+        "representation_notes": [
+            "uses는 원문에 명시된 계획 주장이다. 실제 사용이나 AI 추정으로 바꾸지 않는다.",
+            "대체/검토 동작은 이 스키마의 구체 술어로 표현할 수 없어 텍스트로 보존했다. related_to로 약화하지 않는다. 실제 제출에서는 해당 위치와 schema_limit, 전문가 질문을 diagnostics에 남긴다.",
+            "responsible_for 후보의 인용은 검토 맥락이지 책임 확정의 증거가 아니다. 미정은 기각이나 실제 비책임을 뜻하지 않는다."]}
 
 
 def components(schema):

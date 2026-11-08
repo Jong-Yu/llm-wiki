@@ -12,6 +12,7 @@ from .contracts import CorrespondenceValidationError
 from .state import _scope
 from .state import _states
 from hashlib import sha256
+from core.modules.documents.metadata import parse_document
 
 
 def _validate_anchor(owner, anchor, ctx):
@@ -24,6 +25,8 @@ def _validate_anchor(owner, anchor, ctx):
         raise CorrespondenceValidationError("Anchor source is missing")
     lines = content.splitlines(keepends=True)
     start, end = anchor["start_line"], anchor["end_line"]
+    if start < parse_document(content).body_start_line:
+        raise CorrespondenceValidationError("Anchor evidence must be in the document body")
     if end > len(lines):
         raise CorrespondenceValidationError("Anchor line range is outside source")
     section = "".join(lines[start - 1:end])

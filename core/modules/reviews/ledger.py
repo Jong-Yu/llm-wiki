@@ -9,9 +9,11 @@
 from copy import deepcopy
 import json
 import os
+from core.common.read_changes import before_change
 from core.common.json_codec import canonical_json_bytes as _encode, canonical_json_hash as _hash
 from core.modules.ontology.snapshots import _unique_object, _reject_constant
 from . import contracts, events, values
+from core.modules.ontology.storage import document_identity, validate_document_id
 from .contracts import ReviewValidationError, ReviewCorruptError, ReviewLimitError
 from .values import _token, _reason, _actor
 from .state import _is_policy, _scope, _policy_key, _epoch, _inactive_policy, _policy_visible
@@ -20,15 +22,18 @@ from .state import _is_policy, _scope, _policy_key, _epoch, _inactive_policy, _p
 def _ledger(self, raw, document):
     # raw가 없으면 신규 빈 원장을 만들 값만 반환한다. 기존 raw가 있으면 처음부터 모든 이벤트/연결 지문을 검사한다.
     if raw is None:
-        return {"version": 1, "document": document, "events": []}
+        return {"version": 1, "document": document, "document_id": document_identity(self.store, document), "events": []}
     try:
         ledger = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object,
                             parse_constant=_reject_constant)
-        if (not isinstance(ledger, dict) or set(ledger) != {"version", "document", "events"}
+        if (not isinstance(ledger, dict) or set(ledger) - {"document_id", "cleanup_events", "relation_events"} != {"version", "document", "events"}
                 or type(ledger["version"]) is not int or ledger["version"] not in (1, 2)
                 or ledger["document"] != document or not isinstance(ledger["events"], list)
-                or not 1 <= len(ledger["events"]) <= contracts.MAX_REVIEW_EVENTS):
+                or not 0 <= len(ledger["events"]) <= contracts.MAX_REVIEW_EVENTS
+                or (not ledger["events"] and not ledger.get("relation_events"))):
             raise ReviewValidationError("invalid review ledger")
+        if ledger.get("document_id") is not None:
+            validate_document_id(ledger["document_id"])
         previous_hash, seen, latest = None, {}, {}
         for event in ledger["events"]:
             if not isinstance(event, dict):
@@ -85,11 +90,18 @@ def _ledger(self, raw, document):
                 seen[event["id"]] = event
                 previous_hash = event["hash"]
                 continue
+            # These checks use the same document, collection, entities and
+            # source revision throughout this event. Reuse only successful
+            # checks of exactly typed JSON values; reset for the next event.
+            validated_values = {_encode(target["claim"])}
             for name in ("before", "after"):
                 state = event[name]
                 if not isinstance(state, dict) or set(state) != {"decision", "value"} or state["decision"] not in contracts._DECISIONS:
                     raise ReviewValidationError("invalid review state")
-                self._check_saved_value(document, state["value"], event["collection"], target["entities"], event["source_revision"])
+                encoded_value = _encode(state["value"])
+                if encoded_value not in validated_values:
+                    self._check_saved_value(document, state["value"], event["collection"], target["entities"], event["source_revision"])
+                    validated_values.add(encoded_value)
             key = (event["claim_id"], _epoch(event))
             previous = latest.get(key)
             expected_before = ({"decision": "unreviewed", "value": target["claim"]}
@@ -112,6 +124,10 @@ def _ledger(self, raw, document):
             seen[event["id"]] = event
             latest[key] = event
             previous_hash = event["hash"]
+        from .cleanup_state import validate
+        validate(ledger)
+        from .relations import validate as validate_relations
+        validate_relations(self, ledger)
         return ledger
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError, UnicodeError) as error:
         raise ReviewCorruptError("Stored review history is malformed; no history was replaced") from error
@@ -120,14 +136,16 @@ def _ledger(self, raw, document):
 def _commit_locked(self, document, ledger, cleanup_failures):
     """호출자가 잡은 잠금 안에서 전체 원장을 보존한 새 파일로 조건부 작업을 마무리한다."""
     # 완성된 전체 원장을 한도 확인 후 공개한다. cleanup_failures 목록은 이미 성공한 공개와 임시 정리 문제를 구분한다.
-    if len(ledger["events"]) > contracts.MAX_REVIEW_EVENTS:
+    if len(ledger["events"]) + len(ledger.get("cleanup_events", [])) + len(ledger.get("relation_events", [])) > contracts.MAX_REVIEW_EVENTS:
         raise ReviewLimitError("Review history reached its event limit; nothing was discarded")
     encoded = _encode(ledger)
     if len(encoded) > contracts.MAX_REVIEW_BYTES:
         raise ReviewLimitError("Review history reached its byte limit; nothing was discarded")
-    self.store._mkdir(self.review_dir)
-    with self.store._staged_file(self.review_dir, encoded, cleanup_failures) as staged:
-        os.replace(staged.path, self._path(document))
+    path = self._path(document)
+    before_change(self.store, "wiki", path.relative_to(self.store.data_dir).as_posix())
+    self.store._mkdir(path.parent)
+    with self.store._staged_file(path.parent, encoded, cleanup_failures) as staged:
+        os.replace(staged.path, path)
         staged.consumed = True
     return encoded
 

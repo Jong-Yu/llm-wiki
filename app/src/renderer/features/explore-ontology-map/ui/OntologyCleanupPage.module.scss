@@ -1,0 +1,231 @@
+.page {
+  width: 100%;
+  box-sizing: border-box;
+}
+.root {
+  display: grid;
+  gap: var(--wiki-space-16);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.root p,
+.root h3 {
+  margin: 0;
+}
+.root select,
+.root textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
+  font: inherit;
+  line-height: 20px;
+}
+.scope,
+.form label {
+  display: grid;
+  gap: 6px;
+}
+.root > button,
+.form button {
+  justify-self: start;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  .scope {
+    flex: 1 1 240px;
+    max-width: 480px;
+    min-width: 0;
+  }
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 36px;
+    line-height: 20px;
+  }
+}
+.muted {
+  color: var(--wiki-color-text-secondary);
+}
+.notice,
+.error,
+.success {
+  padding: 12px;
+  border-radius: 0;
+  border-left: 2px solid currentColor;
+  display: grid;
+  gap: 8px;
+}
+.notice {
+  background-color: var(--wiki-color-status-warning-surface);
+  color: var(--wiki-color-status-warning);
+}
+.error {
+  background-color: var(--wiki-color-status-danger-surface);
+  color: var(--wiki-color-status-danger);
+}
+.success {
+  background-color: var(--wiki-color-status-success-surface);
+  color: var(--wiki-color-status-success);
+}
+.capabilities,
+.items,
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0;
+}
+.capabilities {
+  gap: 12px;
+  padding-top: 12px;
+}
+.capabilities li {
+  display: grid;
+  gap: 4px;
+}
+.capabilities span {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+}
+.items > li {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  border-radius: 0;
+}
+.items {
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.items > li[data-selected] {
+  background-color: var(--wiki-color-action-surface);
+  box-shadow: inset 3px 0 var(--wiki-color-action-primary);
+}
+.items input {
+  width: 16px;
+  height: 16px;
+  margin: 4px 0;
+  flex: none;
+}
+.itemContent {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.itemTitle {
+  display: block;
+  min-height: 24px;
+  cursor: pointer;
+}
+.itemContent details {
+  font-size: 12px;
+  line-height: 20px;
+}
+.itemContent details > p,
+.itemContent details > dl {
+  margin-top: 12px;
+}
+.itemContent summary {
+  width: fit-content;
+  color: var(--wiki-color-text-secondary);
+}
+.itemContent > span,
+.history time {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+}
+.itemContent blockquote {
+  margin: 8px 0;
+  border-left: 2px solid var(--wiki-color-border-default);
+  padding-left: 12px;
+  white-space: pre-wrap;
+}
+.itemContent dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+.itemContent dl > div {
+  display: contents;
+}
+.itemContent dd {
+  margin: 0;
+}
+.history > li {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  border-radius: 0;
+}
+.history details .itemContent {
+  margin-top: 12px;
+}
+.root summary {
+  cursor: pointer;
+}
+.empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+}
+.form {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  padding-top: 16px;
+}
+.form button[type='submit'] {
+  min-height: 36px;
+  line-height: 20px;
+  background-color: var(--wiki-color-button-primary-background);
+  border-color: var(--wiki-color-button-primary-background);
+  color: var(--wiki-color-button-primary-foreground);
+  &:hover:not(:disabled) {
+    background-color: var(--wiki-color-button-primary-hover-background);
+  }
+}
+.previewBody {
+  display: grid;
+  gap: 16px;
+}
+.capabilitySummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+  > div {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  dt {
+    color: var(--wiki-color-text-secondary);
+  }
+  dd {
+    margin: 0;
+    font-weight: 600;
+  }
+}
+.excludedTypes {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.root select {
+  min-height: var(--wiki-component-control-height);
+  padding-right: 36px;
+}

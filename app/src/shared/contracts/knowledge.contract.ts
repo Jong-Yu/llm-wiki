@@ -10,11 +10,13 @@ export type KnowledgeJson = z.infer<typeof json>;
 export type KnowledgeValue = z.infer<typeof knowledgeValueSchema>;
 
 // 스키마 세대별 한정어·속성·출처 필드는 catchall로 원형을 보존합니다.
-const entity = z.object({ id: text, label: text, type: text }).catchall(json);
+export const knowledgeEntitySchema = z
+  .object({ id: text, label: text, type: text })
+  .catchall(json);
 export const knowledgeGraphSchema = z
   .object({
     status: text,
-    entities: z.array(entity),
+    entities: z.array(knowledgeEntitySchema),
     relations: z.array(knowledgeValueSchema),
     attributes: z.array(knowledgeValueSchema),
     relation_candidates: z.array(knowledgeValueSchema),
@@ -32,9 +34,8 @@ export const knowledgeClaimSchema = z
     needs_review: z.boolean(),
   })
   .catchall(json);
-export type KnowledgeGraph = z.infer<typeof knowledgeGraphSchema>;
 export type KnowledgeClaim = z.infer<typeof knowledgeClaimSchema>;
-export type KnowledgeEntity = z.infer<typeof entity>;
+export type KnowledgeEntity = z.infer<typeof knowledgeEntitySchema>;
 export const knowledgeRequestSchema = z.strictObject({
   connectionId: text,
   document: text.refine(isDocumentPath),
@@ -46,6 +47,14 @@ const rawAccess = z.object({
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
   policy_revision: revision,
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 const rawKnowledge = z.object({
   document: text.refine(isDocumentPath),
@@ -58,6 +67,11 @@ const rawKnowledge = z.object({
   machine_graph: knowledgeGraphSchema,
   effective_graph: knowledgeGraphSchema,
   claims: z.array(knowledgeClaimSchema),
+  current_claims: z.array(knowledgeClaimSchema).optional(),
+  current_pending_history: z.array(text).optional(),
+  cleanup: knowledgeValueSchema.optional(),
+  authored_relations: z.array(knowledgeValueSchema).optional(),
+  relation_history: z.array(knowledgeValueSchema).optional(),
   policies: z.array(knowledgeValueSchema),
   history: z.array(knowledgeValueSchema),
   pending_history: z.array(text),
@@ -81,6 +95,11 @@ export const documentKnowledgeSchema = z.object({
   machineGraph: knowledgeGraphSchema,
   effectiveGraph: knowledgeGraphSchema,
   claims: z.array(knowledgeClaimSchema),
+  currentClaims: z.array(knowledgeClaimSchema).optional(),
+  currentPendingHistory: z.array(text).optional(),
+  cleanup: knowledgeValueSchema.optional(),
+  authoredRelations: z.array(knowledgeValueSchema).optional(),
+  relationHistory: z.array(knowledgeValueSchema).optional(),
   policies: z.array(knowledgeValueSchema),
   history: z.array(knowledgeValueSchema),
   pendingHistory: z.array(text),
@@ -136,6 +155,11 @@ export function parseDocumentKnowledgeResponse(
     machineGraph: data.machine_graph,
     effectiveGraph: data.effective_graph,
     claims: data.claims,
+    currentClaims: data.current_claims,
+    currentPendingHistory: data.current_pending_history,
+    cleanup: data.cleanup,
+    authoredRelations: data.authored_relations,
+    relationHistory: data.relation_history,
     policies: data.policies,
     history: data.history,
     pendingHistory: data.pending_history,
@@ -148,6 +172,9 @@ export function parseDocumentKnowledgeResponse(
       domain: data.access.domain,
       viewpoint: data.access.viewpoint,
       policyRevision: data.access.policy_revision,
+      ...(data.access.access_revision
+        ? { accessRevision: data.access.access_revision }
+        : {}),
     },
     traceId: meta.trace_id,
   };

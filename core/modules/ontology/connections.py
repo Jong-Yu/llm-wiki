@@ -8,6 +8,9 @@ Markdown 링크는 명시 연결이며 이름/유형 일치는 미확정 후보�
 # 두 문서의 이름이 같아도 같은 대상이라고 병합하지 않으며 문서/개체/버전 근거를 함께 반환한다.
 
 import os
+from dataclasses import dataclass
+from hashlib import sha256
+import json
 from pathlib import Path
 import posixpath
 import stat
@@ -16,12 +19,54 @@ from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
+from core.common.json_codec import canonical_json_bytes
 from core.modules.documents.store import DocumentSnapshot
+from core.modules.documents.metadata import parse_document
 from . import constants
 from .errors import (
     OntologyValidationError, OntologyCorruptError, _ContextBudgetError, _connection_error,
 )
 from .snapshots import _query_snapshot
+
+
+@dataclass(frozen=True)
+class _ValidatedGraph:
+    """Immutable proof of one successful, request-local machine validation."""
+
+    root: str
+    document: str
+    source_revision: str
+    source_content: str
+    raw: object
+    encoded: bytes
+    digest: str
+
+    @classmethod
+    def capture(cls, store, document, source, raw, snapshot):
+        try:
+            encoded = canonical_json_bytes(snapshot)
+        except (TypeError, ValueError, UnicodeError, RecursionError):
+            return None
+        return cls(str(store.data_dir), document, source.revision, source.content, raw,
+                   encoded, sha256(encoded).hexdigest())
+
+    def read(self, store, document, source, raw):
+        """Return an isolated snapshot only for the exact captured inputs."""
+        try:
+            if ((self.root, self.document, self.source_revision, self.source_content, self.raw)
+                    != (str(store.data_dir), document, source.revision, source.content, raw)
+                    or sha256(self.encoded).hexdigest() != self.digest):
+                return None
+            value = json.loads(self.encoded)
+            if (type(value) is not dict or value.get("document") != document
+                    or value.get("source_revision") != source.revision
+                    or value.get("status") not in {"ready", "stale", "missing"}
+                    or any(type(value.get(name)) is not list for name in
+                           ("entities", "relations", "relation_candidates", "attributes"))):
+                return None
+            return value
+        except (AttributeError, TypeError, ValueError, UnicodeError, RecursionError):
+            return None
 
 
 def _link_target(document: str, href: str):
@@ -51,15 +96,17 @@ def _normalized_label(label: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", label).casefold().split())
 
 
-def _source_links(content):
+def _source_links(content, *, parsed=None):
     """Yield Markdown links, excluding images, code and raw HTML/comments."""
     # 본문을 Markdown으로 해석해 실제 링크만 모은다. 코드 블록/이미지의 비슷한 문자열을 문서 연결로 삼지 않는다.
-    for block in MarkdownIt("commonmark").parse(content):
+    parsed = parse_document(content) if parsed is None else parsed
+    offset = parsed.body_start_line - 1
+    for block in MarkdownIt("commonmark").parse(parsed.body):
         if block.type == "inline" and block.map is not None:
             for token in block.children or ():
                 if token.type == "link_open":
-                    yield token.attrGet("href"), {"start_line": block.map[0] + 1,
-                                                  "end_line": block.map[1], "scope": "block"}
+                    yield token.attrGet("href"), {"start_line": block.map[0] + 1 + offset,
+                                                  "end_line": block.map[1] + offset, "scope": "block"}
 
 
 def connection_documents(ontology, skipped: list) -> tuple:
@@ -96,7 +143,7 @@ def connection_documents(ontology, skipped: list) -> tuple:
     return sorted(documents), complete, entries
 
 
-def connections_snapshot_locked(ontology, document: str, limit: int = 20) -> tuple:
+def connections_snapshot_locked(ontology, document: str, limit: int = 20, *, capture_validated=False) -> tuple:
     """Derive explicit links and unmerged concept candidates from one snapshot.
 
     The limit applies separately to links and candidates. Missing/stale
@@ -208,7 +255,12 @@ def connections_snapshot_locked(ontology, document: str, limit: int = 20) -> tup
     for name, source in snapshots.items():
         if links_done:
             break
-        for href, evidence in _source_links(source.content):
+        try:
+            parsed = parse_document(source.content)
+        except ValueError:
+            skip(name, "invalid_document_metadata")
+            continue
+        for href, evidence in _source_links(source.content, parsed=parsed):
             if link_count >= constants.MAX_CONNECTION_LINKS:
                 truncated = True
                 links_done = True
@@ -265,6 +317,7 @@ def connections_snapshot_locked(ontology, document: str, limit: int = 20) -> tup
 
     states = []
     ready = {}
+    validated = {}
     for name, source in snapshots.items():
         if name in graph_errors:
             status = "corrupt" if graph_errors[name] == "ontology_corrupt" else "unavailable"
@@ -279,6 +332,10 @@ def connections_snapshot_locked(ontology, document: str, limit: int = 20) -> tup
         states.append({key: graph[key] for key in (
             "document", "source_revision", "status", "indexed_revision", "needs_reextraction",
         ) if key in graph})
+        if capture_validated:
+            proof = _ValidatedGraph.capture(ontology.store, name, source, raw_graphs[name], graph)
+            if proof is not None:
+                validated[name] = proof
         if graph["status"] == "ready":
             ready[name] = graph
     states.extend({"document": name, "source_revision": None, "status": "unavailable"} for name in source_errors)
@@ -312,8 +369,11 @@ def connections_snapshot_locked(ontology, document: str, limit: int = 20) -> tup
         "ontology_states": states, "skipped": skipped,
         "truncated": truncated, "scanned": scanned,
     }
-    return result, {"sources": snapshots, "raw_graphs": raw_graphs, "graphs": ready,
+    captured = {"sources": snapshots, "raw_graphs": raw_graphs, "graphs": ready,
                     "graph_errors": graph_errors, "source_errors": source_errors,
                     "identities": identities, "scan_complete": scan_complete,
                     "scan_entries": scan_entries,
                     "captured_bytes": constants.MAX_CONNECTION_BYTES - remaining[0]}
+    if capture_validated:
+        captured["validated_graphs"] = validated
+    return result, captured

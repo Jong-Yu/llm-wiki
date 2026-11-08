@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 import fcntl
 from hashlib import sha256
 import os
-from pathlib import Path
 import stat
 import time
 from uuid import uuid4

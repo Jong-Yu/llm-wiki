@@ -43,6 +43,9 @@ def write_text(store, path, text):
 def publish(store, destination, manifest, components, *, maximum=None):
     """완성된 묶음 디렉터리를 한 번 공개한다. 기존 묶음은 교체하지 않는다."""
     raw_manifest = canonical_json_bytes(manifest)
+    references = manifest.get("component_references", {})
+    if not isinstance(references, dict) or set(references) - set(components):
+        raise limits.InputCorruptError("Invalid fixed component references.")
     maximum = limits.MAX_BUNDLE_BYTES if maximum is None else maximum
     if len(raw_manifest) + sum(len(value.encode("utf-8")) for value in components.values()) > maximum:
         raise limits.InputLimitError("The complete fixed input exceeds its byte budget.")
@@ -54,6 +57,10 @@ def publish(store, destination, manifest, components, *, maximum=None):
     primary = None
     try:
         for index, (name, value) in enumerate(sorted(components.items())):
+            if name in references:
+                if resolve_reference(store, references[name]) != value:
+                    raise limits.InputCorruptError("A fixed component reference changed before publication.")
+                continue
             # 논리적 구성 이름을 로컬 경로로 직접 쓰지 않고, 정렬한 순서의 번호 파일에 대응시킨다.
             path = pending / f"component-{index}.txt"
             write_text(store, path, value)
@@ -99,6 +106,9 @@ def load(store, directory, *, expected_revision=None, maximum=None):
         if type(manifest) is not dict or canonical_json_bytes(manifest) != raw or type(manifest["components"]) is not dict:
             raise ValueError()
         components = {}
+        references = manifest.get("component_references", {})
+        if type(references) is not dict or set(references) - set(manifest["components"]):
+            raise ValueError()
         size = len(raw)
         for index, (name, descriptor) in enumerate(manifest["components"].items()):
             if (type(name) is not str or type(descriptor) is not dict
@@ -111,7 +121,8 @@ def load(store, directory, *, expected_revision=None, maximum=None):
             remaining = maximum - size
             if descriptor["size_bytes"] > remaining:
                 raise limits.InputLimitError("The complete fixed input exceeds its byte budget.")
-            value = read_text(store, directory / descriptor["file"], maximum=remaining)
+            value = (resolve_reference(store, references[name]) if name in references
+                     else read_text(store, directory / descriptor["file"], maximum=remaining))
             encoded = value.encode("utf-8")
             size += len(encoded)
             if len(encoded) != descriptor["size_bytes"] or digest(encoded) != descriptor["sha256"]:
@@ -132,3 +143,47 @@ def descriptors(components):
     return {name: {"file": f"component-{index}.txt", "sha256": digest(value.encode("utf-8")),
                    "size_bytes": len(value.encode("utf-8"))}
             for index, (name, value) in enumerate(sorted(components.items()))}
+
+
+def document_revision(store, document, revision):
+    """정확한 현재/전체 이력 판본만 읽는다. 최신 판본으로 바꿔 끼우지 않는다."""
+    from core.modules.documents.history import validate_history_id
+    limits.revision(revision)
+    try:
+        snapshot = store.read(document)
+        if snapshot.revision == revision:
+            return snapshot.content
+    except FileNotFoundError:
+        pass
+    directory = store._document_path(store.history_dir, document)
+    for name in source_files.entries(store, directory, maximum=1001):
+        if name == "changes.json":
+            continue
+        validate_history_id(name)
+        content = read_text(store, directory / name, maximum=1024 * 1024)
+        if digest(content.encode("utf-8")) == revision:
+            return content
+    raise limits.InputCorruptError("The exact referenced document revision is unavailable.")
+
+
+def resolve_reference(store, reference):
+    """새 기본 등록의 중복 본문을 불변 원본/MD 판본 참조로 복원한다."""
+    if type(reference) is not dict:
+        raise limits.InputCorruptError("Invalid fixed component reference.")
+    if reference.get("kind") == "registration" and set(reference) == {"kind", "job"}:
+        from core.modules.analysis_jobs.registration import materialize
+        from core.modules.analysis_jobs.store import JobStore
+        job = reference["job"]
+        content, _ = materialize(JobStore(store), job, job["actor"])
+        return content
+    if reference.get("kind") == "document_context" and set(reference) == {"kind", "context"}:
+        from copy import deepcopy
+        context = deepcopy(reference["context"])
+        for row in context["documents"]:
+            source = row.get("source")
+            if source is not None:
+                if "content" in source or source["document"] != row["document"]:
+                    raise limits.InputCorruptError("Invalid document context reference.")
+                source["content"] = document_revision(store, source["document"], source["revision"])
+        return canonical_json_bytes(context).decode("utf-8")
+    raise limits.InputCorruptError("Unknown fixed component reference.")

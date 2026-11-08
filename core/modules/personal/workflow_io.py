@@ -13,8 +13,16 @@ from core.modules.analysis_inputs.capture import documents_locked
 from core.modules.personal.store import PersonalConflictError, PersonalCorruptError, PersonalLimitError
 
 
+def materialize_basis(store, basis, actor):
+    """새 질문의 참조도 당시 전체 근거로 복원하고 기존 삽입형 근거는 그대로 읽는다."""
+    from types import SimpleNamespace
+    from .question_basis import QuestionBasisStore, is_basis_reference
+    return QuestionBasisStore(SimpleNamespace(store=store, **actor)).load(basis) if is_basis_reference(basis) else basis
+
+
 def observe_basis(store, basis, actor, *, wiki_locked=False, coordination_locked=False):
     """당시 snapshot은 보존하고 최신 판본과의 차이만 별도 반환한다."""
+    basis = materialize_basis(store, basis, actor)
     expected = {item["document"]: item["knowledge"] for item in basis["documents"]}
     documents, originals = [], []
     for document, before in expected.items():
@@ -40,9 +48,23 @@ def observe_basis(store, basis, actor, *, wiki_locked=False, coordination_locked
             originals.append({"source_id": reference["source_id"], "status": "unavailable"})
     old_profile = basis.get("scope", {}).get("profile", {})
     profile_changed = any(old_profile.get(key) != actor.get(key) for key in ("profile_id", "domain", "viewpoint"))
+    old_access = basis.get("scope", {}).get("access_revision") or old_profile.get("access_revision")
+    access_changed = old_access is not None and old_access != actor.get("access_revision")
+    retrieval = basis.get("retrieval", {})
+    discovery_changed = False
+    if retrieval.get("coverage") == "authorized_workspace":
+        from core.modules.knowledge.question_index import catalog_revision
+        if wiki_locked:
+            discovery_changed = catalog_revision(store) != retrieval["catalog_revision"]
+        else:
+            with store._write_lock():
+                discovery_changed = catalog_revision(store) != retrieval["catalog_revision"]
     statuses = [item["status"] for item in [*documents, *originals]]
-    status = "unavailable" if "unavailable" in statuses else "changed" if profile_changed or "changed" in statuses else "current"
-    value = {"status": status, "documents": documents, "originals": originals, "profile_changed": profile_changed}
+    status = "unavailable" if "unavailable" in statuses else "changed" if profile_changed or access_changed or discovery_changed or "changed" in statuses else "current"
+    value = {"status": status, "documents": documents, "originals": originals, "profile_changed": profile_changed,
+             "access_changed": access_changed}
+    if "retrieval" in basis:
+        value["discovery_changed"] = discovery_changed
     return {**value, "observation_revision": canonical_json_hash(value)}
 
 
@@ -51,7 +73,25 @@ def request_path(personal, kind, record_id, request_id):
     if kind not in {"draft-applications", "question-answers"}:
         raise ValueError("Unknown workflow request kind")
     identifier(record_id); identifier(request_id)
-    return personal.root / ("_" + kind) / record_id / request_id
+    return personal._select_path(personal.root / "_requests" / kind / record_id / request_id,
+                                 personal.root / ("_" + kind) / record_id / request_id,
+                                 personal.legacy_root / ("_" + kind) / record_id / request_id)
+
+
+def request_ids(personal, kind, record_id):
+    if kind not in {"draft-applications", "question-answers"}:
+        raise ValueError("Unknown workflow request kind")
+    identifier(record_id)
+    names = []
+    for parent in (personal.root / "_requests" / kind / record_id,
+                   personal.root / ("_" + kind) / record_id,
+                   personal.legacy_root / ("_" + kind) / record_id):
+        names.extend(files.entries(personal.store, parent, maximum=100))
+    if len(names) != len(set(names)):
+        raise PersonalCorruptError("Duplicate workflow requests in both layouts")
+    if len(names) > 100:
+        raise PersonalLimitError("The workflow request count limit was reached")
+    return sorted(names)
 
 
 def receipt(personal, kind, record_id, request_id, *, payload=None):
@@ -78,8 +118,7 @@ def receipt(personal, kind, record_id, request_id, *, payload=None):
 def start_request(personal, kind, record_id, request_id, payload, extra=None):
     """부작용 전에 요청을 기록하고 결과 미확인을 새 요청으로 우회하지 않는다."""
     path = request_path(personal, kind, record_id, request_id)
-    parent = path.parent
-    names = files.entries(personal.store, parent, maximum=100)
+    names = request_ids(personal, kind, record_id)
     if len(names) >= 100:
         raise PersonalLimitError("The workflow request count limit was reached")
     for previous in names:

@@ -1,6 +1,8 @@
 # React 프로젝트 구조·개발 규칙과 컴포넌트 설계
 
-기준: 현재 1920×1080 시안, 사용자 지정 Electron·React·React Router·Jotai·TypeScript. 목적은 **LLM Wiki의 원문 → AI 온톨로지 → 전문가 조정 → 재사용**을 같은 대상/근거로 잇는 것입니다. 이 문서의 업무 컴포넌트·경로·타입은 구현용 설계입니다. 2026-10-25에 실행 골격·시작/앱 정보 화면만 구현했으며 현행 파일과 명령은 [앱 README](../README.md), 실제 검증은 [PLAN](../../docs/history/2026-10-25-before-domain-split/PLAN.md#d-045-electron-실행-골격-2026-10-25)이 관리합니다.
+목적은 **LLM Wiki의 원문 → AI 온톨로지 → 전문가 조정 → 재사용**을 같은 대상/근거로 잇는 것입니다. 이 문서는 Electron·React·React Router·Jotai·TypeScript의 책임·의존 방향과 초기 구현 설계를 보존합니다. 아래 초기 화면명·경로·예정 타입을 현재 구현 목록으로 읽지 않습니다. 현행 파일·실행법은 [앱 README](../README.md), 대상·주소·복귀는 [IA](../../docs/domains/ui/INFORMATION_ARCHITECTURE.md), 최종 표현·조작·검수는 [UI RULES](../../docs/domains/ui/RULES.md), 실제 검증은 [UI HISTORY](../../docs/domains/ui/HISTORY.md)를 따릅니다.
+
+2026-11-05 현재 구현은 feature hook·유지된 작업 화면·보호 저장으로 상태를 소유하며, 사용하지 않던 Jotai 의존성을 제거했습니다. 아래 초기 상태 표와 atom 이름 예시는 당시 설계 기록이며 라이브러리 설치 요건이 아닙니다.
 
 ## 1. 분리 기준과 데이터 흐름
 
@@ -265,17 +267,15 @@ Electron main → PTY → 사용자 개인 CLI ──MCP──┘
 
 ## 3. 앱 프레임과 화면 경로
 
+현재 renderer는 다음 순서로 조립합니다. 아래 `/work/:tenant/*` 표는 초기 책임 분해 예시이며 현재 경로와 메뉴는 [IA 7절](../../docs/domains/ui/INFORMATION_ARCHITECTURE.md#7-실제-화면-주소)을 따릅니다. 제거한 관점 선택·업무 모달·미지원 화면을 초기 예시를 근거로 재도입하지 않습니다.
+
 ```text
-AppProviders (테마·연결 bootstrap·Query client; tenant 없이 시작)
-└─ AppRouter
-   ├─ ConnectionSetupPage (서버 미설정/인증 실패에서도 진입; 소속 조회 전 연결 준비)
-   └─ WorkspaceBoundary (일반 API access-context 확인 후 주체/tenant별 store 생성·전환)
-      └─ AppShell
-         ├─ WorkspaceHeader (브랜드, 공간, 허용 관점)
-         ├─ PrimaryNavigation (AI 작업/지식/문서/검토/이력/작업 공간)
-         ├─ RouteOutlet (현재 Page)
-         ├─ TerminalDock (선택해서 여는 세션 UI)
-         └─ OverlayHost / NoticeRegion
+main.tsx (StrictMode · HashRouter)
+└─ App
+   └─ WorkspaceLogin (연결·인증 범위 확인)
+      └─ AppShell (테마·탐색·공통 상태)
+         └─ RetainedWorkspace
+            └─ Routes (현재 Page와 보존한 화면별 초안)
 ```
 
 터미널 dock과 미저장 초안의 수명은 개별 Page보다 깁니다. document→review 이동 때문에 CLI를 종료하거나 입력을 초기화하지 않습니다. panel은 `children/header/actions/aside` slot으로 합성합니다. 분할 레이아웃의 크기만 패널 설정이 알고, 내부 업무 컴포넌트는 옆 패널 폭을 알지 않습니다.
@@ -316,7 +316,7 @@ AppProviders (테마·연결 bootstrap·Query client; tenant 없이 시작)
 
 최초 설정의 bootstrap provider는 tenant 없이 시작하고 인증·소속 확인 후에만 workspace store와 자료 조회 범위를 만듭니다. 미인증 초기 화면을 만들기 위해 임의의 기본 사용자/tenant나 이전 연결의 자료 상태를 주입하지 않습니다.
 
-기존 `WorkspacePage`의 연결 상태 카드는 위 연결 관리로 이동하는 진입점을 가집니다. 정상 상태를 고르는 시안의 개발용 select를 최초 설정이나 연결 성공 증거로 재사용하지 않습니다. API/MCP의 같은 서버·주체 대조용 handshake와 자동 CLI 설정은 후속 계약이므로 확인 결과를 모의/미구현으로 표시해야 합니다. 실제 연결 수용 기준은 [원격 PC 검증 조건](../../docs/history/2026-10-25-before-domain-split/PLAN.md#원격-pc-최초-연결의-후속-검증-조건)을 따릅니다.
+기존 `WorkspacePage`의 연결 상태 카드는 위 연결 관리로 이동하는 진입점을 가집니다. 정상 상태를 고르는 시안의 개발용 select를 최초 설정이나 연결 성공 증거로 재사용하지 않습니다. API/MCP의 같은 서버·주체 대조용 handshake와 자동 CLI 설정은 후속 계약이므로 확인 결과를 모의/미구현으로 표시해야 합니다. 실제 연결 수용 기준은 원격 PC 검증 조건 (정리로 삭제된 참고 자료)을 따릅니다.
 
 2026-10-25 HTML 시안 반영: 전역 ‘서버 연결’·작업 공간의 ‘연결 관리’, 시안의 ‘새 PC 최초 연결 체험’에서 시작합니다. 최초 설정을 여는 동안 workspace의 자료 renderer를 호출하지 않고 서버/인증·허용 공간·개인 AI/등록 변경 전후·결과/진단을 표시합니다. API 실패·소속 없음·지원 불일치, CLI 설치/로그인·MCP 반영 실패/충돌/재시작과 프로토콜/인증 실패를 구분합니다. 시안에서는 실제 비밀 입력을 비활성화하고 보호 인증 경로가 미구현임을 명시합니다.
 
@@ -328,11 +328,11 @@ AppProviders (테마·연결 bootstrap·Query client; tenant 없이 시작)
 
 다음 계약은 표시 모델과 이벤트의 **방향**입니다. 업무에 특화된 공용 UI는 2.5절의 소유 domain에, 업무 중립 UI는 shared/ui에 둡니다. 여러 domain을 다루는 패널/초안 조정은 feature/page가 조합합니다. 서버 스키마/필드를 축약해 저장 인자로 재사용하지 않습니다.
 
-현재 `shared/ui/`에 Button, IconButton, Field/TextField/TextareaField/SelectField, Panel/Header/Body/Actions, StatusNotice, Tabs, Dialog와 SCSS Module을 구현했습니다. `Button`은 네이티브 버튼 props/ref·children을 전달하고 `variant="primary|secondary"`를 받습니다. 기본 `type="button"`이며 폼 제출은 호출자가 명시합니다. 기본 모양은 primary이고 앱 프레임의 테마 전환은 secondary를 사용합니다. disabled·키보드 동작은 네이티브 버튼 의미를 유지하고, 색/경계/포커스/비활성/모션 축소는 기존 토큰을 사용합니다. 권한·저장·테마 상태는 버튼이 소유하지 않습니다. 링크는 기존 링크 컴포넌트를 사용하며 버튼에 임의 태그 전환이나 업무 상태를 추가하지 않습니다. 구현 순서/각 요소의 완료 여부는 [PLAN](../../docs/history/2026-10-25-before-domain-split/PLAN.md#5단계-공통-ui의-구현)이 관리합니다.
+공용 버튼·필드·탭·알림의 책임은 `shared/ui/`에 둡니다. 아래 IconButton·Panel 등 이름은 책임 계약의 예이며 현재 파일이 모두 존재한다는 뜻이 아닙니다. 새 작업은 실제 공용 구현을 재사용합니다. 버튼은 네이티브 props/ref·children과 disabled·키보드 의미를 보존하며 일반 버튼과 폼 제출을 명시적으로 구별합니다. 치수·문자·내부 간격·상태의 기준은 [RULES 3절](../../docs/domains/ui/RULES.md#3-base-ui) 한 곳을 따릅니다. 권한·저장·테마 상태는 버튼이 소유하지 않으며 이동에는 링크를 사용합니다. 주행동 강조는 각 작업에서 선택하고 기본 variant에 맡겨 모든 버튼을 강조하지 않습니다.
 
-공통 작업 공간은 `WorkspaceLayout` 안에 `WorkspacePane name="index|content|inspector"` 영역을 합성합니다. 기본은 세 영역이며 목록/상세 화면은 `panes={['index', 'content']}`로 두 영역만 사용합니다. `labels`로 화면에 맞는 패널 이름을 지정합니다. `className`은 넓은 화면의 기존 grid 폭을 전달하며 좁은 화면의 배치는 공통 컴포넌트가 결정합니다. 조건부 내용도 해당 Pane 안에서 표시하고 패널 전환을 데이터 조회·저장 명령에 연결하지 않습니다. `WorkspaceToolbar`는 기존 header 표현을 유지하며 긴 동작을 영역 내에서 스크롤합니다. 기준값·검증·화면별 후속은 [공통 레이아웃 검토](responsive-layout-audit.md)를 따릅니다.
+현재 공통 작업 공간의 `WorkspacePage`·`WorkspaceSection`·`ReadingProperties`를 재사용하며 화면의 목적에 따라 필요한 영역만 합성합니다. 초기 설계의 `WorkspaceLayout/WorkspacePane/WorkspaceToolbar` 이름을 별도 구현 목록으로 사용하지 않습니다. 기본 세 영역을 모든 화면에 강제하거나 빈 상세 영역을 예약하지 않습니다. 배치·폭·스크롤·패널 전환은 [RULES 5·9절](../../docs/domains/ui/RULES.md#5-layout과-공간-배분)을 따릅니다. 화면 조건과 상태는 호출자가 소유하며 패널 전환을 저장·AI 실행 명령에 연결하지 않습니다.
 
-입력 필드는 `label/description/error`와 네이티브 props/ref를 받으며 Field가 ID·설명·오류 연결을 보존합니다. SelectField는 option children을 전달합니다. IconButton은 접근 이름을 필수로 받습니다. Panel은 header/body/actions를 children으로 합성하고 StatusNotice는 호출자가 정한 `tone/title/action`을 표시합니다. Tabs는 `label/value/onValueChange/items`의 controlled 계약이며 item ID는 고유해야 합니다. 비활성 탭을 제외해 키보드로 이동하고 숨긴 패널도 유지합니다. Dialog는 `open/onOpenChange/title/description/children/actions`를 받으며 native modal의 focus 제한·복귀를 사용합니다. 두 컴포넌트의 선택/열림 상태는 호출자가 소유합니다.
+입력 필드는 `label/description/error`와 네이티브 props/ref를 받으며 Field가 ID·설명·오류 연결을 보존합니다. SelectField는 option children을 전달합니다. 아이콘 전용 행동은 접근 이름을 필수로 받습니다. 패널은 header/body/actions를 합성하고 알림은 호출자가 정한 상태·설명·행동을 표시합니다. 탭의 선택 상태는 호출자가 소유하고 item ID는 고유해야 합니다. 숨긴 패널의 초안은 유지하되 접근성 트리·focus에서는 제외합니다. 키보드 동작은 RULES를 따릅니다. 초기 Dialog 계약을 업무 모달 재도입의 근거로 쓰지 않으며 기존 업무는 페이지 또는 비차단 영역에서 처리합니다.
 
 | 컴포넌트 | 입력 / 로컬 상태 | 내보내는 의도 / 맡지 않는 일 |
 | --- | --- | --- |
@@ -501,9 +501,9 @@ compare-extractions의 조회/대조 실패·재조회와 차이 분류/필터�
 | 순수 selector | 필터 결과·집계·표시 그래프·현재 선택 객체·미검토 건수 | 변경할 수 있는 두 번째 fullGraph |
 | main + xterm | main: PTY process/세션 연결; xterm: 표시 버퍼 | renderer가 직접 process handle 보관, ANSI 텍스트로 저장 완료 판정 |
 
-폼 초안은 하나의 객체를 소유하고 기준을 함께 보관합니다. 화면을 넘나들어야 하는 초안은 Jotai registry가 소유하며 폼은 그것을 제어합니다. 로컬에서만 쓰는 폼은 로컬이 소유합니다. 같은 초안을 로컬과 registry에 Effect로 계속 복제하지 않습니다. 포커스 상태나 글자 입력마다 전체 앱을 구독시키지 않도록 atom/구독을 기능별로 나눕니다.
+폼 초안은 해당 feature가 하나의 객체로 소유하고 기준을 함께 보관합니다. 화면을 넘나들어야 하는 초안은 유지된 작업 화면과 기존 보호 저장으로 보존합니다. 로컬에서만 쓰는 폼은 로컬이 소유합니다. 같은 초안을 여러 저장소에 Effect로 계속 복제하지 않습니다. 포커스 상태나 글자 입력마다 전체 앱을 구독시키지 않도록 상태/구독을 기능별로 나눕니다.
 
-Jotai store는 인증 주체·서버·tenant 범위로 분리하며 전환 시 이전 Query 응답·구독을 취소하고 해당 캐시/초안을 다른 공간에 노출하지 않습니다. 보존할 초안은 그 원래 범위에서만 접근하게 합니다. 전환 시 버릴지/보관할지는 명시 안내하며 임의 로컬 영속 저장을 추가하지 않습니다. [Jotai Provider](https://jotai.org/docs/core/provider)는 subtree별 store를 지원합니다. 관점 전환은 같은 tenant 초안을 자동 삭제하거나 원문을 변경하는 계기가 아닙니다.
+상태와 요청은 인증 주체·서버·tenant 범위로 분리하며 전환 시 이전 응답·구독을 취소하고 해당 결과/초안을 다른 공간에 노출하지 않습니다. 보존할 초안은 그 원래 범위에서만 접근하게 합니다. 전환 시 버릴지/보관할지는 명시 안내하며 임의 로컬 영속 저장을 추가하지 않습니다. 관점 전환은 같은 tenant 초안을 자동 삭제하거나 원문을 변경하는 계기가 아닙니다.
 
 검토·정책·대응·질문 초안은 시작한 **허용 profile과 업무 적용 범위**를 context와 registry key에 고정합니다. 관점 전환 후 기존 초안은 보존하되, 시작 관점으로 돌아가거나 새 관점에서 최신 근거/판단을 다시 읽고 명시 재확인한 새 초안을 만들기 전에는 그 초안을 제출하지 않습니다. 기준값만 새 관점으로 교체하지 않습니다. 원문 편집의 basis는 전체 문서이며 관점별 일부 본문으로 원문 저장 범위를 줄이지 않습니다.
 
@@ -591,7 +591,7 @@ UC-08 전용 비교, 결과물 계보·대화 영속화, 전역 검토/이력·�
 
 처음에는 문서/토큰을 준비했으며 2026-10-25 요청으로 아래 2번 중 서버에 의존하지 않는 Electron 실행 골격을 먼저 구현했습니다. **다음 순서는 후속 요청 시** 한 묶음씩 구현하고, 자료 연결은 1번의 실제 API를 먼저 검증합니다. 단계 완료 상태는 [PLAN](../../docs/PLAN.md)이 관리합니다.
 
-1. 문서 목록·본문·지식/현재 판단 조회용 **백엔드 일반 API와 권한/부분 결과 계약을 먼저 구현·검증**합니다. [D-043](../../docs/domains/sources/DECISIONS.md#fastapi-백엔드-채택과-구현-경계-2026-10-24)의 FastAPI·기존 MCP 단일 앱 채택과 [PLAN의 R1 첫4개](../../docs/history/2026-10-25-before-domain-split/PLAN.md#r1-첫-구현-묶음과-검증-조건-fastapi-채택-2026-10-24)를 따르고 기존 서비스/저장 모듈을 재사용합니다. 실제 배포/인증·버전 고정은 해당 구현 범위에서 검증·결정합니다.
+1. 문서 목록·본문·지식/현재 판단 조회용 **백엔드 일반 API와 권한/부분 결과 계약을 먼저 구현·검증**합니다. [D-043](../../docs/domains/sources/DECISIONS.md#fastapi-백엔드-채택과-구현-경계-2026-10-24)의 FastAPI·기존 MCP 단일 앱 채택과 PLAN의 R1 첫4개 (정리로 삭제된 참고 자료)를 따르고 기존 서비스/저장 모듈을 재사용합니다. 실제 배포/인증·버전 고정은 해당 구현 범위에서 검증·결정합니다.
 2. Electron main/preload/renderer 경계와 앱 frame·router·테마를 준비하고 1920×1080으로 확인합니다. 실제 의존성/배포 버전은 이때 고정합니다. 공통 근거·판본 UI와 문서 읽기부터 옮겨 실제 일반 API adapter를 검증합니다. 한 feature씩 옮기고 시안 전체를 한 TSX로 감싸지 않습니다.
 3. 자료 등록→CLI 요청→저장 확인은 D-043/D-044의 서버 gate가 준비된 범위만 연결합니다. mock/실제 경로를 섞지 않습니다.
 4. 지도→같은 ClaimEditForm→검토 이력→다음 질문을 연결하고 명시 쓰기/권한/CAS와 원문 보존을 검증합니다.
@@ -612,7 +612,7 @@ UC-08 전용 비교, 결과물 계보·대화 영속화, 전역 검토/이력·�
 | 터미널 수명 | 경로 전환·숨김·개발 모드 재실행 중 세션 중복 생성 없음; 종료·resize·한글/Ctrl+C 확인 |
 | 접근·긴 텍스트 | 클릭 편집의 Enter/키보드 진입, 포커스 복귀, full name 접근, 긴 인용/조건/파일명 overflow 없음 |
 
-이 수용 기준의 실제 기능·사용성·접근성·저장 지속성·패키징 검증은 아직 실행하지 않았습니다. 토큰/문서 정합성 검증 결과와 혼동하지 않습니다.
+실제 검증한 범위는 [UI HISTORY](../../docs/domains/ui/HISTORY.md), 현재 남은 범위는 [UI PLAN](../../docs/domains/ui/PLAN.md)을 따릅니다. 후속 UI 적용의 완료 판정은 [RULES 12절](../../docs/domains/ui/RULES.md#12-화면별-적용-범위와-완료-기준)에 따라 화면·상태별로 기록하며 토큰/문서 검사와 제품 기능·접근성·패키징 검증을 구분합니다.
 
 ## 11. 명명 규칙
 

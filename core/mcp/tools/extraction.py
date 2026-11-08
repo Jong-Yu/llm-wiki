@@ -3,15 +3,15 @@
 # 입력 모델의 strict/extra 설정은 자동 형변환과 알 수 없는 필드를 막는다. 기존 영어 도구 설명은 공개 계약이다.
 
 
-import json
 from typing import Annotated, Literal
 
 from mcp.types import CallToolResult, ToolAnnotations
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool, StrictInt, StrictStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool, StrictInt, StrictStr
 
 from core.mcp.request_context import _authorized_scope
 from core.mcp.results import _access_error, _invoke, _result
 from core.mcp.schemas import SourceRevisionInput
+from core.mcp.validation import validate_model_arguments
 from core.mcp.tools.analysis_jobs import _job_authorizer
 from core.modules.access.policy import AccessDenied, PolicyError
 
@@ -88,14 +88,7 @@ _MODELS = {"extraction_rules_read": RulesRead, "analysis_job_input_prepare": Inp
 # 도구별 입력 모델과 총 바이트를 확인한다. JSON 문자열처럼 보이는 값도 원래 자료형대로 검사한다.
 def validate_arguments(name, arguments):
     """SDK의 문자열/nullable 전처리 전에 원래 JSON 타입·필드·크기를 검사한다."""
-    model = _MODELS.get(name)
-    if model is None:
-        return True
-    try:
-        model.model_validate(arguments)
-        return len(json.dumps(arguments, ensure_ascii=False, allow_nan=False).encode("utf-8")) <= MAX_TOOL_BYTES
-    except (ValidationError, ValueError, TypeError, UnicodeError, RecursionError):
-        return False
+    return validate_model_arguments(name, arguments, _MODELS, maximum=MAX_TOOL_BYTES)
 
 
 # 준비 단계에 맞는 권한을 고른다. 원본 등록 권한으로 위키/그래프 저장 권한을 대신하지 않는다.
@@ -161,8 +154,10 @@ def _register_extraction_tools(server, get_store):
             rebase_reason: Annotated[StrictStr, Field(max_length=1000)] = "") -> CallToolResult:
         """Freeze rules, exact stage inputs and explicitly selected full context for your live run.
 
-        read_source uses the original reference; prepare_wiki requires a successful
-        immutable extraction; extract_ontology uses the actual full current Wiki source.
+        read_source uses the original reference. Basic registration prepare_wiki
+        exposes data/registration.md from the pinned original/conversion; other jobs
+        require a successful immutable extraction. extract_ontology identifies the
+        full Wiki revision and exposes the parsed body with its full-file line offset.
         Preserve source/review/policy provenance and all conditions outside the focus.
         The first preparation pins the rules, explicit context and profile across
         stages and reclaimed runs. Omitted context/rules inherit that job basis;

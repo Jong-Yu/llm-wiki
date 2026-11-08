@@ -10,7 +10,7 @@ import {
 import type { ProposalExecutionResult } from '@contracts/proposalExecution.contract';
 import { isAppSender } from './isAppSender';
 
-/** 고정된 추출안 실행 채널과 허용된 최상위 앱 프레임만 연결합니다. */
+/** 고정된 추출 결과 실행 채널과 허용된 최상위 앱 프레임만 연결합니다. */
 export function registerProposalExecutionHandlers(
   getWindow: () => BrowserWindow | null,
   rendererLocation: string,
@@ -40,7 +40,7 @@ export function registerProposalExecutionHandlers(
             ok: false,
             error: {
               code: 'invalid_request',
-              message: '추출안 실행 요청을 확인해 주세요.',
+              message: '추출 결과 실행 요청을 확인해 주세요.',
             },
           };
         try {
@@ -50,7 +50,7 @@ export function registerProposalExecutionHandlers(
             ok: false,
             error: {
               code: 'invalid_request',
-              message: '추출안 실행 입력·환경을 확인해 주세요.',
+              message: '추출 결과 실행 입력·환경을 확인해 주세요.',
             },
           };
         }

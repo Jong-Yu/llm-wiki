@@ -1,0 +1,173 @@
+// 지난 기록 하위 화면: 문서 목록과 같은 표 모양으로 종류·기록·시작·상태를 나란히 보여 줍니다.
+.root {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--wiki-space-24);
+  font: var(--wiki-font-size-13) / var(--wiki-component-control-line-height)
+    var(--wiki-font-family-ui);
+  min-width: 0;
+}
+.page {
+  display: grid;
+  gap: var(--wiki-space-16);
+  min-width: 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-8) var(--wiki-space-16);
+}
+// 문서 목록·검토함과 같은 모양의 목록 필터(기본 select)입니다.
+.filter {
+  display: flex;
+  align-items: center;
+  select {
+    box-sizing: border-box;
+    min-height: var(--wiki-component-control-height);
+    padding: 7px 36px 7px 12px;
+    max-width: 100%;
+    min-width: 0;
+    border: 1px solid var(--wiki-color-border-control);
+    border-radius: var(--wiki-component-control-radius);
+    background: var(--wiki-color-surface-canvas);
+    color: var(--wiki-color-text-primary);
+    font: inherit;
+    line-height: var(--wiki-component-control-line-height);
+  }
+}
+.count {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font: inherit;
+  th {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--wiki-color-border-default);
+    text-align: left;
+    font-size: var(--wiki-font-size-12);
+    line-height: 18px;
+    font-weight: 600;
+    color: var(--wiki-color-text-secondary);
+  }
+  td {
+    height: 56px;
+    padding: 6px 12px;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--wiki-color-border-default);
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+  }
+  tbody tr:hover {
+    background: var(--wiki-color-surface-hover);
+  }
+  .kindCol {
+    width: 132px;
+  }
+  .timeCol {
+    width: 148px;
+  }
+  .stateCol {
+    width: 96px;
+  }
+  .actionCol {
+    width: 80px;
+    text-align: right;
+  }
+  .time {
+    color: var(--wiki-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .open {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wiki-space-4);
+    color: var(--wiki-color-action-primary);
+  }
+}
+.title {
+  display: block;
+  font-weight: 600;
+}
+.historySkeleton {
+  padding: 0;
+  gap: 0;
+  tbody tr:hover {
+    background: transparent;
+  }
+  .actionCol > span {
+    margin-left: auto;
+  }
+}
+.skeletonTitle {
+  display: grid;
+  gap: 6px;
+  > [data-shape='title'] {
+    width: 65%;
+  }
+  > [data-shape='sub'] {
+    width: 40%;
+  }
+}
+.target {
+  display: block;
+  margin-top: 2px;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: var(--wiki-font-size-12);
+  line-height: 20px;
+  white-space: nowrap;
+  background: var(--wiki-color-surface-subtle);
+  color: var(--wiki-color-text-secondary);
+  &[data-state='complete'] {
+    background: var(--wiki-color-status-success-surface);
+    color: var(--wiki-color-status-success);
+  }
+  &[data-state='running'],
+  &[data-state='partial'] {
+    background: var(--wiki-color-status-warning-surface);
+    color: var(--wiki-color-status-warning);
+  }
+}
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--wiki-space-8);
+  padding: var(--wiki-space-32) var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  color: var(--wiki-color-text-secondary);
+  text-align: center;
+  p {
+    margin: 0;
+  }
+}
+.more {
+  justify-self: center;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

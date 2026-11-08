@@ -8,6 +8,7 @@ import os
 from uuid import uuid4
 
 from core.common.json_codec import canonical_json_hash
+from core.common.storage_layout import analysis_request_root
 from . import contracts as limits, files, validation
 from .contracts import SourceConflictError, SourceCorruptError, SourceLimitError
 
@@ -57,10 +58,11 @@ def commit(self, staged, *, tenant, user_id, request_id, source_id=None,
                 output = result(prior, replayed=True)
             else:
                 # 두 등록 동작은 같은 조정 잠금과 사용자 request_id 공간을 사용한다.
-                job_request = self.store.data_dir / "_jobs" / "_requests" / request_path.name
-                files.checked(self.store, job_request)
-                if job_request.exists():
-                    raise SourceConflictError("request_conflict", request_id=request_id)
+                for job_request in (analysis_request_root(self.store.data_dir, user_id) / request_path.name,
+                                    self.store.data_dir / "_jobs" / "_requests" / request_path.name):
+                    files.checked(self.store, job_request)
+                    if job_request.exists():
+                        raise SourceConflictError("request_conflict", request_id=request_id)
                 output = _new_request(self, staged, tenant, user_id, request_id, source_id,
                                       expected_registration_revision, actor, payload_hash, request_path)
     except BaseException as error:
@@ -82,7 +84,7 @@ def _new_request(self, staged, tenant, user_id, request_id, source_id, expected,
         pass
     if files.original_usage(self.store, incoming=False) + staged.size_bytes > limits.MAX_TENANT_SOURCE_BYTES:
         raise SourceLimitError("The tenant original-byte quota was reached.")
-    if len(files.entries(self.store, self.requests_dir, maximum=limits.MAX_REQUESTS + 1)) >= limits.MAX_REQUESTS:
+    if self._request_count() >= limits.MAX_REQUESTS:
         raise SourceLimitError("The request receipt limit was reached.")
     operation = "create" if source_id is None else "version"
     if source_id is None:
@@ -97,7 +99,7 @@ def _new_request(self, staged, tenant, user_id, request_id, source_id, expected,
             raise SourceConflictError("conflict", source_id=source_id, expected_registration_revision=expected,
                                       current_registration_revision=old["registration_revision"])
         old_versions = old["versions"]
-        if len(files.entries(self.store, self.sources_dir / source_id, maximum=limits.MAX_VERSIONS + 1)) >= limits.MAX_VERSIONS:
+        if self._version_count(source_id) >= limits.MAX_VERSIONS:
             raise SourceLimitError("The original version limit was reached.")
     source_version = uuid4().hex
     manifest = {"source_id": source_id, "source_version": source_version, **staged.metadata,
@@ -113,14 +115,14 @@ def _new_request(self, staged, tenant, user_id, request_id, source_id, expected,
     self._write_request(request_path, record)
     try:
         files.write_json(self.store, staged.directory / "manifest.json", manifest)
-        destination = self.sources_dir / source_id / source_version
+        destination = self._version_path(source_id, source_version, create=True)
         files.mkdir(self.store, destination.parent)
         if destination.exists():
             raise SourceCorruptError("An immutable original destination already exists.")
         os.rename(staged.directory, destination)
         staged.consumed = True
         # 공개 원본 → 카탈로그 → 최종 영수증 순서다. 이 뒤 오류는 이미 공개한 자료를 보존한다.
-        self._write_catalog(self.registrations_dir / (source_id + ".json"), catalog)
+        self._write_catalog(self._catalog_path(source_id), catalog)
         receipt = {"request_id": request_id, "source_id": source_id, "source_version": source_version,
             "source_sha256": staged.source_sha256, "size_bytes": staged.size_bytes,
             "registration_revision": revision, "actor": actor, "created_at": manifest["created_at"],

@@ -15,6 +15,8 @@ import tempfile
 import time
 
 from core.common.json_codec import canonical_json_bytes
+from core.common.read_changes import before_change, bind_lock
+from core.common.read_metrics import increment, span
 from core.modules.documents.store import StorageBusyError
 from . import contracts as limits
 from .contracts import SourceCorruptError, SourceLimitError
@@ -55,20 +57,22 @@ def coordination(store, *, create=False):
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise SourceCorruptError("The registration lock must be regular.")
-        deadline = time.monotonic() + store.lock_timeout_seconds
-        # 시스템 시계가 보정돼도 대기 시간이 어긋나지 않도록 경과 시간용 시계를 쓴다.
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as error:
-                if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
-                    raise
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise StorageBusyError(store.lock_timeout_seconds) from error
-                time.sleep(min(0.05, remaining))
-        yield
+        with span("lock_wait"):
+            deadline = time.monotonic() + store.lock_timeout_seconds
+            # 시스템 시계가 보정돼도 경과 시간용 시계로 대기 시간을 제한한다.
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as error:
+                    if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                        raise
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise StorageBusyError(store.lock_timeout_seconds) from error
+                    time.sleep(min(0.05, remaining))
+        with bind_lock(store, "registration", fd), span("lock_hold"):
+            yield
     finally:
         os.close(fd)
 
@@ -100,7 +104,8 @@ def _object(pairs):
 def read_json(store, path):
     # 한도보다 1바이트 더 읽어, 파일 크기 정보가 바뀌어도 실제 읽은 크기로 초과를 잡는다.
     try:
-        with open_regular(store, path) as stream:
+        increment("canonical_reads")
+        with span("canonical_read"), open_regular(store, path) as stream:
             raw = stream.read(limits.MAX_JSON_BYTES + 1)
         if len(raw) > limits.MAX_JSON_BYTES:
             raise SourceCorruptError("A metadata record exceeds its byte limit.")
@@ -113,11 +118,28 @@ def read_json(store, path):
         raise SourceCorruptError("A metadata record is invalid.") from error
 
 
+def _indexed_record(store, path):
+    parts = path.relative_to(store.data_dir).parts
+    return (
+        (len(parts) == 3 and parts[0] == "_sources" and parts[2] == "catalog.json")
+        or (len(parts) == 2 and parts[0] == "_registrations" and parts[1].endswith(".json"))
+        or (len(parts) == 3 and parts[0] == "_jobs" and parts[2] == "state.json")
+        or (len(parts) == 4 and parts[:2] == ("_jobs", "_owners"))
+        or (len(parts) == 4 and parts[0] == "_jobs" and parts[2] == "leases")
+        or (len(parts) == 5 and parts[0] == "_personal" and parts[2] == "analysis"
+            and parts[4] in {"owner.json", "job.json"})
+        or (len(parts) == 6 and parts[0] == "_personal" and parts[2] == "analysis" and parts[4] == "leases")
+    )
+
+
 def write_json(store, path, value):
     """같은 디렉터리의 임시 파일을 fsync 후 교체한다. 다중 파일 거래는 아니다."""
     raw = canonical_json_bytes(value)
     if len(raw) > limits.MAX_JSON_BYTES:
         raise SourceLimitError("A metadata record exceeds its byte limit.")
+    checked(store, path)
+    if _indexed_record(store, path):
+        before_change(store, "registration", path.relative_to(store.data_dir).as_posix())
     mkdir(store, path.parent)
     checked(store, path)
     fd, name = tempfile.mkstemp(prefix=".source-", suffix=".tmp", dir=path.parent)
@@ -150,9 +172,10 @@ def entries(store, directory, *, maximum):
     # 항목 이름만 정렬해 반환한다. 폴더가 없으면 빈 목록이고, 너무 많거나 링크가 있으면 오류다.
     checked(store, directory)
     try:
-        with os.scandir(directory) as scan:
+        with span("scan"), os.scandir(directory) as scan:
             result = []
             for entry in scan:
+                increment("scanned")
                 if len(result) >= maximum:
                     raise SourceLimitError("The metadata scan limit was reached.")
                 if entry.is_symlink():
@@ -187,7 +210,7 @@ def original_usage(store, *, published=True, incoming=True):
                 if stat.S_ISDIR(info.st_mode):
                     stack.append((path, depth + 1))
                 elif stat.S_ISREG(info.st_mode):
-                    if name != "manifest.json":
+                    if name not in {"manifest.json", "catalog.json"}:
                         total += info.st_size
                 else:
                     raise SourceCorruptError("Source storage contains a nonregular file.")

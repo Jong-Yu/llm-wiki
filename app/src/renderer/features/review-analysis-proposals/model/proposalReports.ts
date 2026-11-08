@@ -115,7 +115,7 @@ export async function verifiedProposalReports(
     (link: z.infer<typeof linkSchema>): boolean =>
       link.currentness !== 'current',
   ).length;
-  for (const report of reports.data) {
+  for (const [index, report] of reports.data.entries()) {
     const ref = report.result_ref;
     const link = links.data.find(
       (item: z.infer<typeof linkSchema>): boolean =>
@@ -167,19 +167,19 @@ export async function verifiedProposalReports(
       !sameBasis
     ) {
       result.unavailable.push(
-        `보고 ${report.request_id}: 후보·입력·실행 참조가 다르거나 현재성을 확인하지 못했습니다. ${[
+        `보고 ${index + 1}: 후보·입력·실행 참조가 다르거나 현재성을 확인하지 못했습니다. ${[
           !sameBasis ? '검사 입력 불일치' : '',
-          ref.submission_sha256 !== submissionHash ? '제출 hash 불일치' : '',
-          ref.source_revision !== source?.revision ? '원문 판본 불일치' : '',
+          ref.submission_sha256 !== submissionHash ? '제출 내용 불일치' : '',
+          ref.source_revision !== source?.revision ? '원문 버전 불일치' : '',
           !expectedRules.success ||
           canonical(expectedRules.data) !== canonical(ref.ruleset_ref)
             ? '규약 불일치'
             : '',
           report.state_revision !== record.state_revision
-            ? '상태 판본 불일치'
+            ? '상태 버전 불일치'
             : '',
           report.execution_id !== record.active_execution_id
-            ? '실행 ID 불일치'
+            ? '다른 실행의 보고'
             : '',
         ]
           .filter(Boolean)
@@ -197,7 +197,7 @@ export async function verifiedProposalReports(
         diagnostics.data.report_hash !== actualHash
       ) {
         result.unavailable.push(
-          `보고 ${report.request_id}: 의미 검사 hash가 일치하지 않습니다.`,
+          `보고 ${index + 1}: 의미 검사 보고가 기록된 내용과 다릅니다.`,
         );
         continue;
       }

@@ -1,0 +1,224 @@
+.header,
+.sessionLink,
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+}
+.header {
+  gap: var(--wiki-space-12);
+  font-size: var(--wiki-font-size-12);
+  min-width: 0;
+  white-space: nowrap;
+  line-height: inherit;
+  color: inherit;
+}
+.header a {
+  color: inherit;
+}
+.sessionLink {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.runningDot,
+.doneDot,
+.idleDot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: var(--wiki-color-text-secondary);
+}
+.doneDot {
+  background-color: var(--wiki-color-status-success);
+}
+.runningDot {
+  /* 돌고 있음은 파랑, 끝남은 초록으로 구별합니다(J-1). */
+  background-color: var(--wiki-color-action-primary);
+  animation: session-pulse 1.8s ease-in-out infinite;
+}
+.usageLink,
+.connectLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  min-width: 0;
+}
+.usageLink > span:first-child,
+.connectLink > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+// 한도가 20% 이하이면 글자를 주의색으로 바꿉니다(막대는 UsageBar가 따로 바꿈).
+.usageLink[data-low='true'] {
+  color: var(--wiki-color-status-warning);
+}
+// 잔여 한도 막대: 트랙 위에 채움을 직접 그려 어떤 환경에서도 채움이 보입니다.
+.usageBar {
+  display: block;
+  position: relative;
+  flex: 1 1 auto;
+  height: var(--wiki-space-8);
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--wiki-radius-4);
+  background: var(--wiki-color-border-default);
+  i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: inherit;
+    background: var(--wiki-color-action-primary);
+  }
+  &[data-low='true'] i {
+    background: var(--wiki-color-status-warning);
+  }
+  &[data-compact='true'] {
+    flex: none;
+    width: 42px;
+    height: 4px;
+  }
+}
+.connectLink {
+  color: var(--wiki-color-action-primary);
+  &:hover {
+    text-decoration: underline;
+  }
+}
+.usagePanel {
+  margin-top: var(--wiki-space-24);
+  min-width: 0;
+}
+.usagePanel h2 {
+  font-size: var(--wiki-font-size-14);
+}
+.usagePanel h3 {
+  margin: 0;
+  font-size: var(--wiki-font-size-14);
+}
+.usagePanel p {
+  margin: 0;
+  color: var(--wiki-color-text-secondary);
+}
+.usagePanel button {
+  padding: var(--wiki-space-7) var(--wiki-space-12);
+  min-height: var(--wiki-component-control-height);
+  line-height: var(--wiki-component-control-line-height);
+  box-sizing: border-box;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-surface-canvas);
+}
+.panelHeader {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.window {
+  padding-block: var(--wiki-space-12);
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+.window .usageBar {
+  margin-block: var(--wiki-space-12);
+}
+.windowRemaining {
+  color: var(--wiki-color-text-secondary);
+}
+@keyframes session-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .runningDot {
+    animation: none;
+  }
+}
+@media (max-width: 900px) {
+  .header {
+    gap: var(--wiki-space-8);
+  }
+  .usageLink {
+    font-size: var(--wiki-font-size-12);
+  }
+}
+@media (max-width: 680px) {
+  .header {
+    flex-wrap: nowrap;
+  }
+  .usageLink {
+    min-width: 0;
+  }
+  .usageLink .usageBar,
+  .connectLink .usageBar {
+    display: none;
+  }
+}
+
+.usagePanel button:hover:not(:disabled) {
+  background-color: var(--wiki-color-surface-hover);
+}
+.usagePanel button:disabled {
+  opacity: var(--wiki-opacity-disabled);
+  cursor: not-allowed;
+}
+.usagePanel button:focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
+}
+
+.usageIdentity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--wiki-space-8) var(--wiki-space-24);
+}
+.usageSkeleton {
+  gap: var(--wiki-space-12);
+  padding: 0;
+  .usageIdentity,
+  .panelHeader {
+    min-height: 20px;
+  }
+  .windowFacts {
+    min-height: 18px;
+  }
+}
+.usageSkeletonBar[data-shape] {
+  height: 6px;
+  margin-block: var(--wiki-space-12);
+}
+.usageChecked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+  margin: 0;
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+  dd {
+    margin: 0;
+  }
+}
+.windowFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-12) var(--wiki-space-32);
+  margin: 0;
+  font-size: var(--wiki-font-size-12);
+  > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wiki-space-8);
+  }
+  dt {
+    color: var(--wiki-color-text-secondary);
+  }
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+.usageScope {
+  font-size: var(--wiki-font-size-12);
+}

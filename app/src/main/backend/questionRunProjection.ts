@@ -26,6 +26,51 @@ const originalSchema = z.object({
     source_sha256: revision,
   }),
 });
+const fullBasisSchema = z.object({
+  // 참조 형식이 손상됐을 때 기존 전체 근거 형식으로 조용히 해석하지 않습니다.
+  kind: z
+    .unknown()
+    .optional()
+    .refine(
+      (value: unknown): boolean => value !== 'question_basis_ref_v1',
+      'A frozen basis reference needs its own metadata contract.',
+    ),
+  snapshot_revision: revision,
+  documents: z.array(documentSchema),
+  originals: z.array(originalSchema).default([]),
+});
+type QuestionBasis = z.infer<typeof fullBasisSchema>;
+const referencedDocumentSchema = z.object({
+  document: z.string(),
+  source_revision: revision,
+  graph_revision: revision.nullable(),
+  state_revision: revision,
+});
+const referencedBasisInputSchema = z.object({
+  kind: z.literal('question_basis_ref_v1'),
+  basis_id: revision,
+  snapshot_revision: revision,
+  documents: z.array(referencedDocumentSchema),
+  originals: z.array(originalSchema).default([]),
+});
+const referencedBasisSchema = referencedBasisInputSchema.transform(
+  (basis: z.infer<typeof referencedBasisInputSchema>): QuestionBasis => ({
+    snapshot_revision: basis.snapshot_revision,
+    documents: basis.documents.map(
+      (
+        document: z.infer<typeof referencedDocumentSchema>,
+      ): z.infer<typeof documentSchema> => ({
+        document: document.document,
+        source_revision: document.source_revision,
+        knowledge: {
+          graph_revision: document.graph_revision,
+          state_revision: document.state_revision,
+        },
+      }),
+    ),
+    originals: basis.originals,
+  }),
+);
 export const questionServerSchema = z.object({
   record: z.object({
     id,
@@ -37,11 +82,7 @@ export const questionServerSchema = z.object({
       conversation_id: id,
       question_turn_id: id,
       question: z.string(),
-      basis: z.object({
-        snapshot_revision: revision,
-        documents: z.array(documentSchema),
-        originals: z.array(originalSchema).default([]),
-      }),
+      basis: z.union([fullBasisSchema, referencedBasisSchema]),
     }),
   }),
   state_revision: revision,
@@ -230,7 +271,17 @@ export function applyQuestionCliEvent(
     return { ...local, preview: event.content };
   }
   if (event.type === 'phase')
-    return { ...local, phase: event.phase ?? local.phase };
+    return {
+      ...local,
+      phase: event.phase ?? local.phase,
+      ...(event.phase === 'session_history_replay'
+        ? { historyReplayed: true }
+        : {}),
+      // 이후 phase가 덮어써도 이어가기 실패 사실은 유지합니다.
+      ...(event.phase === 'session_resume_failed'
+        ? { resumeFailed: true }
+        : {}),
+    };
   if (event.type === 'answer_request')
     return { ...local, requestId: event.request_id ?? local.requestId };
   return {

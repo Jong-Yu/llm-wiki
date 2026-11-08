@@ -1,0 +1,876 @@
+.root {
+  height: 100%;
+  container: ontology / inline-size;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--wiki-color-text-primary);
+  // 안쪽 패널 사이 간격은 공통 틀 배경이 보이도록 투명하게 둡니다.
+  background-color: transparent;
+  font: 13px/20px var(--wiki-font-family-ui);
+  :where(&) :where(button, input, select, textarea) {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: var(--wiki-component-control-line-height);
+    color: inherit;
+  }
+  :where(&) :where(button) {
+    cursor: pointer;
+    background-color: var(--wiki-color-surface-canvas);
+    border: 1px solid var(--wiki-color-border-default);
+    border-radius: var(--wiki-component-control-radius);
+    padding: 7px 12px;
+  }
+  :where(&) :where(button:hover:not(:disabled)) {
+    background-color: var(--wiki-color-surface-hover);
+  }
+  :where(&) :where(button:disabled) {
+    cursor: default;
+    opacity: 0.5;
+  }
+  a {
+    color: var(--wiki-color-action-primary);
+  }
+  :focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+  }
+}
+.header {
+  min-height: 36px;
+  padding: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  > div:first-child {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  h1 {
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+    margin: 0;
+  }
+  span {
+    color: var(--wiki-color-text-secondary);
+    font-size: 12px;
+  }
+}
+// 문서 범위 표시나 개념 목록 버튼이 필요할 때만 보이는 얇은 띠입니다(제목은 앱 Header가 보입니다).
+.looseHeader {
+  display: none;
+  padding: 12px 16px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 8px;
+  background-color: var(--wiki-color-surface-canvas);
+}
+.header {
+  padding: 8px 24px;
+}
+// 개념 목록 열기 버튼은 목록이 접히는 1200px 미만에서만 보입니다.
+.indexToggle {
+  display: none;
+}
+.looseHeader[data-scoped='true'] {
+  display: block;
+}
+@container ontology (max-width: 899px) {
+  .looseHeader {
+    display: block;
+  }
+}
+@container ontology (width < 1200px) {
+  .indexToggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+.iconButton {
+  width: 32px;
+  padding-inline: 0;
+}
+.newRelation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--wiki-color-action-surface);
+  border-color: var(--wiki-color-action-primary);
+  color: var(--wiki-color-action-primary);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.explorer {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--wiki-color-surface-canvas);
+  &[hidden] {
+    display: none;
+  }
+}
+.search {
+  padding: 12px;
+  label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--wiki-color-surface-canvas);
+    border: 1px solid var(--wiki-color-border-default);
+    padding: 7px 12px;
+    border-radius: var(--wiki-component-control-radius);
+    font-size: 12px;
+  }
+}
+.conceptScroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  padding: 0 0 12px;
+  details {
+    margin-top: 4px;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--wiki-color-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 16px 4px;
+    background-color: transparent;
+    span {
+      float: right;
+      min-width: 20px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background-color: var(--wiki-color-surface-subtle);
+      text-align: center;
+      font-weight: 400;
+    }
+  }
+  // 개념은 둥근 행으로 나누고 선택한 개념은 왼쪽 막대로 표시합니다.
+  button {
+    display: flex;
+    align-items: center;
+    width: calc(100% - 16px);
+    min-height: 44px;
+    margin: 2px 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 0;
+    border-left: 3px solid transparent;
+    background-color: transparent;
+    text-align: left;
+    gap: 8px;
+    &:hover {
+      background-color: var(--wiki-color-surface-hover);
+    }
+    > span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      flex: 1;
+    }
+    small {
+      display: block;
+      color: var(--wiki-color-text-secondary);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    &[aria-current='true'] {
+      color: var(--wiki-color-action-primary);
+      border-left-color: var(--wiki-color-action-primary);
+      background-color: var(--wiki-color-action-surface);
+    }
+  }
+}
+.conceptFoot {
+  padding: 12px 16px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  font-size: 12px;
+  color: var(--wiki-color-text-secondary);
+  button {
+    margin-top: 8px;
+    width: 100%;
+  }
+}
+.graphZone {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.focusBar {
+  padding: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  > div {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 {
+    margin: 0;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  span {
+    font-size: 12px;
+    color: var(--wiki-color-text-secondary);
+  }
+  > button {
+    flex: none;
+  }
+}
+.focusCard {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-color: transparent;
+  background-color: transparent;
+  text-align: left;
+  h2 {
+    margin: 0;
+  }
+  &[aria-pressed='true'] {
+    background-color: var(--wiki-color-action-surface);
+  }
+}
+.machine {
+  color: var(--wiki-color-relation-machine);
+}
+.expert {
+  color: var(--wiki-color-relation-expert);
+}
+.candidate {
+  color: var(--wiki-color-relation-candidate);
+}
+.notice,
+.error,
+.range,
+.draftNotice {
+  padding: 9px 18px;
+  overflow-wrap: anywhere;
+  flex-shrink: 0;
+  p {
+    margin: 4px 0;
+  }
+}
+.notice {
+  background-color: var(--wiki-color-status-warning-surface);
+  color: var(--wiki-color-status-warning);
+}
+.error {
+  background-color: var(--wiki-color-status-danger-surface);
+  color: var(--wiki-color-status-danger);
+}
+.range {
+  color: var(--wiki-color-text-secondary);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  font-size: 12px;
+  details {
+    max-height: 100px;
+    overflow: auto;
+  }
+}
+.draftNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  background-color: var(--wiki-color-action-surface);
+}
+.empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  gap: 12px;
+  > span {
+    font-size: 34px;
+    color: var(--wiki-color-action-primary);
+  }
+  h2,
+  p {
+    margin: 0;
+  }
+  h2 {
+    font-size: 16px;
+  }
+  p {
+    max-width: 440px;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.noMatch {
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+  padding: 20px 8px;
+}
+.inspector {
+  padding: 16px;
+  overflow-wrap: anywhere;
+  font: 13px/20px var(--wiki-font-family-ui);
+  h2 {
+    font-size: 16px;
+  }
+  h3 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+  }
+  button:not([role='tab']) {
+    border: 1px solid var(--wiki-color-border-default);
+    background-color: var(--wiki-color-surface-canvas);
+    padding: 7px 12px;
+    border-radius: var(--wiki-component-control-radius);
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  a {
+    color: var(--wiki-color-action-primary);
+  }
+}
+.phrase {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--wiki-color-action-primary);
+    font-size: 12px;
+  }
+}
+.fields {
+  margin: 0;
+  font-size: 13px;
+  > div {
+    display: grid;
+    grid-template-columns: 80px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 12px;
+    min-height: 32px;
+    padding: 6px 0;
+    box-sizing: border-box;
+  }
+  dt {
+    color: var(--wiki-color-text-secondary);
+    font-size: 12px;
+  }
+  dd {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+.evidence {
+  overflow-wrap: anywhere;
+  blockquote {
+    margin: 0;
+    padding-left: 12px;
+    border-left: 2px solid var(--wiki-color-action-primary);
+    white-space: pre-wrap;
+  }
+  a,
+  details {
+    font-size: 12px;
+  }
+}
+.attribute {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+  small {
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.form {
+  margin-top: 24px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  padding-top: 16px;
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 16px 0;
+  }
+  input,
+  select,
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--wiki-color-surface-canvas);
+    border: 1px solid var(--wiki-color-border-default);
+    border-radius: var(--wiki-component-control-radius);
+    padding: 7px 12px;
+  }
+  textarea {
+    resize: vertical;
+  }
+  .actions {
+    margin-top: 24px;
+  }
+}
+.muted {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+}
+.source {
+  font: 12px/18px var(--wiki-font-family-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@container ontology (max-width: 899px) {
+  .header {
+    flex-wrap: wrap;
+    span {
+      display: none;
+    }
+  }
+}
+
+.form fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.form label:has(> input[type='checkbox']) {
+  flex-direction: row;
+  align-items: flex-start;
+  min-height: 32px;
+  gap: 8px;
+}
+.form input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0;
+  flex: none;
+}
+
+.mapWorkspace {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-layout-workbench-panel-gap);
+}
+.noticePanel {
+  flex-shrink: 0;
+  min-width: 0;
+  max-height: 30%;
+  overflow: auto;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-canvas);
+}
+.mobileNotices {
+  display: none;
+}
+@container ontology (width < 900px) {
+  .mobileNotices {
+    display: block;
+    flex-shrink: 0;
+    max-height: 30%;
+    overflow: auto;
+    border-bottom: 1px solid var(--wiki-color-border-default);
+  }
+}
+.root [hidden] {
+  display: none !important;
+}
+.root > [data-workspace-page] {
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+  overflow: auto;
+  box-sizing: border-box;
+  // 작업 페이지는 공통 틀 패널과 같은 배경·경계선·모서리의 카드로 보입니다.
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background-color: var(--wiki-color-surface-canvas);
+  // 다른 화면의 제목과 같은 왼쪽 기준선에서 시작하고 내용 너비만 제한합니다.
+  > header,
+  > div {
+    width: 100%;
+    max-width: 1120px;
+  }
+}
+.taskPage {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.assertionSummary {
+  display: grid;
+  gap: var(--wiki-space-8);
+  margin-bottom: var(--wiki-space-16);
+  padding: 0 0 var(--wiki-space-16);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+
+  > p {
+    margin: 0;
+  }
+}
+
+.form [data-workspace-section] label {
+  margin: 0;
+}
+
+[data-workspace-section] .form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.taskPage > div > .actions {
+  margin-top: var(--wiki-space-24);
+  padding-top: var(--wiki-space-16);
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+
+.attribute[aria-pressed='true'] {
+  border-color: var(--wiki-color-action-primary);
+  background-color: var(--wiki-color-action-surface);
+}
+
+[data-workspace-section] .attribute {
+  margin-block: 0;
+}
+
+.actions button,
+.inspector button:not([role='tab']),
+.form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--wiki-component-control-height);
+  line-height: var(--wiki-component-control-line-height);
+}
+.search input,
+.form input:not([type='checkbox']),
+.form select {
+  min-height: var(--wiki-component-control-height);
+  line-height: var(--wiki-component-control-line-height);
+}
+.form select {
+  padding-right: 36px;
+}
+
+.actions button,
+.inspector button:not([role='tab']),
+.form button,
+.search input,
+.form input:not([type='checkbox']),
+.form select,
+.form textarea {
+  border-color: var(--wiki-color-border-control);
+}
+.inspectorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.inspector button.primaryAction {
+  background-color: var(--wiki-color-button-primary-background);
+  border-color: var(--wiki-color-button-primary-background);
+  color: var(--wiki-color-button-primary-foreground);
+  &:hover:not(:disabled) {
+    background-color: var(--wiki-color-button-primary-hover-background);
+  }
+}
+.taskComparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  padding-top: 20px;
+}
+.referencePane,
+.editorPane {
+  min-width: 0;
+  > h2 {
+    margin: 0 0 12px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+}
+.referencePane {
+  padding-right: 24px;
+  border-right: 1px solid var(--wiki-color-border-default);
+}
+.referenceText {
+  margin: 0;
+  max-height: min(54vh, 640px);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 16px/26px var(--wiki-font-family-ui);
+  scrollbar-gutter: stable;
+}
+.referencePane .evidence blockquote {
+  max-height: min(48vh, 520px);
+  overflow: auto;
+  padding-right: 12px;
+  font: 16px/26px var(--wiki-font-family-ui);
+}
+.goMove {
+  margin-top: 20px;
+}
+.referenceDisclosure {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  > summary {
+    cursor: pointer;
+    color: var(--wiki-color-text-secondary);
+    min-height: 32px;
+    line-height: 20px;
+  }
+}
+.editorPane .form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.editorPane .form label:first-child {
+  margin-top: 0;
+}
+.taskHint {
+  margin: 0 0 20px;
+  color: var(--wiki-color-text-secondary);
+  font: 13px/20px var(--wiki-font-family-ui);
+}
+.editorPane button[type='submit'] {
+  background-color: var(--wiki-color-button-primary-background);
+  border-color: var(--wiki-color-button-primary-background);
+  color: var(--wiki-color-button-primary-foreground);
+  &:hover:not(:disabled) {
+    background-color: var(--wiki-color-button-primary-hover-background);
+  }
+}
+.conceptHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  h3 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 26px;
+  }
+  > span {
+    color: var(--wiki-color-text-secondary);
+    font-size: 12px;
+  }
+  > a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 24px;
+  }
+}
+.conceptDetail section {
+  margin-top: 24px;
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+  }
+  h3 > span {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.connectionList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  li + li {
+    border-top: 1px solid var(--wiki-color-border-default);
+  }
+}
+.connectionList button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  text-align: left;
+  > .connectionText {
+    display: grid;
+    flex: 1;
+    gap: 4px;
+    min-width: 0;
+  }
+  > svg {
+    flex: none;
+    color: var(--wiki-color-text-secondary);
+  }
+  strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  small {
+    font-size: 12px;
+  }
+  &:hover {
+    background-color: var(--wiki-color-surface-hover);
+  }
+}
+.conditionSummary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  color: var(--wiki-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.connectionMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--wiki-color-text-secondary);
+  > span {
+    white-space: nowrap;
+  }
+}
+.valueText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.valueList {
+  margin: 0;
+  padding-left: 20px;
+  li + li {
+    margin-top: 6px;
+  }
+}
+.valueFields {
+  margin: 0;
+  > div {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--wiki-color-border-default);
+  }
+  dt {
+    font-size: 12px;
+    color: var(--wiki-color-text-secondary);
+    margin-bottom: 4px;
+  }
+  dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+.anchorQuote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--wiki-color-border-default);
+}
+.actions .iconButton {
+  width: 36px;
+  padding-inline: 0;
+}
+@container workspace (width < 900px) {
+  .mapWorkspace > .header,
+  .root > [data-workspace-page] {
+    padding: 16px;
+  }
+  .taskComparison {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .referencePane {
+    padding-right: 0;
+    padding-bottom: 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--wiki-color-border-default);
+  }
+  .referenceText {
+    max-height: 240px;
+  }
+}
+@container workspace (width < 420px) {
+  .fields > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
+// 문서 범위로 열었을 때 어느 문서의 온톨로지인지 알리는 칩입니다(화면 제목은 앱 Header가 보입니다).
+.scopeChip {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wiki-space-6);
+  min-height: 28px;
+  padding: 3px 12px;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 999px;
+  font-size: var(--wiki-font-size-13);
+}

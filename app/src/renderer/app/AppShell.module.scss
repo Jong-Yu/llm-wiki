@@ -1,0 +1,546 @@
+.appShell {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  // 바깥 패널(사이드바·본문) 사이와 가장자리는 패널 간격만큼 비우고 바탕색을 드러냅니다.
+  grid-template-columns:
+    calc(
+      var(--wiki-layout-workbench-navigation-width) +
+        var(--wiki-layout-workbench-panel-gap)
+    )
+    minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--wiki-layout-workbench-status-height);
+  overflow: hidden;
+  background: var(--wiki-color-surface-backdrop);
+  color: var(--wiki-color-text-primary);
+  font: var(--wiki-font-size-13) / var(--wiki-font-line-height-ui)
+    var(--wiki-font-family-ui);
+  &[data-sidebar-open='false'] {
+    grid-template-columns: calc(
+        64px + var(--wiki-layout-workbench-panel-gap)
+      ) minmax(0, 1fr);
+  }
+}
+:where(.appShell) {
+  &,
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  :where(button, input, textarea, select) {
+    font: inherit;
+    color: inherit;
+  }
+  :where(a) {
+    color: inherit;
+    text-decoration: none;
+  }
+  :where(a:hover) {
+    color: var(--wiki-color-action-primary);
+  }
+  :where(h1, h2, h3, p) {
+    margin: 0;
+  }
+  :where(svg) {
+    flex-shrink: 0;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--wiki-color-border-default) transparent;
+  }
+}
+.sidebar {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  margin: var(--wiki-layout-workbench-panel-gap) 0
+    var(--wiki-layout-workbench-panel-gap)
+    var(--wiki-layout-workbench-panel-gap);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-panel);
+  padding: 0 12px 12px;
+}
+.brand {
+  display: flex;
+  min-width: 0;
+  height: 60px;
+  min-height: 60px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.brand > :first-child {
+  width: 28px;
+  height: 24px;
+}
+.navigationText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--wiki-component-control-height);
+  margin: 2px 0 20px;
+  padding: 0 var(--wiki-space-12);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  font-size: var(--wiki-font-size-13);
+  background: var(--wiki-color-surface-canvas);
+}
+.workspaceArrow {
+  margin-left: auto;
+  color: var(--wiki-color-text-secondary);
+}
+.navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.navigation a,
+.settingsLink {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  min-height: var(--wiki-component-control-height);
+  padding: 0 var(--wiki-space-12);
+  border-radius: var(--wiki-component-control-radius);
+  color: var(--wiki-color-text-secondary);
+  font-size: 13px;
+  &:hover:not([aria-current='page']) {
+    background: var(--wiki-color-surface-hover);
+    color: var(--wiki-color-text-primary);
+  }
+  &[aria-current='page'] {
+    background: var(--wiki-color-action-surface);
+    color: var(--wiki-color-action-primary);
+    font-weight: var(--wiki-font-weight-semibold);
+    box-shadow: inset 2px 0 var(--wiki-color-action-primary);
+  }
+}
+.settingsLink.updateButton {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--wiki-color-action-primary);
+  &:disabled {
+    cursor: progress;
+    opacity: 0.6;
+  }
+}
+.sidebarBottom {
+  margin-top: auto;
+  padding-top: 16px;
+}
+/* 모든 화면이 같은 구조: 위치 경로 헤더 패널 + 본문 패널(들)을 패널 간격으로 나눕니다. */
+.main {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--wiki-layout-workbench-panel-gap);
+  margin: var(--wiki-layout-workbench-panel-gap);
+  container: workbench / inline-size;
+}
+.topbar {
+  display: flex;
+  min-height: var(--wiki-layout-workbench-header-height);
+  height: var(--wiki-layout-workbench-header-height);
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 0 24px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-canvas);
+}
+.sidebarToggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wiki-space-8);
+  height: var(--wiki-component-control-height);
+  min-height: var(--wiki-component-control-height);
+  border: 1px solid transparent;
+  border-radius: var(--wiki-component-control-radius);
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-component-control-line-height);
+  cursor: pointer;
+  &:enabled:hover {
+    background: var(--wiki-color-surface-hover);
+    color: var(--wiki-color-text-primary);
+  }
+}
+.sidebarToggle {
+  width: var(--wiki-component-control-height);
+  padding: 0;
+}
+.backButton {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--wiki-component-control-height);
+  height: var(--wiki-component-control-height);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--wiki-component-control-radius);
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  cursor: pointer;
+  &:hover {
+    background: var(--wiki-color-surface-hover);
+    color: var(--wiki-color-text-primary);
+  }
+}
+.breadcrumb {
+  min-width: 0;
+  ol {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--wiki-space-8);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--wiki-font-size-14);
+  }
+  li {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--wiki-space-8);
+  }
+  a {
+    color: var(--wiki-color-action-primary);
+    white-space: nowrap;
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+  li > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.crumbSeparator {
+  color: var(--wiki-color-text-secondary);
+}
+.crumbCurrent {
+  margin: 0;
+  overflow: hidden;
+  font-size: inherit;
+  font-weight: var(--wiki-font-weight-semibold);
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+// 화면의 주 행동(최대 3개)은 Header 오른쪽에 놓습니다. 좁은 폭에서만 메뉴로 접습니다.
+.topbarActions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  margin-left: auto;
+}
+.actionsToggle {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--wiki-component-control-height);
+  height: var(--wiki-component-control-height);
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--wiki-component-control-radius);
+  background: transparent;
+  color: var(--wiki-color-text-primary);
+  cursor: pointer;
+}
+.topbarActionsSlot {
+  display: contents;
+}
+.topbarActionsSlot:has(.topbarActions:empty) + .actionsToggle {
+  display: none !important;
+}
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-canvas);
+  container: workspace / inline-size;
+}
+/* 화면 이동 때 프로그램이 주는 포커스(스킵 링크·스크린 리더 안내용)는 본문 전체를 감싸는 큰 윤곽선으로 보이지 않게 합니다. 안쪽 조작 요소의 포커스 표시는 그대로입니다. */
+.content:focus-visible {
+  outline: none;
+}
+.contentInner {
+  display: contents;
+  &[hidden] {
+    display: none;
+  }
+}
+.statusbar {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 0 12px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  background: var(--wiki-color-surface-panel);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  line-height: var(--wiki-font-line-height-caption);
+}
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.connectedDot,
+.disconnectedDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wiki-color-text-secondary);
+}
+.connectedDot {
+  background: var(--wiki-color-status-success);
+}
+.statusWorkspace {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sessionStatus {
+  margin-left: auto;
+  min-width: 0;
+}
+.skipLink {
+  position: absolute;
+  z-index: 100;
+  top: 4px;
+  left: 64px;
+  padding: 8px 12px;
+  border: 1px solid var(--wiki-color-action-primary);
+  background: var(--wiki-color-surface-canvas);
+  transform: translateY(-160%);
+  &:focus {
+    transform: translateY(0);
+  }
+}
+.appShell[data-sidebar-open='false'] {
+  .sidebar {
+    padding-inline: 10px;
+  }
+  // 접힌 사이드바에는 펼침 아이콘을 두지 않고, 마우스를 올리면 서랍처럼 열립니다.
+  .sidebarToggle {
+    display: none;
+  }
+  .brandRow {
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding-bottom: 8px;
+  }
+  .brand {
+    height: 44px;
+    min-height: 44px;
+    padding-inline: 5px;
+  }
+  .navigationText,
+  .workspaceArrow {
+    display: none;
+  }
+  .workspace {
+    padding-inline: 10px;
+    justify-content: center;
+    border-color: transparent;
+    background: transparent;
+  }
+  .navigation a,
+  .settingsLink {
+    justify-content: center;
+    padding-inline: 0;
+  }
+}
+@keyframes drawerIn {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .appShell[data-sidebar-hover='true'] .sidebar {
+    animation: none;
+  }
+}
+// 호버·포커스 임시 펼침: 칸을 차지하지 않고 본문 위에 겹쳐 보입니다.
+.appShell[data-sidebar-open='false'][data-sidebar-hover='true'] {
+  .sidebar {
+    position: absolute;
+    z-index: 20;
+    top: 0;
+    bottom: var(--wiki-layout-workbench-status-height);
+    left: 0;
+    width: var(--wiki-layout-workbench-navigation-width);
+    box-shadow: 4px 0 16px #0000001a;
+    animation: drawerIn 160ms ease-out;
+  }
+  .sidebarToggle {
+    display: inline-flex;
+  }
+  .brandRow {
+    flex-direction: row;
+    padding-bottom: 0;
+  }
+  .brand {
+    height: 60px;
+    min-height: 60px;
+  }
+  .navigationText,
+  .workspaceArrow {
+    display: revert;
+  }
+  .workspace {
+    padding-inline: var(--wiki-space-12);
+    justify-content: flex-start;
+    border-color: var(--wiki-color-border-default);
+    background: var(--wiki-color-surface-canvas);
+  }
+  .navigation a,
+  .settingsLink {
+    justify-content: flex-start;
+    padding-inline: var(--wiki-space-12);
+  }
+}
+@media (max-width: 899px) {
+  .appShell,
+  .appShell[data-sidebar-open='true'] {
+    grid-template-columns: calc(
+        64px + var(--wiki-layout-workbench-panel-gap)
+      ) minmax(0, 1fr);
+  }
+  .appShell[data-sidebar-open='true'] .sidebar {
+    position: absolute;
+    z-index: 20;
+    inset: 0 auto var(--wiki-layout-workbench-status-height) 0;
+    width: var(--wiki-layout-workbench-navigation-width);
+    box-shadow: 4px 0 16px #0000001a;
+  }
+  .appShell[data-sidebar-open='true'] .sidebarToggle {
+    display: none;
+  }
+  .topbar {
+    padding-inline: 12px;
+  }
+  .statusWorkspace {
+    display: none;
+  }
+}
+@media (max-width: 520px) {
+  .topbar {
+    gap: 6px;
+  }
+  .statusbar {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+.mobileClose {
+  display: none;
+}
+@media (max-width: 899px) {
+  .appShell[data-sidebar-open='true'] .mobileClose {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    min-height: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--wiki-component-control-radius);
+    background: transparent;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+
+@container workbench (width < 900px) {
+  .topbar {
+    padding-inline: var(--wiki-space-16);
+  }
+}
+
+// 안쪽도 나누는 화면: 본문 패널의 틀을 풀고 각 내용 영역이 스스로 패널이 됩니다.
+.appShell[data-panels-split='true'] .content {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+// 좁은 폭에서는 Header의 버튼을 "⋯" 메뉴 안으로 접습니다.
+@media (max-width: 720px) {
+  .topbar {
+    position: relative;
+  }
+  .actionsToggle {
+    display: inline-flex;
+  }
+  .topbarActions {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    right: 0;
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 200px;
+    padding: var(--wiki-space-8);
+    border: 1px solid var(--wiki-color-border-control);
+    border-radius: var(--wiki-radius-8);
+    background: var(--wiki-color-surface-canvas);
+    box-shadow: var(--wiki-shadow-overlay);
+    &[data-open='true'] {
+      display: flex;
+    }
+  }
+}

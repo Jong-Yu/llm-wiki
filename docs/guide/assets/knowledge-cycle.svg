@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" width="1200" height="680" role="img" aria-labelledby="knowledge-title knowledge-desc">
+  <title id="knowledge-title">LLM Wiki에서 자료를 지식으로 활용하고 갱신하는 과정</title>
+  <desc id="knowledge-desc">자료 원본을 판본별로 보관하고 편집 가능한 Wiki 문서를 만듭니다. 개인 AI는 본문에서 개념과 관계, 조건과 원문 근거를 추출합니다. 사람과 개인 AI는 문서와 관계를 참고해 질문하고 개인 결과물 초안을 만듭니다. 사람은 필요한 부분의 원문 해석과 업무 판단을 검토해 이유를 기록합니다. 본문이 바뀌면 새 관계 후보를 확인하고 반영한 뒤 필요한 부분을 다시 검토합니다. 원본과 이전 기록은 보존하며 추출이나 초안 생성 자체가 사람의 승인이나 자동 Wiki 반영을 뜻하지는 않습니다.</desc>
+  <defs>
+    <marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#526a63" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="review-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#205b4e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; fill: #182b34; }
+      .title { font-size: 27px; font-weight: 700; letter-spacing: -.7px; }
+      .subtitle { font-size: 17px; fill: #53656e; }
+      .step { font-size: 15px; font-weight: 600; fill: #205b4e; }
+      .heading { font-size: 23px; font-weight: 700; letter-spacing: -.5px; }
+      .copy { font-size: 17px; fill: #425950; }
+      .small { font-size: 16px; fill: #53656e; }
+      .flow { fill: none; stroke: #526a63; stroke-width: 2; marker-end: url(#flow-arrow); }
+      .review-flow { fill: none; stroke: #205b4e; stroke-width: 2; stroke-dasharray: 5 5; marker-start: url(#review-arrow); marker-end: url(#review-arrow); }
+    </style>
+  </defs>
+
+  <rect width="1200" height="680" rx="16" fill="#f7f9f8"/>
+  <text x="40" y="49" class="title">자료를 쌓고, 근거로 활용하고, 바뀌면 다시 확인합니다</text>
+  <text x="40" y="80" class="subtitle">원본 · 문서 · 관계 · 사람의 판단을 연결해 지식을 계속 사용할 수 있게 합니다.</text>
+
+  <g aria-label="자료를 지식으로 활용하는 네 단계">
+    <rect x="40" y="126" width="262" height="175" rx="12" fill="#fff" stroke="#cbd8d2"/>
+    <text x="60" y="159" class="step">01  자료 등록</text>
+    <text x="60" y="199" class="heading">자료 원본 보관</text>
+    <text x="60" y="234" class="copy">파일과 최초 입력을</text>
+    <text x="60" y="260" class="copy">판본별로 보존합니다.</text>
+
+    <path d="M 307 213 H 321" class="flow"/>
+    <rect x="326" y="126" width="262" height="175" rx="12" fill="#fff" stroke="#cbd8d2"/>
+    <text x="346" y="159" class="step">02  읽기와 편집</text>
+    <text x="346" y="199" class="heading">편집 가능한 문서</text>
+    <text x="346" y="234" class="copy">원본에서 준비한 Wiki 본문과</text>
+    <text x="346" y="260" class="copy">이전 문서 이력을 보관합니다.</text>
+
+    <path d="M 593 213 H 607" class="flow"/>
+    <rect x="612" y="126" width="262" height="175" rx="12" fill="#edf4ef" stroke="#b9cfc4"/>
+    <text x="632" y="159" class="step">03  개인 AI의 추출</text>
+    <text x="632" y="199" class="heading">개념·관계 구조화</text>
+    <text x="632" y="234" class="copy">대상·관계·조건과</text>
+    <text x="632" y="260" class="copy">원문 근거를 함께 연결합니다.</text>
+
+    <path d="M 879 213 H 893" class="flow"/>
+    <rect x="898" y="126" width="262" height="175" rx="12" fill="#fff" stroke="#cbd8d2"/>
+    <text x="918" y="159" class="step">04  사람과 개인 AI의 활용</text>
+    <text x="918" y="199" class="heading">근거로 질문·활용</text>
+    <text x="918" y="234" class="copy">문서와 관계를 참고해</text>
+    <text x="918" y="260" class="copy">답변·개인 초안을 만듭니다.</text>
+  </g>
+
+  <g aria-label="필요한 대상만 사람이 검토하는 선택 검토">
+    <path d="M 743 306 V 338" class="review-flow"/>
+    <text x="766" y="328" class="small">필요한 부분을 선택해 검토</text>
+    <rect x="612" y="345" width="548" height="91" rx="10" fill="#fff" stroke="#b9cfc4" stroke-dasharray="5 4"/>
+    <text x="634" y="379" class="heading">사람이 근거와 판단을 확인합니다</text>
+    <text x="634" y="410" class="copy">원문 해석 확인·정정 · 전문가 판단과 이유 기록</text>
+  </g>
+
+  <text x="40" y="361" class="heading">문서와 관계의 근거를 함께 읽습니다</text>
+  <text x="40" y="392" class="small">AI 추출과 사람의 판단은 출처를 구별해 남깁니다.</text>
+  <text x="40" y="420" class="small">검토가 필요한 대상부터 확인할 수 있습니다.</text>
+
+  <g aria-label="본문 변경 후 지식을 갱신하는 반복 과정">
+    <rect x="40" y="476" width="1120" height="149" rx="12" fill="#eaf1ee"/>
+    <text x="62" y="510" class="step">내용이 달라지면 지식도 갱신합니다</text>
+    <text x="171" y="553" class="heading" text-anchor="middle">본문 수정</text>
+    <path d="M 284 546 H 407" class="flow"/>
+    <text x="600" y="553" class="heading" text-anchor="middle">관계 재추출·후보 확인·반영</text>
+    <path d="M 795 546 H 918" class="flow"/>
+    <text x="1040" y="553" class="heading" text-anchor="middle">필요한 재검토</text>
+    <path d="M 1040 568 V 598 H 171 V 568" class="flow"/>
+    <rect x="468" y="585" width="264" height="25" fill="#eaf1ee"/>
+    <text x="600" y="604" class="small" text-anchor="middle">다음 변경에도 같은 확인을 반복</text>
+  </g>
+
+  <text x="40" y="658" class="small">추출과 초안 생성은 사람의 승인과 다릅니다. Wiki에 반영할 내용은 사용자가 확인해 저장합니다.</text>
+</svg>

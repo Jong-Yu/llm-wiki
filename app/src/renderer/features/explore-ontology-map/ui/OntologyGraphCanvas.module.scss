@@ -1,0 +1,583 @@
+.root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  color: var(--wiki-color-text-primary);
+  background-color: var(--wiki-color-surface-canvas);
+}
+[hidden] {
+  display: none !important;
+}
+
+// 지도 머리글은 상세 머리글과 같은 50px로 맞춰 두 패널의 선이 이어지게 합니다.
+.focusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  flex-shrink: 0;
+  min-height: 50px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.notices {
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow: auto;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.segment {
+  display: inline-flex;
+  button {
+    min-height: 26px;
+    margin-left: -1px;
+    padding: 3px 10px;
+    border: 1px solid var(--wiki-color-border-default);
+    border-radius: 0;
+    background-color: var(--wiki-color-surface-canvas);
+    color: var(--wiki-color-text-primary);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button:first-child {
+    margin-left: 0;
+    border-radius: 6px 0 0 6px;
+  }
+  button:last-child {
+    border-radius: 0 6px 6px 0;
+  }
+  button[aria-pressed='true'] {
+    border-color: var(--wiki-color-action-primary);
+    background-color: var(--wiki-color-action-primary);
+    color: var(--wiki-color-button-primary-foreground);
+  }
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 16px 0;
+  > span {
+    color: var(--wiki-color-text-secondary);
+    font-size: 12px;
+  }
+}
+.chip {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 999px;
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  small {
+    margin-left: 4px;
+    color: var(--wiki-color-text-secondary);
+    font-size: 12px;
+  }
+  &[aria-pressed='true'] {
+    border-color: var(--wiki-color-action-primary);
+    background-color: var(--wiki-color-action-primary);
+    color: var(--wiki-color-button-primary-foreground);
+    small {
+      color: var(--wiki-color-button-primary-foreground);
+    }
+  }
+}
+
+.stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 280px;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: none;
+  background-image: radial-gradient(
+    var(--wiki-color-border-default) 0.65px,
+    transparent 0.65px
+  );
+  background-size: 18px 18px;
+  cursor: grab;
+  &:focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: -2px;
+  }
+}
+.panning {
+  cursor: grabbing;
+  user-select: none;
+}
+.world {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center;
+}
+// 범례는 지도 왼쪽 아래에 떠 있고 마우스를 받지 않습니다.
+.legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 8px;
+  background-color: var(--wiki-color-surface-canvas);
+  font-size: 12px;
+  pointer-events: none;
+  i {
+    display: inline-block;
+    width: 18px;
+    height: 0;
+    margin-right: 5px;
+    border-top: 2px solid;
+    vertical-align: middle;
+  }
+  .candidate i {
+    border-top-style: dashed;
+  }
+}
+.machine {
+  color: var(--wiki-color-relation-machine);
+}
+.expert {
+  color: var(--wiki-color-relation-expert);
+}
+.candidate {
+  color: var(--wiki-color-relation-candidate);
+}
+
+.wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.wire {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  transition: opacity 0.12s;
+  path {
+    fill: none;
+  }
+}
+.wire.candidate {
+  stroke-dasharray: 6 4;
+}
+.wire.far {
+  opacity: 0.55;
+  stroke-width: 1.6;
+}
+.wire.off {
+  opacity: 0.1;
+}
+.wire.hot {
+  stroke-width: 2.8;
+  opacity: 1;
+}
+// 관계선 위로 올리거나 누르기 쉽게 보이지 않는 굵은 선을 겹칩니다.
+.hit {
+  stroke: transparent;
+  stroke-width: 14;
+  stroke-dasharray: none;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.node,
+.relation {
+  position: absolute;
+  z-index: 2;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--wiki-color-text-primary);
+  transition: opacity 0.12s;
+}
+.node {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 8px;
+  // 밝은 화면에서 흰 카드가 배경에 묻히지 않도록 테두리를 기본 선보다 조금 진하게 합니다.
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--wiki-color-border-default) 45%,
+      var(--wiki-color-border-control)
+    );
+  border-radius: 8px;
+  background-color: var(--wiki-color-surface-canvas);
+  text-align: left;
+}
+.node.topic {
+  border: 2px solid var(--wiki-color-text-primary);
+  background-color: var(--wiki-color-action-surface);
+}
+.node.picked,
+.node:hover {
+  border: 2px solid var(--wiki-color-action-primary);
+}
+.node.dim,
+.relation.off {
+  opacity: 0.3;
+}
+.nodeText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+// 개념 종류별로 색이 달라지는 둥근 타일에 첫 글자를 넣습니다.
+.avatar {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: #ffffff;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+.node strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+.node span,
+.node small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--wiki-color-text-secondary);
+  line-height: 1.3;
+}
+
+// 관계 이름 알약은 항상 보이며 개념을 가리키는 동안 그 개념의 것만 남습니다.
+.relation {
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 0 8px;
+  border: 1.6px solid var(--wiki-color-border-control);
+  border-radius: 999px;
+  background-color: var(--wiki-color-surface-canvas);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.relation.machine {
+  border-color: var(--wiki-color-relation-machine);
+  color: var(--wiki-color-text-primary);
+}
+.relation.expert {
+  border-color: var(--wiki-color-relation-expert);
+  color: var(--wiki-color-text-primary);
+}
+.relation.candidate {
+  border-color: var(--wiki-color-relation-candidate);
+  border-style: dashed;
+  color: var(--wiki-color-text-primary);
+}
+.relation.selected {
+  border-width: 2.4px;
+  background-color: var(--wiki-color-action-surface);
+}
+.relation.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.root button:focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
+}
+.empty {
+  // 안내는 이동하는 카드와 겹치지 않도록 캔버스 밖 하단의 별도 줄에 둡니다.
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  background-color: var(--wiki-color-surface-panel);
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  strong {
+    font-weight: 500;
+  }
+  p {
+    margin: 3px 0 0;
+  }
+}
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  min-height: var(--wiki-component-control-height-small);
+  padding: 4px 12px;
+  background-color: var(--wiki-color-surface-panel);
+  border-top: 1px solid var(--wiki-color-border-default);
+  color: var(--wiki-color-text-secondary);
+  font-size: 10px;
+}
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.controls button {
+  min-height: var(--wiki-component-control-height-small);
+  padding: 3px 8px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.controls output {
+  min-width: 40px;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 950px) {
+  .hint {
+    display: none;
+  }
+  .footer {
+    justify-content: flex-end;
+  }
+}
+@media (max-height: 650px) {
+  .viewport {
+    min-height: 200px;
+  }
+}
+
+.controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.controls .zoomValue {
+  min-width: 52px;
+  border-color: transparent;
+  background-color: transparent;
+}
+
+.heading {
+  display: contents;
+}
+.exploration {
+  container-type: inline-size;
+}
+.exploration .world {
+  transform-origin: 0 0;
+}
+.exploration .focusbar {
+  position: relative;
+  z-index: 11;
+  box-sizing: border-box;
+  height: var(--ontology-explorer-toolbar-height, 58px);
+  flex-wrap: nowrap;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 12px;
+}
+.exploration .heading {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+.tools {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--wiki-component-control-height-small);
+  padding: 4px 9px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+  &::-webkit-details-marker {
+    display: none;
+  }
+  &:focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+  }
+  small {
+    display: grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--wiki-color-action-primary);
+    color: var(--wiki-color-button-primary-foreground);
+    font-size: 10px;
+  }
+}
+.settings {
+  position: relative;
+  &[open] > summary {
+    border-color: var(--wiki-color-action-primary);
+  }
+}
+.options {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 8;
+  width: 300px;
+  max-width: calc(100cqi - 24px);
+  max-height: 360px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 8px;
+  background: var(--wiki-color-surface-canvas);
+  box-shadow: 0 6px 20px #00000018;
+  .segment {
+    display: flex;
+    button {
+      flex: 1;
+      min-height: var(--wiki-component-control-height-small);
+      white-space: normal;
+    }
+  }
+  .chips {
+    padding: 12px 0 0;
+    border-top: 1px solid var(--wiki-color-border-default);
+    > span {
+      width: 100%;
+    }
+  }
+  .chip {
+    min-height: var(--wiki-component-control-height-small);
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+.optionsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  cursor: pointer;
+}
+.rangeHint {
+  margin: 8px 0 12px;
+  color: var(--wiki-color-text-secondary);
+  font-size: 11px;
+  line-height: 1.6;
+}
+@container ontology (width < 700px) {
+  .exploration .focusbar {
+    flex-wrap: wrap;
+  }
+  .exploration .heading {
+    flex: 0 0 100%;
+    height: 40px;
+  }
+  .tools {
+    margin-left: auto;
+  }
+}
+@container (max-width: 520px) {
+  .exploration .focusbar {
+    gap: 6px;
+    padding: 8px;
+  }
+  .tool {
+    min-width: 32px;
+    padding: 4px 6px;
+    > span {
+      display: none;
+    }
+  }
+  .settings > summary > span {
+    display: inline;
+  }
+  .settings > summary > small {
+    display: none;
+  }
+}
+
+// 좁은 본문에서도 확대·축소·맞춤의 클릭 영역을 모두 보존합니다.
+@container ontology (width < 380px) {
+  .controls {
+    gap: 4px;
+  }
+  .controls button {
+    padding-inline: 6px;
+  }
+  .fitLabel {
+    display: none;
+  }
+}

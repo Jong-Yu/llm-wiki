@@ -5,6 +5,7 @@
 from bisect import bisect_right
 import re
 
+from core.modules.documents.metadata import parse_document
 from . import constants
 from .anchors import normalize_anchor, endpoint_key
 from .errors import OntologyValidationError
@@ -17,11 +18,12 @@ from .values import (
 class _ExtractionValidation:
     """한 번의 추출 검증에서만 개체 참조표와 정확한 원문 위치를 공유한다."""
 
-    def __init__(self, schema_version, source, document, source_revision):
+    def __init__(self, schema_version, source, document, source_revision, body_only=False):
         self.schema_version = schema_version
         self.source = source
         self.document = document
         self.source_revision = source_revision
+        self.source_offset = 0 if source is None or not body_only else len(source) - len(parse_document(source).body)
         self.entity_ids = {}
         self.entity_types = constants.V1_ENTITY_TYPES if self.schema_version == 1 else constants.ENTITY_TYPES
         self.predicates = {
@@ -38,7 +40,7 @@ class _ExtractionValidation:
         quote = _text(value, constants.MAX_EVIDENCE_CHARACTERS, "evidence")
         if self.source is None:
             return quote
-        offset = self.source.find(quote)
+        offset = self.source.find(quote, self.source_offset)
         if offset < 0:
             raise OntologyValidationError("evidence must occur verbatim in the source document")
         return {
@@ -59,7 +61,7 @@ class _ExtractionValidation:
                 raise OntologyValidationError("source anchors require an explicit v4/v5/v6 relation")
             try:
                 return normalize_anchor(value, document=self.document, source_revision=self.source_revision,
-                                        source=self.source, evidence=quote)
+                                        source=self.source, evidence=quote, source_offset=self.source_offset)
             except (ValueError, UnicodeError) as error:
                 raise OntologyValidationError(str(error)) from error
         identifier = _identifier(value, label)
@@ -245,7 +247,7 @@ def _attributes(attributes, validation):
 
 
 def _items(entities, relations, source=None, relation_candidates=None, *, attributes=None,
-           schema_version=3, document=None, source_revision=None) -> tuple:
+           schema_version=3, document=None, source_revision=None, body_only=False) -> tuple:
     """배열/형식 한도를 먼저 확인하고 개체 → 주장 순서로 참조를 검증한다.
 
     순서는 기존 오류 계약의 일부다. 후보는 관계와 중복 검사를 공유하지만
@@ -269,7 +271,7 @@ def _items(entities, relations, source=None, relation_candidates=None, *, attrib
         raise OntologyValidationError("schema version 1 does not support relation candidates")
     if schema_version < 3 and attributes:
         raise OntologyValidationError("attributes require schema version 3")
-    validation = _ExtractionValidation(schema_version, source, document, source_revision)
+    validation = _ExtractionValidation(schema_version, source, document, source_revision, body_only)
     normalized_entities = _entities(entities, validation)
     claims = set()
     normalized_relations = _relations(relations, validation, claims)
@@ -279,10 +281,10 @@ def _items(entities, relations, source=None, relation_candidates=None, *, attrib
 
 
 def _graph(document: str, revision: str, entities: list, relations: list, source: str,
-           relation_candidates=None, *, attributes=None, schema_version=3) -> dict:
+           relation_candidates=None, *, attributes=None, schema_version=3, body_only=False) -> dict:
     entities, relations, candidates, attributes = _items(
         entities, relations, source, relation_candidates, attributes=attributes, schema_version=schema_version,
-        document=document, source_revision=revision,
+        document=document, source_revision=revision, body_only=body_only,
     )
     graph = {"schema_version": schema_version, "document": document, "source_revision": revision,
              "entities": entities, "relations": relations}

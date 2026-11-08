@@ -6,28 +6,32 @@
 
 # _render는 기계 그래프에 같은 원문/생성 세대의 검토 결과를 겹쳐 보여 준다.
 # _apply_policies는 선택한 정확한 업무 관점에 해당하는 정책을 따로 반영한다. 옛 판단은 pending 이력으로 남긴다.
-from copy import deepcopy
 from core.modules.ontology.errors import OntologyCorruptError
 from core.modules.ontology.constants import VIEWPOINTS
 from core.modules.ontology.snapshots import _query_snapshot
+from core.modules.ontology.connections import _ValidatedGraph
 from core.modules.ontology.context import _context_selection
 from . import contracts, values
+from .values import _copy_value
 from .contracts import ReviewCorruptError, ReviewValidationError
-from .state import _is_policy, _policy_key, _epoch
+from .state import _is_policy, _policy_key, _epoch, _source_layer_matches
 
 
-def _render(self, source, graph_raw, ledger, tokens, domain=None, viewpoint=None, *, policies=True):
+def _render(self, source, graph_raw, ledger, tokens, domain=None, viewpoint=None, *, policies=True, machine_capture=None):
     """기계층과 같은 세대의 검토를 조합하고 정확한 관점의 정책을 별도로 적용한다."""
     # machine_graph는 그대로 보존하고, 같은 세대의 검토를 합쳐 effective_graph와 주장별 판단을 만든다.
     try:
-        machine = _query_snapshot(tokens["document"], source, graph_raw)
+        machine = (machine_capture.read(self.store, tokens["document"], source, graph_raw)
+                   if isinstance(machine_capture, _ValidatedGraph) else None)
+        if machine is None:
+            machine = _query_snapshot(tokens["document"], source, graph_raw)
     except OntologyCorruptError:
         # Derived graph repair still needs the current composite CAS token.
         # Review corruption itself remains fail-closed in _ledger().
         machine = {"document": tokens["document"], "source_revision": source.revision,
                    "status": "unavailable", "error": "ontology_corrupt", "needs_reextraction": True,
                    "entities": [], "relations": [], "attributes": [], "relation_candidates": []}
-    effective = deepcopy(machine)
+    effective = _copy_value(machine)
     claims, latest, ids = [], {}, {}
     for event in ledger["events"]:
         if _is_policy(event):
@@ -35,14 +39,18 @@ def _render(self, source, graph_raw, ledger, tokens, domain=None, viewpoint=None
         if machine["status"] == "ready" and _epoch(event) == _epoch(tokens):
             self._validate_active_event(source, machine, event)
             latest[event["claim_id"]] = event
+    identities = None
     for collection in contracts._COLLECTIONS:
         for value in machine[collection]:
-            identifier = values._claim_id(collection, value, machine["entities"])
+            # 첫 주장과 같은 시점에 모든 개체를 정규화해 기존 오류 순서를 유지한다.
+            if identities is None:
+                identities = values._entity_identities(machine["entities"])
+            identifier = values._claim_id_from_identities(collection, value, identities)
             ids[identifier] = ids.get(identifier, 0) + 1
             event = latest.get(identifier)
             state = {"decision": "unreviewed", "value": value} if event is None else event["after"]
-            claims.append({"claim_id": identifier, "collection": collection, "value": deepcopy(value),
-                           "decision": state["decision"], "reviewed_value": deepcopy(state["value"]),
+            claims.append({"claim_id": identifier, "collection": collection, "value": _copy_value(value),
+                           "decision": state["decision"], "reviewed_value": _copy_value(state["value"]),
                            "review_event_id": None if event is None else event["id"]})
     for collection in contracts._COLLECTIONS:
         effective[collection] = []
@@ -56,12 +64,12 @@ def _render(self, source, graph_raw, ledger, tokens, domain=None, viewpoint=None
         collection = claim["collection"]
         if collection == "relation_candidates" and claim["decision"] in {"accept", "edit"}:
             collection = "relations"
-        effective[collection].append(deepcopy(claim["reviewed_value"]))
+        effective[collection].append(_copy_value(claim["reviewed_value"]))
     pending = [event["id"] for event in ledger["events"]
                if not _is_policy(event) and (machine["status"] != "ready" or _epoch(event) != _epoch(tokens))
                and event["claim_id"] not in latest]
     result = {**tokens, "status": machine["status"], "machine_graph": machine,
-            "effective_graph": effective, "claims": claims, "history": deepcopy(ledger["events"]),
+            "effective_graph": effective, "claims": claims, "history": _copy_value(ledger["events"]),
             "pending_history": pending,
             "needs_review": machine["status"] != "ready" or machine.get("needs_reextraction", False) or bool(pending)
                 or any(claim["needs_review"] for claim in claims),
@@ -70,6 +78,10 @@ def _render(self, source, graph_raw, ledger, tokens, domain=None, viewpoint=None
                           "effective": _context_selection(effective, domain, viewpoint)}}
     if policies:
         self._apply_policies(result, ledger, domain, viewpoint)
+    from .cleanup_state import project
+    project(result, ledger, domain, viewpoint)
+    from .relations import project as project_relations
+    project_relations(self, source, result, ledger, policies=policies)
     return result
 
 
@@ -86,6 +98,11 @@ def _apply_policies(self, result, ledger, domain, viewpoint):
             if (event["target"]["claim"] not in machine[event["collection"]]
                     or any(entities.get(entity["id"]) != entity for entity in event["target"]["entities"])):
                 raise ReviewCorruptError("Current policy target differs from its source generation")
+    if not latest:
+        # With no policy events, the validated source graph and selection
+        # are exactly the current view. Keep its independently copied values.
+        result["policies"] = []
+        return
     summaries, selected = [], {}
     requested = {"domain": domain, "viewpoint": viewpoint}
     for event in latest.values():
@@ -94,12 +111,12 @@ def _apply_policies(self, result, ledger, domain, viewpoint):
         status = ("inactive" if not active else "pending" if not current
                   else "active" if event["scope"] == requested else "other_scope")
         summaries.append({"event_id": event["id"], "claim_id": event["claim_id"],
-                          "collection": event["collection"], "scope": deepcopy(event["scope"]),
+                          "collection": event["collection"], "scope": _copy_value(event["scope"]),
                           "status": status, "decision_event_id": None if not active else event["after"]["value"]["provenance"]["event_id"],
                           "source_revision": event["source_revision"], "graph_revision": event["graph_revision"],
                           "history_revision": event["history_revision"],
-                          "value": deepcopy(event["after"]["value"]),
-                          "entities": deepcopy(event["after"]["entities"])})
+                          "value": _copy_value(event["after"]["value"]),
+                          "entities": _copy_value(event["after"]["entities"])})
         if status == "pending":
             result["pending_history"].append(event["id"])
         elif status == "active":
@@ -114,21 +131,21 @@ def _apply_policies(self, result, ledger, domain, viewpoint):
             if claim["ambiguous"]:
                 raise ReviewCorruptError("A policy target has ambiguous semantic identity")
             claim["source_decision"] = claim["decision"]
-            claim["source_reviewed_value"] = deepcopy(claim["reviewed_value"])
-            claim.update(decision="policy", reviewed_value=deepcopy(event["after"]["value"]), needs_review=False,
+            claim["source_reviewed_value"] = _copy_value(claim["reviewed_value"])
+            claim.update(decision="policy", reviewed_value=_copy_value(event["after"]["value"]), needs_review=False,
                          policy_event_id=event["after"]["value"]["provenance"]["event_id"],
                          latest_policy_event_id=event["id"])
             for entity in event["after"]["entities"]:
                 existing = expert_entities.get(entity["id"])
                 if existing is not None and existing != entity:
                     raise ReviewCorruptError("Conflicting expert entity identities")
-                expert_entities[entity["id"]] = deepcopy(entity)
+                expert_entities[entity["id"]] = _copy_value(entity)
         if claim["decision"] in {"reject", "defer"}:
             continue
         collection = claim["collection"]
         if collection == "relation_candidates" and claim["decision"] in {"accept", "edit"}:
             collection = "relations"
-        effective[collection].append(deepcopy(claim["reviewed_value"]))
+        effective[collection].append(_copy_value(claim["reviewed_value"]))
     if any(entity["id"] in expert_entities for entity in effective["entities"]):
         raise ReviewCorruptError("Expert entity identity collides with a source entity")
     effective["entities"].extend(expert_entities.values())
@@ -151,7 +168,9 @@ def query(self, document, *, domain=None, viewpoint=None):
         result = self._render(source, graph_raw, ledger, tokens, domain, viewpoint)
         if result["status"] == "ready" and result["machine_graph"].get("schema_version") in (3, 4, 5, 6):
             try:
-                self._validate_effective(source, self._render(source, graph_raw, ledger, tokens, policies=False))
+                source_layer = (result if _source_layer_matches(ledger, domain, viewpoint)
+                    else self._render(source, graph_raw, ledger, tokens, policies=False))
+                self._validate_effective(source, source_layer)
                 self._validate_effective(source, result)
             except (ValueError, TypeError) as error:
                 raise ReviewCorruptError("Current reviewed graph is inconsistent") from error

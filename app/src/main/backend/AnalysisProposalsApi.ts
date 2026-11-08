@@ -1,3 +1,5 @@
+import { matchesExpectedScope } from './readApi';
+import { sameAccessRevision } from '@contracts/connection.contract';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { analysisProposalRequestSchema } from '@contracts/analysisProposals.contract';
@@ -22,6 +24,14 @@ const accessSchema = z.object({
   tenant: z.string(),
   profile_id: z.string(),
   policy_revision: z.string(),
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
 });
@@ -133,7 +143,7 @@ function unknownOutcome(
   };
 }
 
-/** 인증·범위와 응답 수명을 main에 한정하는 추출안 전용 API입니다. */
+/** 인증·범위와 응답 수명을 main에 한정하는 추출 결과 전용 API입니다. */
 export class AnalysisProposalsApi {
   #connection: ConnectionService;
   #requests = new Set<AbortController>();
@@ -154,7 +164,7 @@ export class AnalysisProposalsApi {
         ok: false,
         error: {
           code: 'invalid_request',
-          message: '추출안 요청과 기준 판본을 확인해 주세요.',
+          message: '추출 결과 요청과 기준 판본을 확인해 주세요.',
         },
       };
     const request = parsed.data;
@@ -165,18 +175,13 @@ export class AnalysisProposalsApi {
     );
     if ('ok' in context) return context;
     const expected = request.expectedScope;
-    if (
-      expected.userId !== context.active.userId ||
-      expected.tenant !== context.selection.tenant ||
-      expected.profileId !== context.selection.profile ||
-      expected.policyRevision !== context.active.policyRevision
-    )
+    if (!matchesExpectedScope(expected, context))
       return {
         ok: false,
         error: {
           code: 'scope_changed',
           message:
-            '작업 공간·관점이 바뀌었습니다. 이전 초안은 원래 범위에 보존합니다.',
+            '작업 공간 또는 조회 설정이 바뀌었습니다. 이전 초안은 원래 범위에 보존합니다.',
         },
       };
     const workspace = context.active.workspaces.find(
@@ -279,7 +284,13 @@ export class AnalysisProposalsApi {
         access.user_id !== expected.userId ||
         access.tenant !== expected.tenant ||
         access.profile_id !== expected.profileId ||
-        access.policy_revision !== expected.policyRevision ||
+        !sameAccessRevision(
+          {
+            policyRevision: access.policy_revision,
+            accessRevision: access.access_revision,
+          },
+          expected,
+        ) ||
         access.domain !== profile.domain ||
         access.viewpoint !== profile.viewpoint
       ) {

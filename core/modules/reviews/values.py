@@ -13,6 +13,37 @@ from . import contracts
 from .contracts import ReviewValidationError
 
 
+_COPY_MISSING = object()
+
+
+def _copy_value(value, memo=None):
+    """Copy JSON containers without revisiting immutable scalar values/keys.
+
+    Each call owns its memo, preserving aliases/cycles within that copy while
+    isolating returned graphs, claims and history. Other types use deepcopy.
+    """
+    kind = type(value)
+    if kind is str or kind is int or kind is float or kind is bool or value is None:
+        return value
+    if memo is None:
+        memo = {}
+    previous = memo.get(id(value), _COPY_MISSING)
+    if previous is not _COPY_MISSING:
+        return previous
+    if kind is dict:
+        result = {}
+        memo[id(value)] = result
+        for key, item in value.items():
+            result[key if type(key) is str else _copy_value(key, memo)] = _copy_value(item, memo)
+        return result
+    if kind is list:
+        result = []
+        memo[id(value)] = result
+        result.extend(_copy_value(item, memo) for item in value)
+        return result
+    return deepcopy(value, memo)
+
+
 def _token(value, name, *, optional=False):
     if optional and value is None:
         return
@@ -28,18 +59,26 @@ def _reason(value):
 
 def _actor(value):
     # 서버가 확인한 실행 주체의 필드/관점을 검사한다. 클라이언트의 자유로운 본문을 인증 주체로 바꾸지 않는다.
-    if not isinstance(value, dict) or set(value) != contracts._ACTOR_FIELDS:
+    if not isinstance(value, dict) or set(value) not in (contracts._ACTOR_FIELDS, contracts._ACTOR_FIELDS | {"access_revision"}):
         raise ReviewValidationError("actor must contain the server-authorized scope")
     for name in ("user_id", "tenant", "profile_id"):
         if not isinstance(value[name], str) or not contracts._ID.fullmatch(value[name]):
             raise ReviewValidationError("actor identifiers are invalid")
     _token(value["policy_revision"], "policy_revision")
+    if "access_revision" in value:
+        _token(value["access_revision"], "access_revision")
     if value["domain"] is not None:
         if not isinstance(value["domain"], str) or not value["domain"].strip() or len(value["domain"]) > 4000:
             raise ReviewValidationError("actor domain is invalid")
         value["domain"].encode("utf-8")
     if value["viewpoint"] is not None and (not isinstance(value["viewpoint"], str) or value["viewpoint"] not in VIEWPOINTS):
         raise ReviewValidationError("actor viewpoint is invalid")
+
+
+def actor_basis(actor):
+    """현재성 지문에서만 본인 접근 기준을 사용한다. 저장 actor는 바꾸지 않는다."""
+    return {key: value for key, value in actor.items()
+            if key != "policy_revision" or "access_revision" not in actor}
 
 
 def _input(value):
@@ -65,7 +104,16 @@ def _identity(value):
 def _claim_id(collection, value, entities):
     """Exact semantic identity, independent of array position and local IDs."""
     # 해당 주장과 끝점 개체의 전체 의미를 함께 지문으로 만든다. 로컬 개체 ID 문자열만 같아도 같은 주장은 아닐 수 있다.
-    identities = {entity["id"]: _identity(entity) for entity in entities}
+    return _claim_id_from_identities(collection, value, _entity_identities(entities))
+
+
+def _entity_identities(entities):
+    """Normalize this machine graph's entities without retaining shared state."""
+    return {entity["id"]: _identity(entity) for entity in entities}
+
+
+def _claim_id_from_identities(collection, value, identities):
+    """Hash the same canonical claim using a read-only, render-local entity map."""
     result = _identity(value)
     for name in ("reason", "question"):
         result.pop(name, None)

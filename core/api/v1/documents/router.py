@@ -10,6 +10,7 @@ from core.api.schemas import Envelope
 from core.modules.access.policy import AccessScope
 from core.modules.knowledge.catalogue import list_catalogue
 from core.modules.documents.history import list_versions, read_version, save_content, restore_version
+from core.modules.documents.changes import document_fields
 from .schemas import ContentQuery, DocumentContent, DocumentPage, ListQuery, VersionsQuery, SaveContent, RestoreContent
 
 router = APIRouter(tags=["documents"])
@@ -26,9 +27,11 @@ def documents(query: Annotated[ListQuery, Query()], scope: Annotated[AccessScope
 @router.get("/documents/content", response_model=Envelope[DocumentContent])
 def content(query: Annotated[ContentQuery, Query()], scope: Annotated[AccessScope, Depends(authorized)]):
     """상대 .md 경로의 최신 전체 본문과 같은 바이트의 revision을 읽는다."""
-    snapshot = scope.store.read(query.document)
-    return envelope({"document": query.document, "content": snapshot.content,
-                     "revision": snapshot.revision, "access": access_value(scope)})
+    with scope.store._write_lock():
+        snapshot = scope.store.read(query.document)
+        return envelope({"document": query.document, "content": snapshot.content,
+                         "revision": snapshot.revision, "access": access_value(scope),
+                         **document_fields(scope.store, query.document, snapshot, include_body=True)})
 
 
 @router.put("/documents/content", response_model=Envelope[dict[str, JsonValue]],
@@ -37,6 +40,7 @@ async def save(request: Request, tenant: str, token: Annotated[str, Depends(cred
     """본문 편집을 공통 저장기에 넘겨 수정 전 전체 이력과 기준 판본을 지킨다."""
     def operation(scope, body):
         return save_content(scope.store, body.document, body.content, body.expected_revision,
+            actor=access_value(scope), origin="human", reason=body.reason, prepare_metadata=True,
             before_commit=lambda: reauthorize(request, tenant, token, "write", body.profile, expected=scope))
     return await json_operation(request, tenant, token, SaveContent, "write", operation)
 
@@ -62,5 +66,6 @@ async def restore(request: Request, tenant: str, token: Annotated[str, Depends(c
     """과거 본문을 새 저장으로 적용하되 그래프나 승인 상태를 자동 복원하지 않는다."""
     def operation(scope, body):
         return restore_version(scope.store, body.document, body.history_id, body.expected_revision,
+            actor=access_value(scope), reason=body.reason,
             before_commit=lambda: reauthorize(request, tenant, token, "write", body.profile, expected=scope))
     return await json_operation(request, tenant, token, RestoreContent, "write", operation)

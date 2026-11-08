@@ -23,40 +23,39 @@ def _mutation(scope, body, check_access, method):
     return {**value, "mutation_receipt": None, "retry_policy": "read_and_reconcile"}
 
 
+async def _mutate_request(request, tenant, token, model, permission, method):
+    """네 검토 쓰기의 본문·선택 관점·저장 직전 권한 연결을 같은 순서로 조립한다."""
+    return await json_operation(request, tenant, token, model, permission,
+        lambda scope, body: _mutation(scope, body,
+            lambda: reauthorize(request, tenant, token, permission, body.profile, expected=scope), method))
+
+
 @router.post("/documents/reviews", response_model=Envelope[dict[str, JsonValue]],
              openapi_extra=body_schema(DocumentReview))
 async def review(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """실제 원문 인용에 근거한 승인·수정·거절·보류를 기록한다."""
-    return await json_operation(request, tenant, token, DocumentReview, "ontology_review",
-        lambda scope, body: _mutation(scope, body,
-            lambda: reauthorize(request, tenant, token, "ontology_review", body.profile, expected=scope), "review"))
+    return await _mutate_request(request, tenant, token, DocumentReview, "ontology_review", "review")
 
 
 @router.post("/documents/review-undos", response_model=Envelope[dict[str, JsonValue]],
              openapi_extra=body_schema(DocumentReviewUndo))
 async def review_undo(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """기존 검토를 삭제하지 않고 정확한 이벤트의 되돌림을 새로 기록한다."""
-    return await json_operation(request, tenant, token, DocumentReviewUndo, "ontology_review",
-        lambda scope, body: _mutation(scope, body,
-            lambda: reauthorize(request, tenant, token, "ontology_review", body.profile, expected=scope), "undo"))
+    return await _mutate_request(request, tenant, token, DocumentReviewUndo, "ontology_review", "undo")
 
 
 @router.post("/documents/policies", response_model=Envelope[dict[str, JsonValue]],
              openapi_extra=body_schema(DocumentPolicy))
 async def policy(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """전문가의 업무 판단을 원문 인용을 발명하지 않고 별도 권한으로 기록한다."""
-    return await json_operation(request, tenant, token, DocumentPolicy, "ontology_policy",
-        lambda scope, body: _mutation(scope, body,
-            lambda: reauthorize(request, tenant, token, "ontology_policy", body.profile, expected=scope), "policy"))
+    return await _mutate_request(request, tenant, token, DocumentPolicy, "ontology_policy", "policy")
 
 
 @router.post("/documents/policy-undos", response_model=Envelope[dict[str, JsonValue]],
              openapi_extra=body_schema(DocumentReviewUndo))
 async def policy_undo(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """같은 관점의 마지막 전문가 판단을 삭제 없이 새 역이벤트로 되돌린다."""
-    return await json_operation(request, tenant, token, DocumentReviewUndo, "ontology_policy",
-        lambda scope, body: _mutation(scope, body,
-            lambda: reauthorize(request, tenant, token, "ontology_policy", body.profile, expected=scope), "policy_undo"))
+    return await _mutate_request(request, tenant, token, DocumentReviewUndo, "ontology_policy", "policy_undo")
 
 
 @router.get("/documents/events", response_model=Envelope[dict[str, JsonValue]])

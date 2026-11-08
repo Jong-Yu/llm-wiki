@@ -26,7 +26,7 @@ def collect_references(ctx):
             return
         item = {"document": name, "source_revision": source_revision, "graph_revision": graph_revision,
                 **deepcopy(entity), "origin": origin,
-                "reference_status": "historical_action" if origin in {"expert_event", "review_source_snapshot"}
+                "reference_status": "historical_action" if origin in {"expert_event", "review_source_snapshot", "authored_relation_event"}
                     else "historical_source" if origin == "baseline_graph" else "current_snapshot"}
         if event_id is not None:
             item.update(event_id=event_id, phase=phase, claim_id=claim_id, decision_scope=deepcopy(scope))
@@ -79,11 +79,17 @@ def collect_references(ctx):
                 source_entities = event["target"]["entities"]
                 verified = False
                 if source_for_event is not None:
-                    try:
-                        check = _graph(ctx.document, source_for_event.revision, _input(source_entities), [], source_for_event.content, schema_version=3)
-                        verified = check["entities"] == source_entities
-                    except (ValueError, TypeError):
-                        pass
+                    # 과거 이벤트에는 추출 envelope가 없을 수 있다. 두 근거 범위의
+                    # 실제 전체파일 위치 중 정확히 일치하는 것만 복원으로 인정한다.
+                    for body_only in (False, True):
+                        try:
+                            check = _graph(ctx.document, source_for_event.revision, _input(source_entities), [],
+                                           source_for_event.content, schema_version=3, body_only=body_only)
+                            verified = check["entities"] == source_entities
+                        except (ValueError, TypeError):
+                            continue
+                        if verified:
+                            break
                 if verified:
                     for entity in source_entities:
                         add_entity(ctx.document, entity, event["source_revision"], event["graph_revision"], "review_source_snapshot",
@@ -94,6 +100,32 @@ def collect_references(ctx):
                     for entity in event[phase].get("entities", []):
                         add_entity(ctx.document, entity, event["source_revision"], event["graph_revision"], "expert_event",
                                    event_id=event["id"], phase=phase, claim_id=event["claim_id"], scope=event.get("scope"))
+        if ledger is not None and ctx.changes["review"] and ledger.get("relation_events"):
+            # 원문/기계층을 바꾸지 않은 추가·되돌림도 관련 개체의 변경 후보로 표시한다.
+            # 기존 prefix 반환은 검토 events의 위치이므로 추가 원장은 보수적으로 모두 대조한다.
+            ctx.restoration["limits"].append("authored_relation_events_include_baseline_history")
+            for event in ledger["relation_events"]:
+                if event["kind"] == "policy" and event["scope"] != {"domain": ctx.domain, "viewpoint": ctx.viewpoint}:
+                    continue
+                source_for_event = next((source for source in (ctx.sources[ctx.document], ctx.old_source)
+                                         if source is not None and source.revision == event["source_revision"]), None)
+                verified = False
+                if source_for_event is not None:
+                    for body_only in (False, True):
+                        try:
+                            check = _graph(ctx.document, source_for_event.revision, _input(event["entities"]), [],
+                                           source_for_event.content, schema_version=3, body_only=body_only)
+                            verified = check["entities"] == event["entities"]
+                        except (ValueError, TypeError):
+                            continue
+                        if verified:
+                            break
+                if verified:
+                    for entity in event["entities"]:
+                        add_entity(ctx.document, entity, event["source_revision"], event["graph_revision"], "authored_relation_event",
+                                   event_id=event["id"], claim_id=event["claim_id"], scope=event["scope"])
+                else:
+                    ctx.skip(ctx.document, "event_source_unverified", "relation_history", omitted=False)
         ctx.restoration["complete"] = all(ctx.restoration[name] != "unavailable" for name in ("source", "graph", "review"))
 
 def collect_candidates(ctx):

@@ -46,3 +46,5 @@ class Access(Model):
     domain: str | None
     viewpoint: str | None
     policy_revision: str
+    # 과거 불변 actor에는 없을 수 있다. 신규 요청은 실제 AccessScope의 값을 사용한다.
+    access_revision: str | None = Field(default=None, exclude_if=lambda value: value is None)

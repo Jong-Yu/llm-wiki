@@ -1,0 +1,57 @@
+// 네이티브 버튼과 이동 링크가 같은 컨트롤 치수·상태 표현을 공유합니다.
+@mixin base {
+  box-sizing: border-box;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wiki-space-8);
+  min-height: var(--wiki-component-control-height);
+  padding: 7px 12px;
+  border: var(--wiki-border-width-default) solid transparent;
+  border-radius: var(--wiki-component-control-radius);
+  font: inherit;
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-component-control-line-height);
+  cursor: pointer;
+  text-decoration: none;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--wiki-motion-duration-hover);
+
+  &:focus-visible {
+    outline: var(--wiki-border-width-selected) solid
+      var(--wiki-color-action-primary);
+    outline-offset: var(--wiki-space-2);
+  }
+
+  &:disabled {
+    opacity: var(--wiki-opacity-disabled);
+    cursor: not-allowed;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition-duration: var(--wiki-motion-duration-reduced);
+  }
+}
+
+@mixin surface {
+  color: var(--wiki-color-text-primary);
+  background: var(--wiki-color-surface-canvas);
+  border-color: var(--wiki-color-border-control);
+
+  &:hover:not(:disabled) {
+    background: var(--wiki-color-surface-hover);
+  }
+}
+
+@mixin primary {
+  color: var(--wiki-color-button-primary-foreground);
+  background: var(--wiki-color-button-primary-background);
+  border-color: var(--wiki-color-button-primary-background);
+
+  &:hover:not(:disabled),
+  &:active:not(:disabled) {
+    background: var(--wiki-color-button-primary-hover-background);
+    border-color: var(--wiki-color-button-primary-hover-background);
+  }
+}

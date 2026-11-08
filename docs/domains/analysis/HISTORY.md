@@ -1,173 +1,142 @@
-# 분석 작업·추출 규약 작업 기록
+# 분석 작업 검증 기록
 
-## 2026-10-26 — 별도 의미 검사 상태 충돌과 부분 보고 보존
+## 2026-11-06 — 작업 이벤트 전용 이력 조회
 
-- 공개 [RFC9111 실패](../../../evals/rfc9111_stale_20261026/separate-check-validation.json)와 원시 assessment를 읽어 R-S02·R-S05·R-S10의 `not_run`/`schema_limit` 충돌을 재현했습니다. 원래 보고는 계속 `invalid_diagnostics`로 거부되며 기존 평가 파일·raw verdict는 바꾸지 않았습니다. 새 파생 보존 경로는 다른 7개 규칙과 원래 7개 finding을 그대로 유지하고 충돌한 3개 규칙만 `error`로 남깁니다. 이 개발 회귀 결과는 새로운 의미 정답이나 실제 모델 개선 증명이 아닙니다.
-- 변경: `core/client/semantic_check.py`의 상태 지침·상태별 중첩 출력 스키마·내용 변경 없는 v2 투영과 `analysis_results/diagnostics.py`의 공통 인용/규칙 검사·부분 오류 보존. 확인한 표현 손실은 `schema_limit`/`fail`, 미확정은 `not_run`으로 구분합니다. 유효한 규칙·근거를 보존하되 잘못된 인용/대상은 raw에만 남고 해당 규칙은 `error`입니다. 전역 기준/실행/형식 오류는 전체 실패로 보존합니다. 기존 API/다섯 상태/result refs와 발행된 진단 v1/v2의 canonical SHA256은 변경 전후 동일합니다.
-- **고유 27개 통과**: 개인 검사/공개 실패·상태 조합 9개, 규칙/릴리스·부분 보고·원시/파생 요청 분리 11개, 기존 진단 4개, 실제 in-process MCP/ASGI 1개, 실제 loopback 서버·별도 CLI 프로세스 2개입니다. CLI 모델만 합성 실행 파일이며 정상 저장과 잘못된 인용의 부분 보고, 남은 fail 보존, 서버/로컬 보고 일치·정확한 request/hash/인덱스·raw 보존·원문 전체 이력 1회·사람 승인 없음까지 확인했습니다. 45개 상태/verdict 조합은 원본/실제 Codex 엄격 스키마 양쪽에서 검사했습니다.
-- 실행: 최초 집중 22개가 1.416초, 추가 2개·영향 검사 2개·MCP/ASGI 1개가 통과했습니다. 같은 실행의 CLI 1개는 sandbox loopback bind 거부로 미실행되어, 허용된 로컬 실행에서 정상/부분 오류 CLI 2개를 13.393초에 통과했습니다. 새 시험의 초기 괄호 오타는 수집 전에 수정했으며 제품 성공 수로 세지 않습니다. 시스템 Python에 pydantic이 없어 일회성 schema 지문 조회를 프로젝트 `.venv`로 다시 수행했습니다.
-- 미실행/인계: 실제 외부 모델 호출은 0회입니다. mcp_6은 새 공개 원문 평가의 전송 승인 대기로 `not_run`을 보고했으며 이 세션에서 대신 실행하지 않았습니다. 공통 Python 전체 회귀는 fastapi_9, 앱 build/E2E는 기존 ui_11 소유입니다. 운영 발행/허용 정책·권한·위키/원장·Windows/WSL2 실기기·HTTPS/서명 검증은 변경하거나 완료로 표시하지 않습니다. [D-061](DECISIONS.md#d-061--별도-의미-검사-상태-계약과-부분-보고-보존-2026-10-26)을 따릅니다.
+- `JobStore.list_history_ids/history`와 tenant/selected 이력 연결을 추가하고 종전 요청 내 상세 관측 map을 제거했습니다. 기존 `query/list_jobs/project/_uncached_list` 본문은 수정 전과 같으며, 소유·상태·이벤트·lease·원본·등록 descriptor 검사는 유지합니다. 결과·고정 입력·변환 파일/readiness의 상세 검증 분리는 D-102의 의도한 경계입니다.
+- 새/조정16개와 기존 작업 인덱스·추적/HTTP·MCP 지식38개, 합계54개가 통과했습니다. 정상 DTO·cursor·selected/tenant·출력/바이트/발견 한도·부분 실패·취소/권한 freshness·외부 owner 선읽기 차단·손상 우선순위·SQLite fallback을 확인했습니다. 결과 손상/변환 파일 누락 시 이벤트 조회는 성공하고 공개 상세는 계속 거부함을 검사했습니다.
+- 실제 등록→claim→prepare→Wiki 저장을 수행한 격리6작업에서 수정 전과 정상/페이지/cursor/출력 한도4경로의 canonical DTO와 원본 파일 bytes가 같았습니다. 상세 투영6→0회, 결과 요약6→0회, 고정 입력 load12→0회였으며3회 중앙값50.847→35.732ms입니다. 이는 운영 측정과 구분합니다. 근거는 `.local/diagnostics/history-impact-20261106-cuzgm50v/isolated-history-benchmark.json`입니다.
+- 최종 공통 회귀58모듈587개와 영향 전용12개가 통과했고 독립 검토의 차단 사항은 없었습니다. 운영 이력의 실제 개선과 자료 변화·부분 결과의 한계는 [platform 기록](../platform/HISTORY.md#2026-11-06--통합-이력과-변경-영향의-반복-검증-감축)에 둡니다.
 
-재현 명령(새 변경·실패에 해당하는 검사만 다시 실행했습니다):
+## 2026-11-06 — 규약 기대 스키마와 결과 입력의 중복 읽기 감축
 
-```sh
-.venv/bin/python -B -m unittest core.tests.runtime.test_semantic_check core.tests.modules.test_rule_diagnostics core.tests.modules.test_analysis_diagnostics -v
-.venv/bin/python -B -m unittest core.tests.modules.test_rule_diagnostics.RuleDiagnosticTests.test_partial_report_and_rejected_original_keep_separate_exact_receipts core.tests.modules.test_rule_diagnostics.RuleDiagnosticTests.test_partial_report_never_repairs_global_binding_or_evidence core.tests.runtime.test_semantic_check.SemanticCheckTests.test_execution_failure_preserves_audit_and_error_report core.tests.runtime.test_semantic_check.SemanticCheckTests.test_invalid_quote_keeps_other_rules_and_raw_report_without_repair core.tests.api.test_rule_diagnostics_protocol core.tests.runtime.test_semantic_check_cli -v
-.venv/bin/python -B -m unittest core.tests.runtime.test_semantic_check_cli -v
-```
+- 실계정 작업 목록의 상세 투영에서 같은 진단 스키마를 매 작업마다 다시 생성하던 비용을 재현했습니다. 실행 코드의 기대 스키마 세 형식만 불변 bytes로 최대8항목에 재사용하며 실제 정책/철회·릴리스·전체 구성 hash·현재 schema/validator 검사는 매번 수행합니다. builder 교체·실패·oversize와 caller 변경 오염을 포함한 새12개 검사가 통과했습니다.
+- 결과 요약 한 번 안에서만 동일 job/store·완전 revision·실제 maximum에 묶인 고정 입력을 재사용합니다. 최대8개/8MiB의 UTF-8 bytes이며 hit는 새 manifest/components를 복원합니다. 기본 load·현재 basis·mutable receipt/saved 증거·소유/권한은 재사용하지 않습니다. 실패·잘못된 옵션·초과는 기존 loader를 쓰며 다음 summary는 새로 검증합니다. 새12개와 registration/reuse 관련34개가 통과했습니다.
+- 격리 동일 자료에서 20작업 목록은165.147→49.177ms(5회 중앙값), 진단 schema 생성60→0회(warm), 실제 policy/release/validator 검사20→20회였습니다. 결과 요약은4.927→3.055ms(7회), 전체 `files.load`3→2회·경로 확인45→26회이며 DTO·canonical bytes·원본이 같았습니다. 최종 전체 core581개도 통과했습니다.
+- 현재 서버의 실제 작업 목록20개/전체154개 반복 조회는341.387→203.455ms, 상세는25.087→17.631ms였습니다. 자료·부하가 진행 중 변하므로 고정 snapshot 성능 비교로 해석하지 않습니다. 최종 운영 상태와 범위는 [platform 기록](../platform/HISTORY.md#2026-11-06--실계정-재측정과-조회-반복-계산-개선)을 따릅니다.
 
-## 2026-10-25 — 규칙별 판정·별도 의미 검사
+## 2026-11-06 — 변경 기록에 따른 개인 작업 증분 관측
 
-- 변경: `analysis_results/rule_checks.py`가 R-A01~10의 실제 `pass/fail/not_run/not_applicable/error`와 검사 이유를 기록합니다. 기존 canonical 검증기·저장 경계를 재사용하고, 실패 시 선행 통과와 후행 미실행을 보존합니다. `diagnostics.py`의 v2는 R-S01~10·근거 finding·미실행/오류 이유·원문/입력/규약/제출 판본·별도 검사 실행 지문·표현 한계를 보존합니다. 기존 v1 진단과 불변 v1 전용 릴리스는 계속 읽고, 새 발행만 v1/v2를 명시합니다.
-- 개인 검사: `core/client/semantic_check.py`가 고정 원문 우선 감사와 중립 그래프 대조를 두 새 개인 어댑터 세션으로 실행합니다. 생성자 프롬프트/진단과 후보 reason/question은 검증 입력에서 제외하고, 원시/검증용 제출 hash와 원문 감사 기록을 보존합니다. 공통 담당이 연결한 `--semantic-check`는 기존 MCP 결과 도구의 새 request ID·`save=false`에 검사 보고를 저장한 뒤 일반 그래프 저장을 수행합니다. 모델/보고 오류는 error 보고, 취소는 로컬 not_run 보고를 남깁니다. 서버 AI/셸 실행·검토 원장 승인을 추가하지 않았습니다.
-- 같은 기준의 재개 통합 요청도 처리했습니다. `repository.summary`는 같은 analysis basis의 확인된 이전 run 저장을 집계하며 `current_run/current_scope`를 구분합니다. `wiki_receipt`는 정확한 원문·전체 이력이 일치하는 같은 기준의 선행 저장을 승계합니다. 이전 run의 같은 기준 pending 영수증은 계속 차단하고, 새 rebase 이전 이력은 완료 집계에 넣지 않습니다. 공통 basis 연쇄·CLI 재개 변경은 fastapi_4 소유입니다.
-- 실제 검증: 기존 진단/결과/규약 13개, 신규 규칙·릴리스/개인 검사 10개, 실제 in-process MCP/ASGI 신규·기존 4개가 통과했습니다. 추가로 같은 기준 재개·pending 보존 2개, 불확실성 보존 1개, 저장 직전 기존 경계 2개를 확인했습니다. 초기 시험의 `StorageBusyError` 인수와 이력 디렉터리 glob fixture 오류를 수정해 해당 시험만 재실행했습니다. 형식·인용·보존 시험이며 의미 정확도 평가는 아닙니다.
-- 실제 프로세스: `core.tests.runtime.test_semantic_check_cli` 1개가 7.316초에 통과했습니다. 격리 loopback 서버·실제 `tools.analysis_cli --run-ai --semantic-check`·합성 Codex 실행 파일로 위키/그래프 영수증 2개와 별도 진단 초안 1개, 원문 감사·실행 hash·서버/로컬 보고 일치·토큰 비출력·수정 전 위키 전체 이력 1회를 확인했습니다. 최초 sandbox의 loopback bind 거부 후 허용된 동일 시험을 재실행했습니다. 실제 모델/운영 서버를 사용하지 않았습니다.
-- 미실행: 실문서 의미 정확도/원문 분리 평가, 실제 사람 검토 승인, Windows 실제 OS, Electron 전체 동선 및 전체 제품 회귀는 이 세션에서 수행하지 않았습니다. UI/공통 Python 최종 통합 검증은 해당 담당의 별도 기록을 따릅니다. 운영 자료·규약 발행·기본/허용 정책·실서버 업데이트는 변경하지 않았습니다.
+- 소유 목록과 thin fingerprint/source path 관측을 재사용하고 변경된 작업/lease/원본만 확인합니다. warm도 SQL 전체 요약의 형식·현재 용량/개수 한도·membership을 확인하며, 현재 서버 시각의 lease 만료와 선택 페이지 원본 상세 검증을 유지합니다. DB 재생성에서도 membership을 복구하고 SQLite 오류에서는 소유 목록부터 원본으로 복귀합니다.
+- 신규 추적13개·기존 작업18개·MCP8개를 전체 core541개에서 통과했습니다. warm 전체 owner 탐색/stat0, cancel1 fingerprint·claim2·heartbeat1·관련 원본1을 확인했습니다. 시각만의 만료/cursor 변경, 새 항목·busy/손상 복귀·SQL 재생성과 strict 직접 변경 검사도 포함합니다. 취소의 변경 파일 검사에는 `.registration.lock` intent를 명시 인정하면서 실제 작업 JSON만 바뀌는 비교를 유지했습니다.
+- 격리 작업80/페이지20, warm5회 중앙값은 기본 인덱스33.972→추적20.777ms이며 결과가 같았습니다. 현재 서버 반영 후 실제 실행 작업 heartbeat200을 관측했으며 내용/권한을 바꾸거나 AI를 시험 호출하지 않았습니다. 상세 운영 범위는 [platform 기록](../platform/HISTORY.md#2026-11-06--변경-기록계측과-현재-서버-반영), 계약은 [D-101](../documents/DECISIONS.md#d-101--변경-원장과-요청-계측으로-조회-인덱스-증분-갱신-2026-11-06)을 따릅니다.
 
-재현 명령(이번에는 필요한 묶음/사례를 나누어 실행했고 마지막에 모두 반복하지 않았습니다):
+## 2026-11-06 — SQLite 개인 작업 목록 인덱스
 
-```sh
-.venv/bin/python -B -m unittest core.tests.modules.test_rule_diagnostics core.tests.runtime.test_semantic_check core.tests.api.test_rule_diagnostics_protocol -q
-.venv/bin/python -B -m unittest core.tests.runtime.test_semantic_check_cli -q
-```
+- 작업·소유 marker·lease·원본 기준의 얇은 요약을 workspace/사용자 scope별로 저장하고 SQL 페이지를 선택합니다. 전체 개수·소유/용량 한도와 커서는 기존 기준을 유지하고 반환 페이지는 현재 원본의 상세 투영을 수행합니다. lease 만료는 현재 시각으로 계산합니다.
+- 전용18개와 기존 MCP 작업8개를 통과했습니다. 원본·소유권·작업·lease 변경, 만료, cursor·한도와 캐시 실패를 검증했습니다. 독립 검토에서 발견한 lease/원본 복합 손상의 오류 순서는 기존 경로와 동일하게 보완하고 뒤 작업의 손상·잘못된 이름까지 회귀를 추가했습니다.
+- 최종 전체 회귀에서 warm 조회의 쓰기 트랜잭션 제거로 busy 테스트의 기존 기대값 1건이 맞지 않았습니다. 테스트만 보완해 writer 잠금 중 변경 없는 조회는 페이지2건만 읽고, 정상 cancel로 갱신이 필요한 조회는 제한 시간 안에 원본5건으로 복귀하는 것을 재검증했습니다. 이 수정 후 작업18+MCP8+foundation busy/no-op2개가 통과했습니다.
+- 격리 작업80개/페이지20, warm3회 중앙값은 기존47.111→29.673ms이며 결과가 같았습니다. 운영 서버·설치 앱·실행 중 분석은 변경하지 않았습니다. [D-100](../documents/DECISIONS.md#d-100--원문을-보존하는-sqlite-조회-인덱스-1단계-2026-11-06), [통합 검증](../platform/HISTORY.md#2026-11-06--sqlite-조회-인덱스-1단계-통합-검증)을 따릅니다.
 
-## 2026-10-25 — 서버 오류4개 수정
+## 2026-11-06 — 분석 목록 조회 지연과 잠금 경쟁 개선
 
-- 범위: 코드 점검에서 재현한 연속 관계 복구의 검토 누락, 계획의 자기 저장 후 단계 중단, 추출안 최초 상태 기록 실패 후 재접수 불가, 입력 묶음의 늦은 전체 용량 검사4개만 수정했습니다. 화면·API 입력·MCP 공개 계약·의미 스키마/배포 지문·운영 자료/정책/토큰은 변경하지 않았습니다. 새 의존성/운영 이관/실제 AI 실행은 없습니다.
-- 연속 복구: `analysis_proposals/store.py`에서 각 복구 당시의 불변 후보와 최종 후보의 실제 전체 주장·인용·조건·식별자를 대조합니다. 당시 후보 참조를 최신값으로 바꾸지 않고 `recovery_bindings`로 연결을 남기며, 기존 인용 그대로 복구한 관계와 새 인용으로 ID가 바뀐 관계 모두 최종 세대의 실제 accept/edit를 요구합니다. 의미/검토 승인을 자동 복사하지 않습니다. 최종 후보에서 복구 주장이 바뀌거나 사라지면 명시 판단을 요구하고 거부합니다.
-- 최초 준비 복구: 동일 모듈의 `_load_input`과 `_finish_preparation`을 최초 생성/재접수에서 공유합니다. 이미 공개한 입력·후보의 바이트를 보존하고 같은 소유자·요청 지문·후보 내용·현재 권한/원문 기준을 확인한 뒤 누락된 최초 상태만 연결합니다. 손상된 상태나 부분 후보는 초기화하지 않으며 다른 요청 내용·변경된 원문·권한 회수는 거부합니다. 마지막 근거 확인과 상태 연결은 위키 잠금 안에서 수행합니다.
-- 계획 승계: `analysis_plans/store.py`와 `analysis_inputs/bundles.py`의 내부 실행 연결에서 기존 `basis.validate_captured`/`expected_after_saves`를 재사용합니다. 최초 계획과 작업 기준의 명시 맥락이 같을 때 동일 job/run/basis의 실제 저장 영수증·전체 이력 연쇄만 승계합니다. 출력 대상이 필수 맥락에도 포함된 Wiki 저장→그래프 입력/저장을 허용하고, 외부 수정과 정책 변경은 계속 거부합니다. 외부 validate/handoff의 최초 계획 비교와 불변 계획은 유지합니다.
-- 읽기 예산: 공통 `analysis_inputs/files.py:load`에서 설명서도 전체 예산으로 제한하고, 구성마다 남은 예산만 읽습니다. 선언 크기의 초과는 읽기 전에 거부하고 실제 파일이 설명서보다 커진 경우에도 한도 확인용1바이트 외에는 전체 예산을 넘지 않습니다. 정상 UTF-8/빈 구성·정확한 경계·기존 revision/hash 오류 계약과 보존 파일을 유지합니다.
-- 실제 검증: **신규 고유5개와 관련 기존3개, 총8개 통과**. 입력 예산/정상·변조 경계 신규2개는0.007초, 계획의 자기 저장→실제 그래프 저장/불변 계획/외부 검증·정책 변경/외부 A→B→A 이력 거부 신규1개는1.084초, 기존 같은 Wiki 재분석의 새 세대/옛 승인 보류1개는0.841초였습니다. 추출안의 최초 실패 재접수/손상·부분 후보·권한/기준 보존과 연속 복구 신규2개, 기존 단일 keep·exclude와 새ID reextract 호환2개는 합계1.801초에 통과했습니다. root의 공통 읽기 수정이 포함된 상태에서 해당 통합 경로를 실행했습니다.
-- 재현/제한: 읽기 예산 검사는 수정 전 합계/설명서 초과2건의 실제 초과 읽기와 거짓 크기의 다른 오류를 확인한 뒤 수정 후 통과했습니다. 정상 판본/hash·파일 보존도 함께 확인했습니다. 전체 회귀·Electron 빌드/화면 검사·실제 사용자 자료·실문서 의미 평가는 실행하지 않았고 이미 통과한 묶음을 최종 반복하지 않았습니다. 화면의 다음 페이지 자동 선택과 별도 요청이 필요한 광범위 공통화/이력 탐색 성능 개선은 이번 범위가 아닙니다.
+- 현재 설치 앱의 문서 목록에서 `storage_busy`를 확인했습니다. 실행 서버의 분석 목록 20건 요청이 11.87~12.13초 동안 조정 잠금을 보유했고 병렬 문서/작업 목록이 약 5초 후 HTTP 503으로 실패했습니다. 매 페이지마다 소유 작업 154건 모두의 결과·고정 입력과 동일 규약 스키마를 검사했으며, 프로파일링에서 규약 준비 조회가 시간의 약 88%를 차지했습니다.
+- `analysis_jobs/queries.py`는 전체 소유·용량·job/lease/원본 커서 기준을 유지하고 현재 페이지에만 상세 투영합니다. `extraction_rules/store.py`는 크기 제한을 통과한 동일 canonical 스키마의 순수 구조 검사만 최대 8개 재사용합니다. 현재 정책·철회·검증기 지문·릴리스 바이트/hash 확인과 저장·잠금 계약은 유지합니다.
+- 수정 코드의 같은 자료 20/154건 직접 조회는 0.753초였습니다. 변경 앱의 ASGI HTTP 경계에서 분석 목록 3건+문서 목록+원본 상세를 두 번 병렬 조회해 10건 모두 200을 확인했습니다(작업 0.492~1.726초, 문서 1.072~1.822초, 원본 상세 0.092~0.977초). 운영 HTTP와 변경 ASGI의 전송 조건은 다릅니다. 초기 원본 주소 한 건은 잘못된 `/versions`로 405였으며 실제 `/sources/{id}` 경로로 수정해 검증했습니다. 운영 자료에 새로 쓰지 않았고, 전후 관측 중 기존 실행의 lease 갱신이 있어 전체 파일 동일성을 주장하지 않습니다.
+- 격리 회귀 53개 통과: 작업/규약 설정/문서 HTTP 18개, 재사용 방어/초안/등록 35개. 페이지 내 상세 검사 횟수·페이지 밖 변경 시 커서 거부·조회 무수정·동일 스키마 재사용·변경/오류/크기 초과 거부를 검증했습니다. 최초 HTTP 목록/상세 DTO의 기본값 차이로 비교 검사가 실패해 같은 저장소 투영끼리 대조한 뒤 통과했고, 스키마 크기 검사 보강 뒤 해당 검사도 재통과했습니다.
+- [UI 중복 조회 방지](../ui/HISTORY.md#2026-11-06--원본-분석-상태의-중복-조회-방지)도 함께 수정했습니다. 기존 Quick Tunnel 주소·운영 서버·설치 앱·실행 중 분석을 유지했습니다. 운영 반영 후 재측정은 남아 있습니다.
 
-실제로 필요한 묶음만 나누어 실행한 명령입니다. 아래 모음을 다시 실행하지 않았습니다.
+## 2026-10-30 — 운영 QA의 실제 Codex 추출·동일 세션 대조
 
-```sh
-.venv/bin/python -B -m unittest core.tests.modules.test_analysis_input_files -q
-.venv/bin/python -B -m unittest core.tests.api.test_planned_execution_protocol.PlannedExecutionTests.test_target_context_follows_only_own_saved_results_and_rejects_external_changes -q
-.venv/bin/python -B -m unittest core.tests.api.test_planned_execution_protocol.PlannedExecutionTests.test_plan_handoff_same_graph_creates_new_generation_without_old_approval -q
-.venv/bin/python -B -m unittest core.tests.api.test_analysis_proposals_api.AnalysisProposalApiTests.test_initial_state_failure_reconnects_only_the_exact_current_request core.tests.api.test_analysis_proposals_api.AnalysisProposalApiTests.test_successive_recoveries_require_every_retained_claim_review core.tests.api.test_analysis_proposals_api.AnalysisProposalApiTests.test_missing_exclusion_recovery_draft_and_actual_new_claim_review core.tests.api.test_analysis_proposals_api.AnalysisProposalApiTests.test_reextract_link_and_saved_receipt_survive_state_failure_and_write_revocation -q
-```
+- 새 서버 8767에서 기존 박종유 계정의 API/MCP 사용자 일치와 `sdv-platform/default`, 기본 규약 `common/2026-10-30.1` revision `e4e65eabb1c520e48215b4cad4014423d31340fbaf616fc813d7c825989e3fa2` 및 구성 hash를 읽어 확인했다. 지정 문서 부재를 확인하고 신규 합성 원본을 `qa/operational-smoke-2026-10-30.md`로 등록했다.
+- 생산 `prepare`·기본 Codex·현 제품 프롬프트로 추출 저장→동일 세션의 추가 검색→최종 대조→서버 조회까지 성공했다. 모델 3호출의 ID가 같고, 원문 보존/그래프 ready(개체 2·관계 1)/대조 complete/검색 2/5회/후보 0·제외 0/현재성 current/조회 잘림 없음으로 확인했다. 제공자 보고 입력 105,475 + 출력 749 = 106,224토큰이며 캐시 입력 33,792는 입력의 부분집합이다. 의미 품질·토큰 절감 평가로 해석하지 않는다.
+- 기존 운영 문서·작업·역사를 변경/삭제하지 않고 신규 QA 기록을 보존했다. 토큰은 메모리에만 두었고 제품 코드는 수정하지 않았다. 보호 세션 기록은 지정 배포 경로와 검증 서버 주소 8767에 바인딩돼 있으며, 서버를 8766으로 교체한 뒤 그 QA 세션의 수동 재개는 주소 불일치로 거부된다. 수동 재대조는 이번 운영 검사 범위에 포함하지 않았다. [실행 근거와 식별자](../../../evals/2026-10-30-operational-smoke/REPORT.md)
 
-## 2026-10-25 — MCP 우선순위1 계약 구현·검증
+## 2026-10-30 — Claude 실제 검증의 제공자 사용량 제한
 
-- 변경: `analysis_results/diagnostics.py`와 결과 저장/조회·MCP에 진단 스키마, 원문 인용/줄·초안 대상 검증, 불변 원시 제출 및 초안/거부/성공 영수증 보존을 연결했습니다. `save=false`는 자료 저장 없이 `draft`로 남고, 신고된 미독·위키 누락은 실제 저장을 막습니다. AI 의견과 `human_reported`는 client_reported이며 검토 원장/사람 승인으로 변환하지 않습니다. CLI의 위키 경고와 그래프 누락도 새 응답 봉투로 서버에 전달합니다.
-- 변경: 발행 의미 원문·예시·JSON Schema를 v3~v6별 허용 술어/끝점/mapping/출처 관계에 맞추고 `diagnostics.schema.json`을 규약 구성에 추가했습니다. `analysis_inputs/basis.py`·준비/조회·API/MCP에서 규약·관점·명시 맥락과 모든 출력 대상의 상태를 최초 기준으로 고정합니다. 같은 job/run/basis의 실제 저장 영수증·전체 이력 연쇄만 후속 입력으로 승계하고, 외부 변경·맥락 생략의 재해석·옛 bundle/extraction 재사용을 차단합니다. 기존 분석 계획 연결은 유지했습니다. 단순 재claim은 기준을 바꾸지 않고 명시 rebase만 새 기준을 만듭니다.
-- 보완: 다중 대상이 필수 맥락과 겹치는 경우와 ontology-only 대상도 고정합니다. 자기 저장 직후 외부 A→B→A 변경은 실제 `history_entry`와 원래 전체 이력 지문으로 구별합니다. 이전 basis의 pending은 이력에 남기되 새 기준의 완료를 막지 않습니다. draft 집계와 saved.json을 통한 진단 복원을 보완했습니다. 독립 읽기 전용 재검토에서 이 4건의 해소를 확인했고 남은 확정 결함은 없었습니다. 독립 검토는 별도 시험 통과 수에 더하지 않았습니다.
-- 실제 검증: **고유 35개 통과**. 입력 기준/결과/진단/저장 경계/API/MCP·실행 신고 24개(14.619초), 발행 규약/CLI 입력/기존 tenant 도구 공개 계약 9개(1.162초), 임시 실제 MCP 서버·별도 CLI 프로세스·합성 AI 실행의 전체 저장 및 부분 실패 2개(12.790초)입니다. 마지막 진단 검사에는 잘못된 버전 타입·인용/대상·승인 필드, 존재하지 않는 입력과 다른 입력 판본의 보존/조회도 추가해 해당 1개만 재확인했습니다(0.125초, 중복 합산 없음). 기존 위키/전체 이력·그래프·검토 보존, CAS·권한 회수·취소 후 본인 조회, 불변 릴리스와 구형 릴리스 명시 거부, 기본 규약 변경/필수 맥락/재claim/rebase/옛 작업 전환을 확인했습니다.
-- 화면 호환: 공유 분석 계약에 `draft` 상태를 추가하고 결과 제목을 초안 보존으로 표시했습니다. 변경 2파일의 Oxc/형식과 renderer 타입 검사가 통과했습니다. 전체 타입 검사는 이번 수정 밖의 `app/tests/e2e/document-content.spec.ts:359–361`의 nullable content 오류 3개로 통과하지 못했습니다. Electron은 실행하지 않았습니다.
-- 실행 중 조정: 최초 CLI 통합은 sandbox의 loopback 포트 제한으로 실행되지 않아 허용된 로컬 실행으로 해당 2개만 수행했습니다. 최초 lint는 시스템 Node16/아키텍처 선택 때문에 실행되지 않았고, 기존 번들 Node와 그 PATH로 변경 파일 검사에 통과했습니다. 추가 입력 부재 조회 검사는 기존 계약의 pending_reconcile을 거부 예외로 잘못 기대한 시험을 바로잡았습니다. 운영 자료·정책·토큰·발행 규약은 변경하지 않았습니다.
-- 남은 범위: 새 버전 발행·허용/기본 규약 설정·업데이트된 서버 실행과 공통 기준 없는 진행 작업의 명시 rebase가 운영 전환에 필요합니다. 실제 모델/실문서 의미 정확도·원격 두 PC·Electron·전체 회귀·규칙별 자동 판정 세분화는 미실행입니다. 완료는 요청받은 우선순위1 계약이며 후속 범위를 자동 시작하지 않습니다. 결정은 [D-052](DECISIONS.md#d-052--mcp-진단-보존버전별-제출작업-공통-기준-2026-10-25), 실행/전환은 [README](../../../README.md#공통-규약과-고정-입력)에 둡니다.
+- 기존 `ClaudeAdapter`의 실제 preflight는 Claude Code 2.1.312와 필수 옵션 지원을 확인했다. 새 임시 작업 폴더에서 제공자 기본 모델에 짧은 합성 marker를 요청했으나 첫 호출이 `rate_limit_event`와 `assistant.error=rate_limit`을 반환해 고정 코드 `ai_rate_limited`로 실패했다. 관측 실행 시간은 0.841초다.
+- 실제 호출 시도는 1회다. 같은 대화의 재개, 새 원본 등록→실제 추출→저장→검색/대조, 새 어댑터의 수동 재대조는 시작하지 않았다. 성공한 세션 ID·실제 모델 ID·사용량·제한 해제 시각은 미확보이며 0토큰이나 연결 성공으로 표시하지 않았다. 사용량 제한 해제 뒤 남은 실제 연결 검증이 필요하다.
+- 계정/로그인/설정과 운영 서버·앱·정책·자료를 변경하지 않았다. 이번 임시 폴더는 제거했고 공개 이벤트의 종류·고정 오류와 실행 메타데이터만 [검증 보고서](../../../evals/2026-10-30-claude-live/REPORT.md)에 보존했다. 실제 의미 평가·규약 변경·공통 MUST 재평가는 수행하지 않았다.
 
-재현 모음(위처럼 필요한 묶음으로 나누어 실행했으며 최종 전체 반복은 하지 않음):
+## 2026-10-29 — 동일 추출 세션의 후속 대조
 
-```sh
-.venv/bin/python -B -m unittest core.tests.modules.test_analysis_basis core.tests.modules.test_analysis_inputs core.tests.modules.test_analysis_results core.tests.modules.test_analysis_diagnostics core.tests.modules.test_analysis_save_boundary core.tests.api.test_analysis_inputs_protocol core.tests.api.test_analysis_results_protocol core.tests.api.test_ai_execution_provenance -q
-.venv/bin/python -B -m unittest core.tests.modules.test_extraction_rules core.tests.runtime.test_personal_ai_inputs core.tests.mcp.test_tenant_mcp.TenantMCPTests.test_tool_contract_and_access_context_only_disclose_own_memberships -q
-.venv/bin/python -B -m unittest core.tests.runtime.test_personal_ai_workflow -q
-```
+- `core/client/ai/{codex,claude,workflow}.py`, `post_extraction.py`에서 실제 관찰한 세션 ID의 보존·명시 재개와 저장 후 대조를 연결했습니다. 준비/독립 의미 검사와 추출 세션을 구분하며 도구 차단과 호출별 원시 결과·입력/사용량 보관을 유지합니다. Codex의 누적 사용량은 원시 총계와 이번 호출 차분을 구분하고 이전 기준이 없으면 호출별 값을 추정하지 않습니다.
+- 세션 어댑터 3개, 기존 초안/클라이언트 통합 15개 검사 통과. 실제 Codex 동일 ID/앞선 내용 회상 확인과 새 합성 원본의 추출→대조 5호출 전체 흐름을 확인했습니다. 대조의 실제 조회 4/5회·후보 3개·제외 6개와 사용량은 [실행 보고서](../../../evals/2026-10-29-comparison-live/REPORT.json)에 보존했습니다. 의미 정확도·토큰 절감 평가로 해석하지 않습니다.
+- 저장 후 대조·현재 대상의 수동 재대조와 동일 요청 재확인을 격리 HTTP/MCP로 검증했습니다. 로컬 요약/세션 기록에 권한 오류를 주입한 추가 3개 검사는 이미 저장된 문서·그래프·대조 성공 유지, 중복 실행 없음, 원래 실패 유지와 취소 전파를 확인했습니다.
+- 보호된 로컬 세션 기록 7개와 위 대조 1개·실패 보존 3개·세션 어댑터 3개를 묶은 최종 14개 검사 통과. 실제 추출에서 관측한 제공자/대화/작업 위치와 서버·사용자·작업 공간·관점·문서·작업을 불변으로 연결하고 미등록/다른 범위는 모델 호출 전에 거부합니다. 새 Claude 실행기에도 확인된 원래 작업 위치만 복원합니다. 양쪽 CLI의 `--session-registry`와 기본 경로는 README에 기록했습니다.
+- Claude는 모의 CLI에서 명시 재개·원래 작업 위치·출력 형식/도구 차단을 검사했습니다. 실제 계정 실행은 제공자 오류로 결과를 만들지 못해 성공으로 기록하지 않습니다. 운영 자료·규약 발행·배포·Windows 실기기는 이 검사에 포함하지 않습니다.
 
-## 2026-10-25 — MCP 추출 정책 표현 범위 점검
+## 2026-10-29 — 8시트 원문/이름 범위/서식의 동일 MD 연결
 
-- 요청 범위는 정책·API·화면 설계와 현행 MCP 계약의 차이 확인입니다. D-044·D-050, 원본 계보/분석 범위/재추출 비교 설계와 실제 규약·입력·제출·CLI를 대조했습니다. 제품 코드·운영 규약/권한·위키/원장은 변경하지 않았으며 아래는 개선 제안입니다.
-- **단계 간 기준 고정:** 격리된 실제 발행 규약 두 개로 read_source의 규약1/필수 definition.md → prepare_wiki의 규약2/해당 문서 미선택을 준비할 수 있고 input_ready=true임을 재현했습니다. 각 bundle의 변경 검사는 존재하지만 job 전체의 규약/필수 맥락 승계 계약은 없습니다. 현재 개인 CLI의 동일 규약/맥락 전달과 별개로, 요청 명세 revision에 규약·필수 맥락을 고정하고 변경 시 명시적인 새 준비를 요구하는 서버 계약이 필요합니다. 근거: [입력 준비](../../../core/modules/analysis_inputs/bundles.py), [접수 모델](../../../core/api/v1/analysis_jobs/schemas.py).
-- **지침/스키마 정합:** 배포 의미 원문은 현재 계약을 v3로 지시하고 v4 앵커·v5 대응·v6 출처 보존의 사용 지침을 포함하지 않지만 출력 스키마는3–6을 허용합니다. v3에 requires를 넣으면 배포 JSON Schema는 통과하고 실제 OntologyStore는 거부함을 재현했습니다. 버전별 지침/예시·선택 기준과 버전별 허용 형식을 함께 발행해야 합니다. 근거: [의미 원문](../../../.agent/ontology_semantics.md), [스키마 조립](../../../core/runtime/extraction_schema.py), [규약 구성](../../../core/modules/extraction_rules/content.py).
-- **누락·의미 보고:** 지침의 omissions는 그래프 제출에 넣으면 거부되며 결과 래퍼에도 별도 보고 필드가 없습니다. 원본 읽기의 문자열 omissions와 로컬 위키 응답 봉투는 존재하지만, 위키 단계 warnings는 서버 저장 인자로 전달되지 않습니다. 그래프를 바꾸지 않는 job 별도 진단 제출/조회와 원문 위치·제출 hash·Rule ID·검토 종류/범위·미해결 사유의 연결을 우선 제안합니다. AI 의미 의견을 사람 승인/기존 검토 원장으로 자동 전환하지 않습니다. 근거: [결과 입력](../../../core/mcp/tools/analysis_results.py), [CLI 인계](../../../core/client/ai/workflow.py).
-- **요청 범위·출처 대응:** 현행 접수는 대상 경로/산출물만 받고 hints는 not_provided로 고정됩니다. source_extraction_submit은 whole_original만 허용하며 부분 줄 범위가 거부됨을 확인했습니다. 시안의 문서별 목적/사용 구간·해석 힌트·원본 페이지/셀→준비 본문→주장 연결을 위해 명시 요청 명세와 위치 대응 자료가 필요합니다. UTF-8 md/txt·단일 대상 CLI 및 원본/본문/입력 한도는 그대로 밝혀야 하며 파일 API의 산출물 보관을 OCR 지원으로 확대하지 않습니다. 근거: [추출물 계약](../../../core/modules/analysis_inputs/extractions.py), [분석 범위 시안](../../../app/docs/component-architecture.md#51-자료-등록cli-작업결과).
-- **규칙별 판정·비교:** 릴리스는 구조화 Rule 명세 없이 지침/스키마/어휘/예시를 발행하고, 결과 보고는 여러 Rule에 동일 상태를 묶어 쓰며 semantic은 not_run입니다. D-044의 규칙별 pass/fail/not_run/not_applicable/error·검토 근거를 보존할 명세/보고가 필요합니다. D-050의 개인 비교 API는 존재하나 시안의 미저장 전체 추출 초안·미발견 유지/이번 판본 제외/재추출 결정을 실행·보존하는 계약과는 다릅니다. 조건/AND/OR 문자열 보존과 기계적 논리·수량 판정도 구분하며 표현 한계부터 기록하도록 제안합니다. 근거: [검사 보고](../../../core/modules/analysis_results/validation.py), [개인 비교 입력](../../../core/api/v1/personal/schemas.py), [재추출 시안](../../../app/docs/component-architecture.md#55-원문-변경이전새-추출미발견-대조).
-- 실제 검증: `.venv/bin/python -B -m unittest core.tests.modules.test_extraction_rules core.tests.modules.test_analysis_inputs core.tests.modules.test_analysis_results core.tests.runtime.test_personal_ai_inputs -q`의 **11개 통과(0.690초)**. 별도 임시 실행에서 그래프 omissions 거부, 규약1→2/필수 맥락 누락의 단계 준비, 부분 범위 거부, v3 requires의 스키마/저장 검증 차이를 확인했습니다. 임시 자료는 정리했습니다. 실제 모델 의미 평가·원격 MCP·Electron 실행·운영 발행 규약 확인·전체 회귀는 하지 않았습니다. 이번 연결에서 노출된13개 조회 도구와 저장소의 분석 도구 구현을 구분했으며 운영 도구 허용 목록은 변경하지 않았습니다.
+- 표시/관계 순서·ID가 다른 8시트 표본의 빈/숨김 시트·정확한 이름·시트 간/3D/지역 이름 수식·원시 캐시와 원본 서식/색/크기 참조를 같은 불변 변환 보고/단일 MD에 보존했다. 실제 worker/Pandoc·격리 HTTP 등록/보고 저장과 원본 hash/재다운로드·보고 위치·MD 본문/최초 revision을 대조했다. 원본을 다시 저장하거나 분석 규약/프롬프트/스키마를 바꾸지 않았다.
+- 담당 **45개 통과**. 시트 원명/범위·실제 렌더 td 대응, 실패 보존·서식 보존 판단과 미실행은 [sources HISTORY](../sources/HISTORY.md#2026-10-29--여러-시트-대응이름-범위서식-출처-검증)를 따른다. 실제 모델 의미 평가나 Excel 표시/계산 엔진 구현은 수행하지 않았다.
 
-## 2026-10-25 — 개인 AI 실행 어댑터
+## 2026-10-29 — 복잡 XLSX 구조·셀 기록의 동일 MD 판본 검증
 
-- `client/ai`의 입력 조립·Codex 프로세스·사용권 갱신·결과 인계를 구현하고 `tools.analysis_cli --run-ai`에 연결했습니다. 기존 클라이언트 전송/JSON/hash/고정 입력·결과 저장 모듈을 재사용했습니다. 새 코드와 변경 부분에는 입문자용 한국어 역할/입력/결과/처리 이유 설명을 달았으며 핵심 의미 규칙·공개 그래프 형식·검증 지문은 변경하지 않았습니다.
-- 현재 단일 대상·UTF-8 원본 문자 4 MiB 범위에서 위키 작성과 실제 위키 기반 그래프 추출을 새 세션으로 실행합니다. 전체 사본/관점/규약 대조, 원본 문자 그대로 제출, 두 스키마/결과 검사, 단계별 로컬 기록·선택 client_reported 실행 정보·실제 영수증 확인, 30초 heartbeat/중단/부분 성공 보존을 연결했습니다. 기존 인계 명령은 AI를 자동 실행하지 않습니다.
-- **핵심 고유 9개 통과**: 가짜 CLI 경계/토큰 환경 격리·구조화 출력/시간 초과·취소 회수/잘못된 이벤트·출력 거부 3개, 입력 수신·조립/변조·규약·경로 거부 2개, 실 MCP의 실행 신고 연결·작성자/승인 위조 거부·기존 payload/hash 호환 1개, 임시 실제 서버·별도 CLI·가짜 AI의 전체 저장/그래프 실패·위키 보존·heartbeat 상실 취소 2개, 기존 고정 입력 인계의 실제 CLI 호환 1개입니다. 전체 회귀·옛 모델 평가를 실행하지 않았습니다.
-- 초기 프로세스 검사는 테스트 shebang의 공백 경로를 실제 Python 경로로 수정했습니다. 통합 검사 첫 시도는 환경의 loopback 포트 제한으로 실행되지 않아 그 2개만 허용된 실행 환경에서 수행했습니다. 그래프 실패 경로에서 SDK의 예외 묶음이 알려진 오류 코드를 가리는 문제를 공통 전송 helper로 보완하고 해당 흐름만 통과했습니다(2.468초). 마지막 원본/실행 스키마 구분과 일반 관계의 mapping 생략 보완 뒤 영향받은 입력/runner/정상 통합 흐름만 재확인했습니다(정상 통합 최종 2.652초). 전체 모음을 반복하지 않았습니다.
-- **실제 개인 Codex CLI 확인**: 설치 버전 `0.164.0-alpha.11.1`의 지원 옵션과 개인 로그인 상태를 확인했습니다. 처음에는 개발 중 기능의 안내가 error 항목으로 전달돼 어댑터가 거부했습니다. 안내만 이번 실행에서 억제하고 실제 오류/도구 활동은 계속 거부하도록 보완한 뒤, 기본 모델 선택·빈 임시 폴더·작은 합성 입력에서 `{status: ready}` 구조화 응답/완료 이벤트/출력 hash를 확인했습니다. 설정 파일을 변경하지 않았습니다. 실제 CLI 확인은 작은 연결 검사이며 전체 실문서 분석/의미 정확도 검증은 아닙니다.
-- 위키 저장 통합은 임시 tenant·시험 토큰·합성 원문/가짜 AI를 사용했습니다. 실제 CLI에는 합성 입력만 전달했고 운영 위키/원장·서버 토큰·운영 정책/MCP 설정을 사용하지 않았습니다. 개인 CLI의 기존 로그인은 사용하되 인증 원문을 출력/문서화하지 않았습니다. 실제 문서의 의미 평가·다중 대상 분할·PDF/OCR/artifact·다른 제공자·Windows 네이티브·Electron/두 PC 실행은 미실행/후속입니다.
+- 다단 헤더/병합/두 명시 표·합계·숨김 자료·공유/시트 간 수식이 있는 새 합성 XLSX를 실제 개인 worker/Pandoc과 격리 API로 변환/등록했다. 원본 재다운로드/hash와 구조/모든 cells 위치·원시 캐시·미독/경고를 불변 보고에서 확인하고, 동일한 전체 MD 본문과 first_markdown revision 연결을 대조했다. 기존 분석 저장/규약/프롬프트/스키마는 변경하지 않았다.
+- 복잡 표 **8개**, 변환/연결 **20개**, 기존 등록 **11개**, 합계 **39개 통과**. 병합/표 경계 누락과 설명 행 머리글 오해석의 재현·수정, 원본 XML 및 Markdown→HTML 셀별 대응·부재/한도/모호성 보존은 [sources HISTORY](../sources/HISTORY.md#2026-10-29--병합-셀복잡-표의-markdown-대응-검증과-수정)를 따른다. 실제 모델/온톨로지 의미 평가·운영 쓰기는 실행하지 않았다.
 
-재현용 핵심 모음(실제로는 위와 같이 필요한 묶음으로 나눠 실행했으며 이 모음을 마지막에 반복 실행하지 않음):
+## 2026-10-29 — XLSX Pandoc 표·수식/원시 캐시의 D-074 연결
 
-```sh
-.venv/bin/python -B -m unittest core.tests.runtime.test_personal_ai_runner core.tests.runtime.test_personal_ai_inputs core.tests.api.test_ai_execution_provenance core.tests.runtime.test_personal_ai_workflow core.tests.runtime.test_fixed_input_cli.FixedInputCliTests.test_published_rules_and_fixed_input_reach_actual_cli -q
-```
+- XLSX의 Pandoc whole 표와 기존 cells 위치의 셀별 수식·원시 캐시·종류/속성을 같은 불변 보고로 저장하고, D-074의 기존 단일 MD 저장/최초 revision 연결을 실제 worker/Pandoc·격리 HTTP API로 확인했다. 원본 ZIP을 다시 저장하지 않고 다운로드/재다운로드 바이트와 source_ref/hash를 대조했다. 캐시 누락과 부분 상태·미독·경고를 그대로 전달하며 표와 셀 기록을 다른 원본 사실로 표시하지 않는다.
+- 변환/연결 **19개**와 기존 등록 **11개**, 합계 **30개 통과**. 원인·보존·실패·남은 한계는 [sources HISTORY](../sources/HISTORY.md#2026-10-29--xlsx-경로-오류-수정pandoc-표와-원본-셀-기록-보존)를 따른다. 분석 서버/프롬프트/규약/스키마·실제 모델/의미 평가는 이번 변경 범위가 아니다.
 
-## 2026-10-25 — 파이썬 입문자를 위한 저장 코드 설명 보강
+## 2026-10-29 — Pandoc 변환의 D-074 보존형 등록 연결
 
-- 결과 저장·파일 보관·형식 검사·MCP/API 입구·공통 JSON/경고·입력/작업 조회의 10개 Python 파일에 처리 순서, 주요 변수/ID/버전, 입력과 반환값을 설명했습니다. self·키워드 인자·딕셔너리 펼침·lambda·with·예외·콜백·nonlocal·집합 비교는 처음 읽을 때 필요한 위치에 한국어 설명을 덧붙였습니다. 공개 MCP 도구 설명은 그대로 두었습니다.
-- 변경 전후 구문 트리에서 주석/설명문을 제외하고 비교해 10개 파일의 실행 코드가 동일함을 확인했습니다. Python 구문도 정상이며, 설명만 변경했으므로 기능 검사를 반복하지 않았습니다. 기능 상태와 다음 범위는 기존 PLAN을 유지합니다.
+- 기존 분석 구현을 변경하지 않고 실제 DOCX 원본 등록·다운로드·개인 Pandoc worker·변환 보고의 유실 응답 확인·D-074 등록·Wiki 저장을 격리 연결했다. MD 본문과 변환 MD의 일치, source_ref/hash·whole 위치·미독·경고·최초 MD revision, 원본 중복 미생성을 대조했다. 부분 변환도 보존하고 완전 읽기로 표시하지 않는다.
+- 변환 신규 **11개**와 기존 등록 **11개**, 합계 **22개 통과**. 기존 등록 suite의 CAS/권한/소유권·구 입력/작업 바이트·응답 유실·그래프 실패 뒤 위키 재저장 방지 확인을 포함한다. 상세는 [sources HISTORY](../sources/HISTORY.md#2026-10-29--d-080-개인-pandoc-docx--보존형-md)를 따른다.
+- 추출 프롬프트·규약·스키마·관계/질문/검색은 변경하지 않았고 실제 모델·의미 평가·운영/GUI는 실행하지 않았다. 부분/경고 보고가 있다는 이유로 원본 전체 보존·의미 정확성을 승인하지 않는다.
 
-## 2026-10-25 — 분석 결과의 위키·그래프 저장 연결
+## 2026-10-29 · D-076 실제 모델 토큰·의미 비교와 저장 거부 발견
 
-- `analysis_results`의 저장/영수증·불변 원시 제출·자동 검사 보고·독립 저장 증거와 MCP 저장 도구 2개/결과 조회·일반 API 결과 조회를 연결했습니다. 기존 공통 JSON/hash/정리 경고·안전 파일/불변 입력 공개·작업 인가·오류 처리를 재사용했습니다. jsonschema는 이미 lock된 4.26.0을 직접 의존성에도 명시했으며 설치/업데이트는 하지 않았습니다.
-- `WikiStore.save`·`OntologyStore.generate`의 기본 동작은 유지하고 같은 저장 잠금의 최종 guard를 연결했습니다. 고정 맥락/검토/관점/규약·현재 권한/원본/lease/작업 CAS와 실제 저장의 사이에 다른 위키/검토 쓰기가 끼지 않게 했습니다. 위키 영수증→실제 source/history→그래프 입력의 계보와 부분/전체 저장 집계, 실패 뒤 재쓰기 차단을 연결했습니다.
-- **핵심 고유 8개 통과**: 저장 guard/경합·보존 2개(0.017초), 입력 변경/권한·규약 거부·자료 보존/위키 멱등·최종 영수증 실패/잘못된 인용·기존 검토 원장 보존·partial→complete 3개, 실제 MCP/일반 API 연결·원시 스키마/권한 거부 2개(첫 실행 0.522초), 변경된 tenant 도구 계약 1개입니다. 자료 보존 검사는 격리 임시 저장소만 사용했습니다.
-- 결과 모듈 검사 첫 실행은 테스트의 영수증 오류 주입이 초기 접수까지 막아 1개 오류가 있었고, 최종 complete 영수증만 실패하도록 테스트 범위를 고친 뒤 그 1개를 통과했습니다(0.069초). 저장 후 상태 관측/실패 보존을 보완한 뒤 영향받은 위키 흐름·프로토콜 2개·도구 계약만 0.562초에 확인했고, 위키/그래프 이력 계보 보완 뒤 graph 흐름 1개만 재확인했습니다. 최종 graph 흐름에 자기 위키 저장 뒤 외부 A→B→A의 잘못된 선행 영수증 재사용 거부도 추가해 통과했습니다(0.115초). 전체 회귀/기존 의미 평가는 반복하지 않았습니다.
-- 모델을 호출하거나 실제 사용자의 원문·이력·원장·운영 정책·토큰·MCP 설정을 읽거나 변경하지 않았습니다. 테스트의 검토 판단은 simulation이며 실제 사람 승인이 아닙니다. 이번 결과는 저장·자동 검사 경계의 확인으로, 실제 개인 AI 실행·의미 정확도·전체 artifact 전송·Electron·두 PC 실행·불명확한 저장의 운영 복구는 미실행/후속입니다.
+- 새 합성 냉각 제어기 사양 12줄과 맥락 4줄, 3관계의 부분 과거 그래프와 **모의 판단 13건**을 격리 저장소에 구성했습니다. 같은 불변 bundle의 `full`/`current-review-v1`을 실제 조립기로 생성했고, 원문·규약·출력 스키마가 같은 상태로 전체→축약 각 1회 실행했습니다. 전체 프롬프트는 125,703 → 82,168 B(34.6% 감소)입니다. 기존 사용자 자료·인증 설정·원장/히스토리는 변경하지 않았습니다.
+- 두 추출은 `gpt-6-astra`, reasoning `xhigh`, `codex-cli 0.165.0-alpha.1.2`를 명시한 독립 ephemeral CLI입니다. 자동 재시도·결과 재사용 없이 원시 JSON/프롬프트/스키마/명령/usage/hash를 보존했습니다. 아래는 추정치가 아닌 **제공자 보고 토큰**입니다. 제공자 이벤트의 별도 model ID는 null이며 요청 모델은 명령에 기록돼 있습니다.
 
-위 고유 8개의 재현 명령(이번 작업에서는 필요한 묶음으로 나눠 실행했으며 이 모음을 반복 실행하지 않음):
+| 입력 방식 | 입력 토큰 | 캐시 입력 | 출력 토큰 | 입출력 합계 |
+| --- | ---: | ---: | ---: | ---: |
+| full | 47,384 | 0 | 7,427 | 54,811 |
+| current-review-v1 | 35,919 | 0 | 7,374 | 43,293 |
 
-```sh
-.venv/bin/python -B -m unittest core.tests.modules.test_analysis_save_boundary core.tests.modules.test_analysis_results core.tests.api.test_analysis_results_protocol core.tests.mcp.test_tenant_mcp.TenantMCPTests.test_tool_contract_and_access_context_only_disclose_own_memberships -q
-```
+- 입력 **11,465토큰(24.2%)**, 입출력 합계 **11,518토큰(21.0%)** 감소입니다. 요금 절감률은 계산하지 않았고, 시간은 184.145 → 244.035초여서 속도 개선을 입증하지 않습니다. 비교 외 원문 감사/익명 판정 2회는 입력 34,560·출력 7,615, 합계 **42,175토큰**을 추가 사용했습니다. 외부 대화·실행 담당 세션의 토큰은 이 측정에 포함하지 않습니다.
+- 원문만 받는 CLI에서 인용·줄·SHA와 확인 항목 **14개(대상 12·맥락 2)**를 먼저 고정했습니다. 생성 결과의 diagnostics/해설과 후보 reason/question을 가린 뒤 다른 새 CLI에서 익명 그래프를 판정했습니다. 양쪽 **14/14 supported**, 관계 **10/10**, 속성 **3/3** 근거 확인, 조건 손실·중요 관계 누락·모순·근거 없는 추가 주장 발견 **0건**입니다. AND/only when, 정비·경보 예외, 부정, 계획/현재·가능성/관측 구별, 방향·범위·24 V를 포함합니다. 같은 모델의 상관 오류가 남으므로 사람의 독립 심사나 일반적 정확성 보장으로 해석하지 않습니다.
+- 양쪽 원시 응답이 발행 스키마 및 실제 `OntologyStore.generate()`의 구조·인용·한정어·참조/속성 검사를 통과했습니다. 모두 개체10·관계10·속성3·후보0입니다. 조건은 **문자열 한정어**로 보존됐으며 실행 가능한 논리식/수치 구간을 만들지는 않았습니다. 두 생성자의 미표현 진단 원문도 판정 확정 뒤 보존했습니다.
+- **운영 실패 재현:** 축약 응답은 제외한 과거 검토 이력 12건을 `diagnostics.unread_ranges`에 넣고 대상 원문에는 미독이 없다고 보고했습니다. 추가 모델 호출 없이 원시 submission+diagnostics를 그대로 새 격리 동일 원문 작업의 실제 `ResultStore.generate_ontology()`에 제출했습니다. full은 `saved=true/complete`, 축약은 **`saved=false/rejected`, `diagnostic_input_incomplete`(R-A04 실패)**였습니다. 이 재생은 새 job/bundle이며 최초 생성 job의 재실행은 아닙니다. 두 원문 바이트와 원시 응답을 보존했고 진단을 지워서 통과시키지 않았습니다. 따라서 추출 의미 보존과 별개로 축약의 전체 저장 경로는 미완료입니다.
+- 평가 실행 준비에서 기록용 wrapper가 모델 호출 전 preflight의 `directory=None`을 처리하지 못해 한 번 실패했고 수정 후 첫 실제 감사를 실행했습니다. 자동 주입된 프로젝트 안내를 받은 최초 외부 검증자의 체크리스트는 폐기 대상으로 표시하고 입력/판정 근거에서 제외했습니다. 실제 생성/평가 CLI는 로컬 지침·도구·기억을 비활성화하고 기록된 입력만 받았습니다. 보고 집계 첫 시도는 정규 JSON의 마지막 LF를 빠뜨린 hash 대조가 실패했으며 기존 canonical helper로 확인한 뒤 기록했습니다. 생성·평가의 실제 모델 호출 실패/재시도는 없습니다.
+- 산출물: [전체 결과 JSON](../../../evals/2026-10-29-token-cost/report.json), [원문](../../../evals/2026-10-29-token-cost/source.md), [고정 실행 조건](../../../evals/2026-10-29-token-cost/protocol.json), [토큰](../../../evals/2026-10-29-token-cost/token-results.json), [원문 감사](../../../evals/2026-10-29-token-cost/evaluation/source-audit/result.json), [익명 의미 판정](../../../evals/2026-10-29-token-cost/evaluation/assessment/result.json), [구조 검사](../../../evals/2026-10-29-token-cost/structural-results.json), [저장 재생](../../../evals/2026-10-29-token-cost/result-replay.json). `evals/`는 기존 Git 제외 대상이며 원시 근거와 실행 harness를 로컬에 보존합니다.
+- 최종 확인: 평가 harness 5개 AST, 고정 프롬프트/원시 결과 hash 불변, 실제 CLI 4개의 각 1턴 완료 및 도구 호출0, 새 기록의 파일 링크, 담당 PLAN/HISTORY 4개의 `git diff --check`를 통과했습니다. [전체 산출물 지문](../../../evals/2026-10-29-token-cost/artifact-manifest.json)을 기록했습니다. 생산 코드 수정이 없어 이전 61개 회귀 시험을 반복하지 않았습니다.
+- 남은 작업: 허용된 보기 제외와 실제 필수 자료 미독의 진단 경계를 수정하고 실제 미독 거부를 유지한 채 새 원문·새 세션으로 검증해야 합니다. 이번에는 추출기/프롬프트/발행 규약을 바꾸거나 추가 모델 실행으로 결과를 골라내지 않았습니다. 1쌍/1회이므로 독립 반복 일관성·후보 품질·공개 실문서·전체 MCP 대화 비용·운영 배포의 완료 근거는 아닙니다.
 
-## 2026-10-25 — 공통 규약·고정 입력 연결
+## 2026-10-29 · D-076 명시 입력 보기·문서 선택 실행·검증된 재개
 
-- 변경: 공통 의미 원문 `.agent/ontology_semantics.md`와 역할 참조, `extraction_rules`·실제 제출 스키마 조립/관리자 발행 도구, `analysis_inputs`의 단계별 불변 입력/문자 추출물, MCP 도구4개와 작업 조회 상태를 연결했습니다. runtime은 명시한 규약 root/policy만 주입하고 CLI의 `--prepare-input`은 규약·manifest·구성 사본을 hash 확인해 보존합니다. 기존 평가 도구의 직접 역할 로더에도 같은 의미 원문 조립을 보완했습니다.
-- 핵심 검증만 수행: 규약3개(0.029초), 입력 저장3개(0.311초), MCP 연결2개(0.416초), 실제 CLI1개가 통과했습니다. 전체 회귀·기존 모델 평가·중복 광범위 검사는 하지 않았습니다. 초기 연결의 모듈 준비 순서/인가 주입을 보완한 뒤 해당 CLI 흐름만 다시 확인했고, 최종 manifest와 구성 hash의 대조를 보완한 뒤 같은 흐름1개만 재확인했습니다.
-- 확인 범위: 기존 의미 연속 원문14,433 UTF-8바이트/hash 보존·현재 스키마3–6/기본3·명시적 qualifiers·불변 발행/재발행 거부·현재 허용/철회·변조/호환 오류·tenant-root 분리, read_source→불변 문자 추출물/replay→prepare_wiki 및 실제 위키의 extract_ontology 입력, 전체 원문/검토/정책·조건 맥락과 페이지 hash, A→B→A/history/profile/권한/규약 변경 차단·필수 선행/한도·실패 보존을 확인했습니다.
-- 실제 CLI는 임시 정책/tenant·발행 규약의 Uvicorn 서버에서 작업 접수→read_source 고정 입력 준비→정확한 규약/입력/원본 수신→구성 hash 검증→인계 사본·진행 보고까지 확인했습니다. 운영 data·토큰·권한/설정은 접근/변경하지 않았고 AI를 호출하거나 위키/그래프를 저장하지 않았습니다.
-- 현재 한도: 고정 입력8MiB, 문자 추출물 본문4MiB/수신8MiB·작업별 누적64MiB, 구성/원시 제출 보관16MiB, 묶음/추출물각100·선택 문서8개·문서별 기존1MiB입니다. 이는 전체64MiB 추출물·artifact 전송 설계의 구현 완료가 아닙니다.
-- 완료 범위는 규약/고정 입력 연결 묶음입니다. Q2/R2 전체 결과 저장 래퍼·검사 보고/영수증·실제 개인 AI/Electron/두 PC 실행과 새 의미 정확도 평가는 남습니다. 입력 준비는 `can_analyze_input`, 실제 저장 미구현은 `execution_ready=false`와 후속 조건으로 구분합니다.
+- 변경: `core/client/ai/{input_view,assembly,observations,workflow,resume,codex,claude}.py`, `core/client/{analysis,analysis_batch}.py`, `tools/analysis_cli.py`, `core/modules/analysis_results/{reuse,store,validation}.py`. 기본 full 입력을 유지하고 명시 current-review-v1 조립·선택 작업 묶음·설정 지문·현재 재사용 기준·호출/크기/제공자 보고 토큰을 연결했습니다. 원본 bundle·규약·저장 payload의 기존 필드는 재작성하지 않습니다. MCP 간결 응답은 platform 기록을 따릅니다.
+- 격리 검증 대상은 최종 **61개 모두 통과**했습니다. 명령 범위: `core.tests.poc_analysis.{test_input_cost,test_client_integration,test_reuse_guard,test_registration}`, `core.tests.poc_mcp.{test_compact_responses,test_cleanup_transport}`, `core.tests.poc_knowledge.test_cleanup`. 첫 묶음의 60개 중 58개 통과 후 시험의 예외 포장 기대를 수정해 통합 2개 재검사를 통과했고, 전체 그래프/미선택 문서 보존 검사 1개를 추가 통과했습니다.
+- 입력/저장: 모든 선택 원문 바이트·한정어·조건/예외·유효 그래프·reject/defer/accept·정책 이유/범위·pending 상태, undo로 복구한 판단의 원래 이유, 제외 이벤트 ID와 전체 이력 보존을 확인했습니다. 선택 문서 전체 2관계를 저장하고 미선택 문서 그래프/본문을 보존했습니다. 단순 중복 제거 검사는 의미 정확도 판정이 아닙니다.
+- 재사용: 검토만 변경되어 `current_output.status=current`였던 기존 구멍을 재현하고 `reuse_basis`로 차단했습니다. 원본 판본·맥락 A→B→A 이력·대상·규약 철회·access/관점·취소·tenant/owner/read 거부·설정 변경/증거 누락·미확인 영수증은 재사용 거부, 확인된 자기 저장 연쇄만 재개합니다. 과거 결과 조회·전체 원본/이력 바이트는 유지합니다.
+- 실제 격리 ASGI API/MCP SDK와 개인 실행기에 **합성 어댑터**를 연결해 full/current-review-v1 모두 확인했습니다. MD 저장 응답 유실 뒤 조회·그래프 모의 실패 뒤 그래프만 재개·완료 재실행을 확인했습니다. 각 흐름에서 Wiki 저장 1회, 합성 adapter 호출은 최초 실패 1회 + 재개 성공 1회 + 완료 결과 재사용 0회였습니다. 설정을 바꾼 재사용 시도는 추가 호출 없이 거부됐습니다. batch는 선택 작업만 한 번씩, 개별 실패 보존/후속 진행, 취소 시 후속 미실행, 중복/잘못된 선택의 실행 전 거부를 확인했습니다.
+- 크기 측정: 24개 합성 관계·반복 판단·명시 예외 문서의 같은 자료 JSON(`manifest + data components`, 규약 본문 제외)은 **235,649 → 43,738 UTF-8 바이트**, 약 **81.4% 감소**했습니다. MCP 검토 snapshot은 platform 기록의 111,945 → 5,188 B입니다. 실제 전체 wire/전체 프롬프트/토큰/과금 절감률이 아닙니다. 제공자 usage 이벤트는 합성 fixture로 보존/미제공 null/숫자 타입을 검사했고 실제 CLI 모델은 호출하지 않았습니다. schema 크기는 제공자 내부 변환 전 어댑터에 전달한 JSON 바이트입니다.
+- 초기 시험의 잘못된 한정어 키/정책 context fixture를 현행 스키마에 맞췄습니다. 통합 시험에서는 의도한 설정 변경 거부가 MCP SDK의 ExceptionGroup으로 포장되어 직접 예외형 기대가 실패했으며 기존 `client_error_code`로 대조하도록 시험만 수정했습니다.
+- 최종 코드 검토에서 투영 자료와 원본 component hash의 표시를 분리하고 원본 bundle_revision 재직렬화를 제거했습니다. 비정규 JSON 원본 hash 전달·보기 hash 검사를 포함한 입력/전송 **11개 재검사 통과**. 담당 Python **22파일 AST 검사**, 변경 경로 `git diff --check`, CLI 도움말과 D-076 유일성/README 구조 확인을 통과했습니다.
+- 미실행/한계: 실제 모델·공개 원문 분리 의미 평가·독립 반복 생성 일관성·UI/Windows·운영 배포/대량 재추출은 미실행입니다. 과거 bundle 수신/로컬 전체 보존 크기를 줄인 것은 아니며, 정책 상태·규약 전체를 유지해 작은 입력은 오히려 보기 메타데이터만큼 커질 수 있습니다. 제공자 기본 모델의 내부 선택 변동을 검증했다고 하지 않습니다. 기존 인증 초기화 호환 실패는 범위 밖으로 남깁니다. 사용자 data/·토큰·기존 원장/이력을 수정하거나 자동화를 만들지 않았습니다.
 
-핵심 재현 명령(이번에는 각 파일을 나누어 실행했으며 이 모음을 반복 실행하지 않음):
+## 2026-10-28 · D-074 기본 등록과 개인 분석 기록
 
-```sh
-.venv/bin/python -B -m unittest core.tests.modules.test_extraction_rules core.tests.modules.test_analysis_inputs core.tests.api.test_analysis_inputs_protocol core.tests.runtime.test_fixed_input_cli -q
-```
+- 구현: POST `analysis-jobs/registrations`와 `JobStore.create_registration`, 원본/변환 참조 → 보존형 단일 MD → 정확한 MD 판본 그래프. 독립 plan/파생 TXT source를 생성하지 않음. job/전환 보고/입력/요청/저장 증거를 개인 작업 경로로 연결하고 기존 `_jobs`·고급 실행·구 actor/bundle을 원래 위치/바이트로 유지. 입력/요청의 반복 전체 본문은 원본/MD 이력 판본 참조로 축소. 변환 미독·경고·위치를 최초 MD 판본에 연결하고 모델 입력에도 유지.
+- 검증: `.venv/bin/python -m unittest discover -s core/tests/poc_analysis -v` **12개 통과**. 텍스트·부분 PDF 변환 보고, 원본 중복 방지, 요청 동시 접수와 source/job ID 충돌, MD/graph SHA 일치, 보존 모드의 요약 거부, 본문 변경 후 구 결과 거부와 정확한 이력 판본 복원, 권한 변경/소유권/취소, 구 작업·구 고정 입력 불변 읽기, 최종 영수증 유실의 실제 저장 증거를 확인.
+- 연결 검증: 실제 가입 서비스/API/MCP SDK/개인 실행기를 격리 ASGI 전송으로 연결. 다른 사용자 가입 후 access_revision 유지, HTTP 생성/MCP 재전송 동일 job, 위키 응답 유실 후 결과 조회, 합성 그래프 실행 실패 후 reclaim, 그래프만 재개 및 완료 재실행의 추가 모델 호출 없음. 실제 Wiki 저장 호출은 1회이며 원본을 다시 등록하지 않음. nullable 기본 관점 actor와 AI 작성 이력도 확인.
+- 실패·수정: 초기 시험에서 새 작성 원장의 changes.json 생성이 기존 분석 이력 기준과 충돌한 것을 확인하고, 실제 저장 영수증에 그 생성 여부를 연결해 해결. 공유 문서 저장의 nullable domain/viewpoint 거부를 PLAN에 인계했고 저장 담당 수정 후 정상 actor로 재검증. 시험 초기 임시 루트 생성과 source URL 설정 오류도 수정.
+- 정적 확인: 담당 경로 Python 53개 AST 파싱 통과, 담당 변경 `git diff --check` 통과.
+- 미실행: 실제 Codex/Claude 모델·원문 분리 의미 평가·운영 네트워크 서버/GUI/Windows는 미검증. 합성 어댑터의 스키마/저장 시험은 실제 모델 의미 정확도를 입증하지 않음. 실제 data/·.local/tenancy/·사용자 CLI 설정/토큰은 시험용으로 수정하지 않았으며 미확인 증거 자동 삭제는 추가하지 않음.
 
-## 2026-10-25 — 작업 접수·CLI 원본 인계
+## 2026-10-29 — D-081 초안 검사·제한 재추출의 개인 실행기 연결
 
-- 변경: `core/modules/analysis_jobs`의 store/records/commands/queries/contracts, 작업 API, tenant MCP 도구4개, API/MCP 오류와 정리 경고 변환, source/job의 request_id 충돌 검사와 본인 영수증 조회를 구현했습니다. `core/client/analysis.py`·`tools/analysis_cli.py`는 작업 PC의 인증 API/MCP 접수·고정 원본 수신·input_ready 보고를 제공합니다. 실제 사용법은 README, 계약은 analysis DECISIONS에 둡니다.
-- 실제 검증: 사용자 요청에 따라 **고유13개만 실행**했습니다. 저장5개(0.124초), HTTP/MCP5개(0.683초), 개발 CLI/입력 보호2개, 변경된 기존 tenant 도구 계약1개가 통과했습니다. 실제 CLI의 첫 실행은 macOS `/var` 별칭이 symlink 보호에 걸려 실패했고 실제 private 경로로 고친 뒤 해당 흐름만 재실행해 통과했습니다(1개1.345초). 기존742개 전체 회귀를 반복하지 않았습니다.
-- 실제 별도 프로세스: 임시 tenant·시험 토큰의 Uvicorn 서버에 HTTP 원본 등록/작업 생성 후 `tools.analysis_cli`를 실행했습니다. API/MCP 사용자·tenant/job 대조→claim/source_read→인증 다운로드의 원본 바이트/hash/UTF-8/CRLF→input_ready 보고→같은 API 상태/본인 영수증→heartbeat의 lease/job 분리→취소와 원본 보존을 확인했습니다. 토큰 비출력과 프로세스 종료도 확인했습니다. 개인 AI 모델은 호출하지 않았습니다.
-- 보존/거부: 새 업무 흐름 안에서 권한 회수·본인 marker·다른 tenant/위조 인자·request 재전송/충돌·source/job/lease 기준·유효 run 보호/명시 reclaim·만료/취소·pending 영수증 근거·metadata 손상/한도와 원본/기존 자료 보존을 확인했습니다. 운영 자료·정책·토큰·기존 MCP/앱 설정은 접근/변경하지 않았습니다.
-- 독립 읽기전용 검토: 중복 검사를 실행하지 않고 새 코드 경계를 검토했습니다. claim의 후보 state가 JSON 한도를 넘을 때 lease가 먼저 공개돼 허용 run 한도까지 불필요한 고아 lease가 쌓이는 경계1건을 재현했습니다. 완성된 state/lease를 먼저 preflight한 뒤 같은 바이트를 공개하도록 수정했고 기존 실패 흐름1개만 다시 통과했습니다(0.012초). 같은 CAS3회 실패에도 lease0·원본/state 보존을 확인했습니다. 최신 코드를 재검토한 결과 남은 확정 결함은 없습니다. 독립 재현을 별도 통과 수로 합산하지 않습니다.
+- `workflow.py`와 `draft_validation.py`에서 고정 source/원본 발행 스키마 검사, 최대2회 전체 재추출, 원시 호출/검사 기록, 최종 출력 지문만 저장을 연결했습니다. `save=false` 미독 진단 보존과 의미 검사·저장 영수증 조회를 유지합니다.
+- 실제 격리 HTTP/MCP 신규13개와 기존 client/input-cost/reuse 회귀를 합친35개가 통과했습니다. 유효1회·수정성공2회·소진3회, source 변경/규약 회수 뒤 모델 추가호출0·graph쓰기0, 취소/adapter/lease/미독/최종semantic/저장응답유실/재사용을 확인했습니다.
+- 초기 구현의 job 조회만으로는 target 원문 변경을 추가 수정 호출 전에 감지하지 못해, 기존 `analysis_job_input_read`의 전체 basis 검사를 매 호출 전후에 연결했습니다.
+- 독립 리뷰에서 실제 Codex reports형 토큰 총계 누락과 검사 자원 한도의 재사용 지문 누락을 재현해 수정했습니다. Codex 완료 턴과 Claude 총계/중복 표현, 9개 자원 한도·기본 진단 한도20 변경을 검증했습니다. 수정 이후 영향 검사8개/7개, 최종 관측6개가 통과했으며 앞선 검사와 중복돼 단순 합산하지 않습니다.
+- 실제 Codex 호출12회는 순수 검사/수정 프롬프트 경로의 새 원문 평가이고, 전체 job/lease/save 오케스트레이션은 위 격리 합성 어댑터 통합 검사로 검증했습니다. Claude 실제 호출·운영 서버 배포/발행은 수행하지 않았습니다. [실행 근거](../../../evals/2026-10-29-adopt-imp01-02/implementation-verification.json).
 
-```sh
-.venv/bin/python -B -m unittest core.tests.modules.test_analysis_jobs core.tests.api.test_analysis_jobs_api core.tests.runtime.test_analysis_cli core.tests.mcp.test_tenant_mcp.TenantMCPTests.test_tool_contract_and_access_context_only_disclose_own_memberships -q
-```
+## 2026-10-29 — 공통 MUST 점검과 이력 생략 보고 통합 검증
 
-위 명령은 나누어 실행한13개의 재현 모음이며 마지막에 같은 모음을 반복 실행하지 않았습니다. 완료는 **작업 접수/원본 인계 묶음**입니다. Q1/Q2 규약·고정 입력·추출물/위키·그래프 저장, 실제 로그인된 AI CLI·모델·Electron/PTY·두 PC/WSL2/HTTPS·영구 backend identity는 미구현/미검증입니다. 다음은 Q1 공통 규약과 Q2 고정 입력 연결이며 자동 착수하지 않습니다.
+- EP01~11/RP01~04를 지침·기계 검사·의미 검토·검토함 연결로 구분했습니다. diagnostics 원시 보존과 기존 후보 검토는 있지만 진단별 독립 검토 항목/해결 상태는 미구현입니다.
+- 선택 입력에만 과거 이력 제외의 경고 안내와 보고 정책/템플릿 실행 지문을 추가했습니다. 반환 unread를 수정하지 않으며 진짜 미독의 차단을 유지합니다. full의 prompt/schema/assembly/config는 변경 전과 동일했습니다.
+- 새 통합7개+기존 설정 회귀1개, 서로 다른 검사8개 통과. 공유 workflow의 다른 작업 변경 뒤 영향3개를 재통과했으며 중복 실행 수를 합산하지 않습니다. 독립 코드 리뷰의 중요한 재현 결함0입니다.
+- 새 합성 원문18줄/992자·사전10문항, 전체1회/선택2회의 최종3개를 실제 CLI로 얻었습니다. 최초 구조 실패3개와 추가 실패1개를 보존하고 교정4회를 포함한 실제 호출7회, 최종3개 graph/diagnostics/격리 저장 통과. 선택2개 모두 과거 이력 제외를 warnings로 보고하고 모든 실행 unread는 빈 목록이었습니다.
+- 익명7출력×10문항·관계75/속성148/후보14의 원문 검토 완료. 최종 내용 복원 각10/10(문장 속성 포함), 의미 지원 전체9/10·선택각10/10, 중요 누락0. 전체 입력의 발화 귀속 확대1개, 실패 출력의 술어/근거 모호함을 보존합니다. 후보 명제/상태와 판정 후 대조한 이유/질문 의미는 같지만 관계 구성은 달라 전체 그래프 일관성은 미충족입니다.
+- 보고 토큰 입력300,979+출력63,870=364,849(캐시39,936은 입력 부분집합, 미보고 호출0). 조정·원문 작성·검토 에이전트 사용량 제외. 반복 수와 교정 횟수가 달라 일반 절감률로 확대하지 않습니다.
+- 평가 하네스 준비의 폴더 모드/임시 경로 오류와 시험 fixture의 기준 충돌은 기록하고 준비 코드만 수정했습니다. 원문/gold/원시 출력/과거 실패를 바꾸지 않았습니다. 실제 모델은 production assembly/adapter/validator 및 격리 저장, 전체 job 전송은 합성 어댑터 MCP 시험으로 검증했습니다.
+- 의미 프롬프트·스키마·운영 발행/기본 정책·기존 자료는 변경하지 않았습니다. 실제 전문가 검토함 통합, 전체 반복 의미 동치, 다양한 실문서/운영 서버는 미완료입니다. [전체 보고서·변경 파일·근거](../../../evals/2026-10-29-must-integration/REPORT.md).
 
 
-## 2026-10-25 — 규약 발행·허용·전환·되돌림
+## 2026-10-30 — 운영 서버 교체 후 저장 결과 보존
 
-- `extraction_rules.administration`과 `tools.transition_ruleset`에 inspect/plan/apply/status/rollback을 추가했습니다. 기존 reader의 정책 검증을 재사용하고 전체 정책 CAS·관리 잠금·새 불변 이력/동기화·원자 교체를 연결했습니다. 허용과 기본값 선택, 전환과 원래 전체 바이트 복원, 최초 생성의 빈 정책 되돌림을 명시 단계로 분리했습니다. 기록 실패·충돌·잠금 대기·정리 문제·교체 후 동기화 경고를 구분합니다. 기존 릴리스·사용자 자료·히스토리는 덮어쓰거나 삭제하지 않았습니다.
-- **신규 관리자 검사7개 통과**: 동시 변경1회만 적용, 기존 릴리스/다른 tenant/원시 정책 보존과 정확한 되돌림, 이력 쓰기 실패 보존, 변경된 릴리스 참조·중간 정책 변경·철회 규약 거부, v1 읽기/신규 정책 CLI 왕복, 잠금·symlink 실패/동일 계획 재시도, 교체 후 동기화 경고를 확인했습니다. 기존 규약 검사6개도 초기 회귀에서 통과했습니다.
-- **실제 별도 서버/CLI2개 통과(10.427초)**: 새 발행 CLI→loopback Uvicorn API/MCP 서버→인증 initialize→구 v1 작업 고정→v2 허용/기본값 전환→기존 입력 유지/명시 rebase→새 MCP 초기화→원본/작업/고정 입력→v2 별도 진단 초안→HTTP 영수증/hash 대조→정책 되돌림→구버전 바이트/기존 결과 조회 보존을 확인했습니다. 기존 개인 CLI의 별도 의미 검사 저장 연결도 통과했습니다. 모델 응답은 합성이며 실제 의미 정확도 평가가 아닙니다.
-- 기존 규칙 진단9개·MCP/API 진단1개·개인 별도 검사4개도 통과했습니다. 최초 실제 서버 검사는 sandbox의 loopback bind 제한으로 중단됐고 허용된 escalation에서 실행했습니다. 테스트의 macOS `/var` 별칭을 실제 경로로 바꾸고 그래프 hash 참조를 실제 계약 `validation_report.basis.submission_sha256`로 바로잡은 뒤 해당 실패 흐름만 재실행했습니다. 전체 Python 회귀는 공통 통합 담당이 소유합니다.
-- 추출안 담당의 `ensure_proposal_job_draft`를 `ResultStore._save`의 현재 job/run 확인 직후에 연결했습니다. 예약된 추출안 실행은 초안 제출만 허용하고 canonical 변경은 명시 proposal apply로 남깁니다. 기존 분석 결과/진단 동작은 위 검사로 확인했으며 추출안 고유 정상·거부·연결 검증은 담당의 최종 인계를 별도로 반영합니다.
-- 격리 발행 산출물: `/private/tmp/mcp_2-ruleset-evidence-xs495a2y/releases/llm-wiki/diagnostics-v2-20261025`, revision `a72813d86e6a9bfdbf53d36102c8b56056f944262495f3bd805de268ea69fdb4`. 같은 폴더의 `allow-plan.json`은 아직 적용하지 않은 격리 정책 계획이며, `protocol-receipt.json`은 실제 시험의 반환 영수증/hash입니다. 시험 tenant는 종료 시 정리했고 이 영수증을 운영 서버의 현재 조회 결과로 사용하지 않습니다. 임시 증거는 운영 보관 위치를 대신하지 않습니다.
-- 운영 미적용: 실제 `access_context`에서 `jong-yu`/`personal`의 권한은 `read`로 확인했습니다. 운영 관리 대상/권한은 미확정이라는 통합 담당의 인계를 받았고 운영 정책·MCP 설정·인증정보·Wiki를 변경하지 않았습니다. 필요한 입력과 보존/되돌림 실행법은 [RULESET_ROLLOUT](RULESET_ROLLOUT.md)에 둡니다. 실제 모델 원문 분리 평가·Windows·두 PC·운영 HTTPS/자동시작은 이 계약 시험의 완료 범위가 아닙니다.
-
-### 같은 차수 실행기 담당의 중간 인계
-
-- fastapi_5의 공개 인계: 기존 추출안 API8개와 새 execution→후보→진단→명시 적용/정확한 영수증 ASGI 통합1개 통과. 실제 저장 모듈을 사용했으며 모델 호출은 하지 않았습니다. 공통 ResultStore의 초안 강제 연결을 소비하는 검사입니다. 나머지 실패/취소 경로와 실제 loopback의 최종 결과는 담당이 확정한 뒤 통합 기록에 추가합니다.
-- fastapi_6의 공개 인계: `tools.proposal_cli --help`와 실제 loopback의 후보·별도 의미 보고·읽기 전용 재개 첫 흐름 통과, 취소 검증은 진행 중입니다. 이 중간 인계를 전체 재추출 실행기 검증 완료로 표시하지 않습니다.
-- fastapi_8의 공개 인계: runtime/배포 준비 관련 집중 검사22개 통과 보고를 받았습니다. 실제 POSIX 프로세스 경계와 보존/hash/경로 거부를 확인했으며 Windows 분기는 모의, Caddy/systemd/Windows 실환경 실행은 미실행입니다. 상세·최종 공통 Python 통합은 platform 기록이 소유합니다.
-
-## 2026-10-26 — 별도 검사 줄 기준과 정규화 관점 명확화
-
-- 실제 RFC9110 평가의10개 규칙은 새 상태/verdict 조합을 지켰지만 평가 하네스의 글로벌 출처 줄 번호를 발췌문 인용 위치로 사용했습니다. 원시 reviewed_range1개와 finding10개의 위치 검증 실패를 그대로 보존했습니다. 실제 제품 checker에는 이 하네스의 글로벌 provenance 입력이 없다는 차이를 기록합니다.
-- core/client/semantic_check.py의 공통 지침에 source 문자열 첫 줄=1, 출처 전체 줄/페이지와 구분, viewpoints는 원문 주장에 근거한 정규화 분류라는 기준을 명확히 했습니다. 태그의 실제 의미 적합성 검사는 유지합니다. 원시 모델 판정·스키마·서버 인용 검증을 고치거나 완화하지 않았습니다.
-- semantic_check·rule_diagnostics·analysis_diagnostics 관련24검사(1.544초) 통과. 기존 거부/부분 보고/취소/구규약 보존 검사를 실행했으며 이 회귀를 실제 의미 통과로 표시하지 않습니다. 원시 근거는 [개발 평가 보고](../../../evals/rfc9110_safe_20261026/REPORT.md)에 있습니다.
-
-
-## 2026-10-26 — Codex·Claude 실행 기록과 기존 규약 호환
-
-- D-065에 따라 일반 실행 및 독립 의미 검사 실행 제공자에 codex/claude를 허용했습니다. 기존에 알려진 진단 스키마의 CheckExecution.provider만 확장한 검증 사본을 사용하며, 기존 발행 바이트/hash/revision·정책·고정 입력은 바꾸지 않습니다. 신규 발행은 두 제공자를 명시합니다. 변조 스키마에는 호환 예외를 적용하지 않습니다.
-- 서버 집중 검사 **38개 통과**: `.venv/bin/python -B -m unittest core.tests.modules.test_analysis_results core.tests.modules.test_analysis_diagnostics core.tests.modules.test_rule_diagnostics core.tests.modules.test_extraction_rules core.tests.api.test_analysis_results_protocol core.tests.api.test_rule_diagnostics_protocol -q`. 두 제공자의 자기진단·실행 영수증, Claude 독립 의미 보고, 잘못된 제공자 거부, 구 스키마 지문·발행/정책 바이트·revision·원문 이력을 확인했습니다.
-- 독립 읽기 검토에서 분석·질문·추출안·별도 검사까지 제공자 전달, 영수증 보존, 기존 규약의 클라이언트/서버 검증 연결을 확인했습니다. 실제 CLI fixture 검증은 platform HISTORY에 기록합니다. 운영 자료·규약·정책 변경이나 실제 모델 의미 평가는 수행하지 않았습니다.
+- 기존 공개 주소를 유지해 8766 서버를 최신 코드·기본 규약 설정으로 교체한 뒤 읽기 전용 검사7개를 통과했습니다. API/MCP identity·default 규약, 신규 대조 목록200, QA 문서 전체 hash/원본 바이트·그래프 판본/ready·대조 원장/revision이 기존 실제 실행 결과와 같았습니다. [최종 검사](../../../evals/2026-10-30-operational-smoke/ROLLOUT.json).
+- 설치 앱에서도 QA의 완료·결과2/2 저장·대조2/5 조회를 확인했습니다. 새 모델 호출이나 기존 자료 재추출, 8767에 바인딩된 QA 로컬 세션의 주소 변경은 하지 않았습니다. 운영 반영의 상세와 Claude 한도 제한은 platform/analysis의 각 기록을 따릅니다.

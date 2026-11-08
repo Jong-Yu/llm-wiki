@@ -36,6 +36,7 @@ class SaveContent(Model):
     content: str = Field(max_length=1024 * 1024)
     expected_revision: str | None = Field(pattern=r"^[a-f0-9]{64}$")
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    reason: str | None = Field(None, max_length=2000)
 
 
 class RestoreContent(Model):
@@ -44,19 +45,30 @@ class RestoreContent(Model):
     history_id: str = Field(min_length=1, max_length=255)
     expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    reason: str | None = Field(None, max_length=2000)
 
 
 class DocumentContent(Model):
     document: str
     content: str
     revision: str
+    metadata: dict[str, JsonValue]
+    body: str
+    body_start_line: int
+    body_revision: str
+    document_id: str | None
+    authorship: dict[str, JsonValue]
     access: Access
 
 
 class DocumentItem(Model):
     document: str
     revision: str
-    source_status: Literal["unlinked"]
+    source_status: Literal["unlinked", "linked"]
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    document_id: str | None = None
+    body_revision: str | None = None
+    authorship: dict[str, JsonValue] = Field(default_factory=lambda: {"status": "unknown", "created": None, "updated": None})
 
 
 class RegisteredSourceItem(Model):

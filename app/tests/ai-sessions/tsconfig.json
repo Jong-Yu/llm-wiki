@@ -1,0 +1,9 @@
+{
+  "extends": "../../config/typescript/tsconfig.tools.json",
+  "include": [
+    "verify.ts",
+    "verify-ui.ts",
+    "renderer.tsx",
+    "../../src/renderer/env.d.ts"
+  ]
+}

@@ -67,7 +67,7 @@ def _cli_schema(schema, stage):
     return deepcopy(schema)
 
 
-def assemble_input(fixed_input, directory, *, stage, target_document):
+def assemble_input(fixed_input, directory, *, stage, target_document, input_view="full"):
     """지문을 재검사한 prompt/schema/manifest와 조립 기록을 반환한다.
 
     directory는 서버에서 받은 사본을 둔 작업 폴더다. 경로를 프롬프트에 넣지 않고,
@@ -88,10 +88,17 @@ def assemble_input(fixed_input, directory, *, stage, target_document):
     trusted = {"rules/manifest.json": release["manifest_text"],
                **{"rules/" + name: value["content"] for name, value in release["components"].items()}}
     data = {name: value for name, value in components.items() if name not in trusted}
+    from . import input_view as views
+    # 추출 단계에서만 명시 보기를 사용한다. 다른 단계의 원래 입력 계약은 유지한다.
+    view_manifest, view_data, view_audit = views.project(manifest, data, input_view if stage == "extract_ontology" else "full",
+                                                 bundle_revision=fixed_input["bundle_revision"])
     task = ("고정된 data/extraction.txt 전체와 출처를 사용해 대상 위키의 충실한 전체 본문을 구성한다. "
             "본문은 content, 누락·경고·미독·의미 의견은 발행된 형식의 diagnostics로 분리한다."
             if stage == "prepare_wiki" else
             "data/context.json에서 대상 문서의 실제 source.content 전체를 추출 원문으로 사용한다. "
+            "body_start_line이 있으면 그 줄부터 본문이며 앞의 Front Matter는 근거로 인용하지 않는다. "
+            "source_revision은 전체 파일 revision이다. source_anchor와 모든 줄 범위는 전체 파일 1-based 좌표로 제출한다. "
+            "본문만 따로 세었다면 body_start_line - 1을 더하며 두 기준을 혼용하지 않는다. "
             "전체 그래프는 발행된 submission.schema.json 형식의 submission에, 누락·표현 한계·의미 의견은 diagnostics에 반환한다. "
             "기본 schema_version은3이며 v4~v6 기능이 필요한 경우 해당 버전을 명시하고 그 지침을 따른다. "
             "다른 맥락의 조건/예외도 확인하고 의미상 미확정 제안은 근거 사실로 만들지 않는다.")
@@ -103,10 +110,16 @@ def assemble_input(fixed_input, directory, *, stage, target_document):
         "조건·부정·가능성·범위·시점·출처를 보존하고 원문에 없는 인용/사실/승인을 만들지 않는다.\n"
         f"작업 단계: {stage}\n대상 문서: {json.dumps(target_document, ensure_ascii=False)}\n{task}\n"
     )
+    reporting = None
+    if view_audit is not None:
+        reporting = {"policy": views.reporting_configuration(input_view),
+                     "warnings": views.reporting_warnings(view_audit)}
+        instructions += ("\n" + views.REVIEW_HISTORY_REPORTING_INSTRUCTIONS + "\nINPUT_VIEW_REPORTING\n"
+                         + canonical_json_bytes(reporting).decode("utf-8") + "\n")
     # JSON 문자열 안에 자료를 넣어 원문에 구분자/명령처럼 보이는 글이 있어도
     # 자료와 조립 메타데이터를 구분해 전달한다. 실제 의미 이해를 증명하는 장치는 아니다.
     prompt = (instructions + "\nPUBLISHED_RULES\n" + canonical_json_bytes(trusted).decode("utf-8")
-              + "\nFIXED_INPUT_DATA\n" + canonical_json_bytes({"manifest": manifest, "components": data}).decode("utf-8"))
+              + "\nFIXED_INPUT_DATA\n" + canonical_json_bytes({"manifest": view_manifest, "components": view_data}).decode("utf-8"))
     if len(prompt.encode("utf-8")) > MAX_INPUT_BYTES:
         raise AnalysisClientError("analysis_prompt_limit")
     assembly = {"version": 1, "stage": stage, "target_document": target_document,
@@ -117,5 +130,16 @@ def assemble_input(fixed_input, directory, *, stage, target_document):
         "published_schema_sha256": (sha256(components["rules/submission.schema.json"].encode()).hexdigest()
                                      if stage == "extract_ontology" else None),
         "observation": "client_assembled_input", "model_execution_certified": False}
+    full_data = canonical_json_bytes({"manifest": manifest, "components": data})
+    supplied_data = canonical_json_bytes({"manifest": view_manifest, "components": view_data})
+    assembly["input_view"] = "full" if view_audit is None else input_view
+    assembly["view_audit"] = view_audit
+    if reporting is not None:
+        assembly["input_view_reporting"] = reporting["policy"]
+        assembly["view_warnings"] = reporting["warnings"]
+    assembly["sizes"] = {"prompt_utf8_bytes": len(prompt.encode("utf-8")), "prompt_characters": len(prompt),
+                         "schema_utf8_bytes": len(canonical_json_bytes(schema)),
+                         "full_data_utf8_bytes": len(full_data), "supplied_data_utf8_bytes": len(supplied_data),
+                         "token_estimate": None, "actual_token_usage": None}
     return {"prompt": prompt, "schema": schema, "cli_schema": _cli_schema(schema, stage),
             "manifest": manifest, "assembly": assembly}

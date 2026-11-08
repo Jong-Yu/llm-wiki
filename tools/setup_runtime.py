@@ -4,7 +4,6 @@ import argparse
 from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import venv

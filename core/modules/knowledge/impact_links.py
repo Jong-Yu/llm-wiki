@@ -5,6 +5,7 @@
 
 from core.modules.ontology.connections import _link_target
 from core.modules.ontology.connections import _source_links
+from core.modules.documents.metadata import parse_document
 from . import contracts
 import stat
 
@@ -14,11 +15,17 @@ def collect_links(ctx):
     # 현재 링크와 복원한 옛 링크를 비교한다. 제거된 링크도 과거 근거로 남기되 현재 연결과 구분한다.
     ctx.explicit = [{**item, "origin": "current", "change": "current"} for item in ctx.connections["explicit_links"]]
     if ctx.old_source is not None and ctx.old_source.revision != ctx.sources[ctx.document].revision:
+        try:
+            current_parsed = parse_document(ctx.sources[ctx.document].content)
+            old_parsed = parse_document(ctx.old_source.content)
+        except ValueError:
+            ctx.skip(ctx.document, "invalid_document_metadata", "baseline_source")
+            return
         # Connections intentionally return one edge per document pair. A
         # second fragment may still exist even when its edge was deduped.
         # Prove absence against the bounded current source, not its output.
         current_targets, current_links_complete = set(), True
-        for index, (href, _) in enumerate(_source_links(ctx.sources[ctx.document].content)):
+        for index, (href, _) in enumerate(_source_links(ctx.sources[ctx.document].content, parsed=current_parsed)):
             if index >= contracts.MAX_CONNECTION_LINKS:
                 current_links_complete = False
                 ctx.skip(ctx.document, "link_budget", "current_source")
@@ -42,7 +49,7 @@ def collect_links(ctx):
                 continue
             current_targets.add(name)
         seen = set()
-        for index, (href, evidence) in enumerate(_source_links(ctx.old_source.content)):
+        for index, (href, evidence) in enumerate(_source_links(ctx.old_source.content, parsed=old_parsed)):
             if index >= contracts.MAX_CONNECTION_LINKS:
                 ctx.skip(ctx.document, "link_budget", "baseline_source")
                 break

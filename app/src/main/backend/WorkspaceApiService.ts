@@ -1,14 +1,19 @@
+import { sameAccessRevision } from '@contracts/connection.contract';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import type { ConnectionService, AnalysisContext } from './ConnectionService';
 import type {
   WorkspaceRequest,
   WorkspaceResult,
-  WorkspaceScope,
   WorkspaceRecovery,
 } from '@contracts/workspace.contract';
 import { knowledgeValueSchema } from '@contracts/knowledge.contract';
-import { apiFailure } from './readApi';
+import {
+  ontologySearchPageSchema,
+  ontologyNeighborPageSchema,
+  ontologyGlossaryCardSchema,
+} from '@contracts/ontologyExploration.contract';
+import { apiFailure, readApiJsonBody, matchesExpectedScope } from './readApi';
 
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
@@ -19,6 +24,14 @@ const accessSchema = z.object({
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
   policy_revision: z.string().regex(/^[a-f0-9]{64}$/),
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 const envelopeSchema = z.object({
   data: knowledgeValueSchema,
@@ -35,266 +48,220 @@ const errorEnvelopeSchema = z.object({
   meta: z.object({ trace_id: z.string().regex(/^[a-f0-9]{32}$/) }),
 });
 type Failure = Extract<WorkspaceResult, { ok: false }>;
+type Operation = WorkspaceRequest['operation'];
+type Inputs = {
+  [O in Operation]: Extract<WorkspaceRequest, { operation: O }>['input'];
+};
+type Resource<O extends Operation> =
+  | string
+  | readonly [
+      base: string,
+      id: Extract<keyof Inputs[O], string>,
+      suffix?: string,
+      secondId?: Extract<keyof Inputs[O], string>,
+    ];
+type RouteSpec<O extends Operation> =
+  | readonly [
+      'GET',
+      Resource<O>,
+      query?: readonly Extract<keyof Inputs[O], string>[],
+    ]
+  | readonly [
+      'POST' | 'PUT',
+      Resource<O>,
+      permission?: string | ((input: Inputs[O]) => string),
+      omit?: readonly Extract<keyof Inputs[O], string>[],
+    ];
 type Route = {
   path: string;
   method: 'GET' | 'POST' | 'PUT';
   permission: string | null;
+  query?: readonly string[];
+  omit?: readonly string[];
 };
 
-/** 업무 이름을 고정 HTTP 입구에만 대응시키고 입력에서 URL/메서드를 만들지 않습니다. */
-function route(request: WorkspaceRequest): Route {
-  switch (request.operation) {
-    case 'createConversion':
-      return {
-        path: 'analysis-conversions',
-        method: 'POST',
-        permission: 'source_write',
-      };
-    case 'conversion':
-      return {
-        path: `analysis-conversions/${request.input.conversion_id}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'createAnalysisPlan':
-      return {
-        path: 'analysis-plans',
-        method: 'POST',
-        permission: 'source_write',
-      };
-    case 'analysisPlan':
-      return {
-        path: `analysis-plans/${request.input.plan_id}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'validateAnalysisPlan':
-      return {
-        path: `analysis-plans/${request.input.plan_id}/validate`,
-        method: 'POST',
-        permission: null,
-      };
-    case 'handoffAnalysisPlan':
-      return {
-        path: `analysis-plans/${request.input.plan_id}/handoffs`,
-        method: 'POST',
-        permission: 'source_write',
-      };
-    case 'analysisPlanReceipt':
-      return {
-        path: `analysis-plans/${request.input.plan_id}/handoffs/${request.input.request_id}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'conversations':
-      return { path: `conversations`, method: 'GET', permission: null };
-    case 'conversation':
-      return {
-        path: `conversations/${encodeURIComponent(request.input.record_id)}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'createConversation':
-      return {
-        path: `conversations`,
-        method: 'POST',
-        permission: 'conversation_write',
-      };
-    case 'appendTurn':
-      return {
-        path: `conversations/${encodeURIComponent(request.input.record_id)}/turns`,
-        method: 'POST',
-        permission: 'conversation_write',
-      };
-    case 'savedResults':
-      return { path: `saved-results`, method: 'GET', permission: null };
-    case 'savedResult':
-      return {
-        path: `saved-results/${encodeURIComponent(request.input.record_id)}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'createSavedResult':
-      return {
-        path: `saved-results`,
-        method: 'POST',
-        permission: 'result_write',
-      };
-    case 'comparisons':
-      return { path: `comparisons`, method: 'GET', permission: null };
-    case 'comparison':
-      return {
-        path: `comparisons/${encodeURIComponent(request.input.record_id)}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'createComparison':
-      return {
-        path: `comparisons`,
-        method: 'POST',
-        permission: 'comparison_write',
-      };
-    case 'completeComparison':
-      return {
-        path: `comparisons/${encodeURIComponent(request.input.record_id)}/completions`,
-        method: 'POST',
-        permission: 'comparison_write',
-      };
-    case 'personalReceipt':
-      return {
-        path: `personal-requests/${request.input.kind}/${request.input.request_id}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'correspondenceFind':
-      return { path: `correspondences/find`, method: 'POST', permission: null };
-    case 'correspondenceDraft':
-      return {
-        path: `correspondences/drafts/prepare`,
-        method: 'POST',
-        permission: null,
-      };
-    case 'correspondencePropose':
-      return {
-        path: `correspondences`,
-        method: 'POST',
-        permission: 'ontology_write',
-      };
-    case 'correspondenceQuery':
-      return {
-        path: `correspondences/${request.input.correspondence_id}/query`,
-        method: 'POST',
-        permission: null,
-      };
-    case 'correspondencePrepare':
-      return {
-        path: `correspondences/${request.input.correspondence_id}/changes/prepare`,
-        method: 'POST',
-        permission: null,
-      };
-    case 'correspondenceReview':
-      return {
-        path: `correspondences/${request.input.correspondence_id}/reviews`,
-        method: 'POST',
-        permission: 'ontology_review',
-      };
-    case 'correspondenceReviewUndo':
-      return {
-        path: `correspondences/${request.input.correspondence_id}/review-undos`,
-        method: 'POST',
-        permission: 'ontology_review',
-      };
-    case 'correspondencePolicy':
-      return {
-        path: `correspondences/${request.input.correspondence_id}/policies`,
-        method: 'POST',
-        permission: 'ontology_policy',
-      };
-    case 'correspondencePolicyUndo':
-      return {
-        path: `correspondences/${request.input.correspondence_id}/policy-undos`,
-        method: 'POST',
-        permission: 'ontology_policy',
-      };
-    case 'extraction':
-      return {
-        path: `extractions/${request.input.extraction_id}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'extractionContent':
-      return {
-        path: `extractions/${request.input.extraction_id}/content`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'artifactReceipt':
-      return {
-        path: `analysis-jobs/${request.input.job_id}/artifacts/requests/${request.input.request_id}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'search':
-      return { path: 'documents/search', method: 'GET', permission: null };
-    case 'ontology':
-      return { path: 'documents/ontology', method: 'GET', permission: null };
-    case 'connections':
-      return { path: 'documents/connections', method: 'GET', permission: null };
-    case 'context':
-      return {
-        path: 'knowledge/context/query',
-        method: 'POST',
-        permission: null,
-      };
-    case 'conceptFind':
-      return { path: 'concepts/find', method: 'POST', permission: null };
-    case 'conceptQuery':
-      return { path: 'concepts/query', method: 'POST', permission: null };
-    case 'impact':
-      return {
-        path: 'documents/impact/query',
-        method: 'POST',
-        permission: null,
-      };
-    case 'reviewQueue':
-      return { path: 'review-queue/query', method: 'POST', permission: null };
-    case 'history':
-      return { path: 'history/query', method: 'POST', permission: null };
-    case 'questionContext':
-      return {
-        path: 'question-context/prepare',
-        method: 'POST',
-        permission: null,
-      };
-    case 'saveDocument':
-      return { path: 'documents/content', method: 'PUT', permission: 'write' };
-    case 'documentVersions':
-      return { path: 'documents/versions', method: 'GET', permission: null };
-    case 'documentVersion':
-      return {
-        path: `documents/versions/${encodeURIComponent(request.input.history_id)}`,
-        method: 'GET',
-        permission: null,
-      };
-    case 'restoreDocument':
-      return {
-        path: 'documents/restorations',
-        method: 'POST',
-        permission: 'write',
-      };
-    case 'review':
-      return {
-        path: 'documents/reviews',
-        method: 'POST',
-        permission: 'ontology_review',
-      };
-    case 'reviewUndo':
-      return {
-        path: 'documents/review-undos',
-        method: 'POST',
-        permission: 'ontology_review',
-      };
-    case 'policy':
-      return {
-        path: 'documents/policies',
-        method: 'POST',
-        permission: 'ontology_policy',
-      };
-    case 'policyUndo':
-      return {
-        path: 'documents/policy-undos',
-        method: 'POST',
-        permission: 'ontology_policy',
-      };
-    case 'events':
-      return { path: 'documents/events', method: 'GET', permission: null };
-    case 'event':
-      return {
-        path: `documents/events/${encodeURIComponent(request.input.event_id)}`,
-        method: 'GET',
-        permission: null,
-      };
+/** 독립 관계 추가/되돌림에서만 판단 종류에 맞는 기존 권한을 선택합니다. */
+function relationPermission(input: { kind: 'source' | 'policy' }): string {
+  return input.kind === 'policy' ? 'ontology_policy' : 'ontology_review';
+}
+
+// GET의 세 번째 항목은 query 허용 키, POST/PUT의 네 번째 항목은 본문에서 뺄 경로 키입니다.
+// 경로 배열은 고정 prefix/식별자/suffix/두 번째 식별자 순서이며 키는 operation 입력으로 검사합니다.
+const routes: { [O in Operation]: RouteSpec<O> } = {
+  relationCreate: ['POST', 'documents/relations', relationPermission],
+  relationUndo: ['POST', 'documents/relation-undos', relationPermission],
+  relationRequest: [
+    'GET',
+    ['documents/relation-requests', 'request_id'],
+    ['document'],
+  ],
+  cleanupPreview: [
+    'GET',
+    'documents/cleanup-preview',
+    ['document', 'limit', 'cursor'],
+  ],
+  cleanupHistory: [
+    'GET',
+    'documents/cleanup-events',
+    ['document', 'limit', 'cursor'],
+  ],
+  cleanupRequest: [
+    'GET',
+    ['documents/cleanup-requests', 'request_id'],
+    ['document'],
+  ],
+  cleanupApply: ['POST', 'documents/cleanup', 'ontology_review'],
+  cleanupUndo: ['POST', 'documents/cleanup-undos', 'ontology_review'],
+  createConversion: ['POST', 'analysis-conversions', 'source_write'],
+  conversion: ['GET', ['analysis-conversions', 'conversion_id']],
+  createAnalysisPlan: ['POST', 'analysis-plans', 'source_write'],
+  analysisPlan: ['GET', ['analysis-plans', 'plan_id']],
+  validateAnalysisPlan: [
+    'POST',
+    ['analysis-plans', 'plan_id', 'validate'],
+    undefined,
+    ['plan_id'],
+  ],
+  handoffAnalysisPlan: [
+    'POST',
+    ['analysis-plans', 'plan_id', 'handoffs'],
+    'source_write',
+    ['plan_id'],
+  ],
+  analysisPlanReceipt: [
+    'GET',
+    ['analysis-plans', 'plan_id', 'handoffs', 'request_id'],
+  ],
+  conversations: ['GET', 'conversations', ['limit', 'cursor']],
+  conversation: ['GET', ['conversations', 'record_id']],
+  createConversation: ['POST', 'conversations', 'conversation_write'],
+  appendTurn: [
+    'POST',
+    ['conversations', 'record_id', 'turns'],
+    'conversation_write',
+    ['record_id'],
+  ],
+  savedResults: ['GET', 'saved-results', ['limit', 'cursor']],
+  savedResult: ['GET', ['saved-results', 'record_id']],
+  createSavedResult: ['POST', 'saved-results', 'result_write'],
+  comparisons: ['GET', 'comparisons', ['limit', 'cursor']],
+  comparison: ['GET', ['comparisons', 'record_id']],
+  createComparison: ['POST', 'comparisons', 'comparison_write'],
+  completeComparison: [
+    'POST',
+    ['comparisons', 'record_id', 'completions'],
+    'comparison_write',
+    ['record_id'],
+  ],
+  personalReceipt: [
+    'GET',
+    ['personal-requests', 'kind', undefined, 'request_id'],
+    ['record_id'],
+  ],
+  correspondenceFind: ['POST', 'correspondences/find'],
+  correspondenceDraft: ['POST', 'correspondences/drafts/prepare'],
+  correspondencePropose: ['POST', 'correspondences', 'ontology_write'],
+  correspondenceQuery: [
+    'POST',
+    ['correspondences', 'correspondence_id', 'query'],
+    undefined,
+    ['correspondence_id'],
+  ],
+  correspondencePrepare: [
+    'POST',
+    ['correspondences', 'correspondence_id', 'changes/prepare'],
+    undefined,
+    ['correspondence_id'],
+  ],
+  correspondenceReview: [
+    'POST',
+    ['correspondences', 'correspondence_id', 'reviews'],
+    'ontology_review',
+    ['correspondence_id'],
+  ],
+  correspondenceReviewUndo: [
+    'POST',
+    ['correspondences', 'correspondence_id', 'review-undos'],
+    'ontology_review',
+    ['correspondence_id'],
+  ],
+  correspondencePolicy: [
+    'POST',
+    ['correspondences', 'correspondence_id', 'policies'],
+    'ontology_policy',
+    ['correspondence_id'],
+  ],
+  correspondencePolicyUndo: [
+    'POST',
+    ['correspondences', 'correspondence_id', 'policy-undos'],
+    'ontology_policy',
+    ['correspondence_id'],
+  ],
+  extraction: ['GET', ['extractions', 'extraction_id'], ['job_id']],
+  extractionContent: [
+    'GET',
+    ['extractions', 'extraction_id', 'content'],
+    ['job_id', 'extraction_revision', 'offset', 'limit'],
+  ],
+  artifactReceipt: [
+    'GET',
+    ['analysis-jobs', 'job_id', 'artifacts/requests', 'request_id'],
+  ],
+  search: ['GET', 'documents/search', ['query', 'limit']],
+  ontology: ['GET', 'documents/ontology', ['document']],
+  connections: ['GET', 'documents/connections', ['document', 'limit']],
+  context: ['POST', 'knowledge/context/query'],
+  conceptFind: ['POST', 'concepts/find'],
+  conceptQuery: ['POST', 'concepts/query'],
+  ontologySearch: ['POST', 'ontology/search'],
+  ontologyNeighbors: ['POST', 'ontology/neighbors'],
+  ontologyGlossary: ['POST', 'ontology/glossary'],
+  impact: ['POST', 'documents/impact/query'],
+  reviewQueue: ['POST', 'review-queue/query'],
+  history: ['POST', 'history/query'],
+  questionContext: ['POST', 'question-context/prepare'],
+  saveDocument: ['PUT', 'documents/content', 'write'],
+  documentVersions: [
+    'GET',
+    'documents/versions',
+    ['document', 'limit', 'cursor'],
+  ],
+  documentVersion: ['GET', ['documents/versions', 'history_id'], ['document']],
+  restoreDocument: ['POST', 'documents/restorations', 'write'],
+  review: ['POST', 'documents/reviews', 'ontology_review'],
+  reviewUndo: ['POST', 'documents/review-undos', 'ontology_review'],
+  policy: ['POST', 'documents/policies', 'ontology_policy'],
+  policyUndo: ['POST', 'documents/policy-undos', 'ontology_policy'],
+  events: ['GET', 'documents/events', ['document', 'limit', 'cursor']],
+  event: ['GET', ['documents/events', 'event_id'], ['document']],
+};
+
+/** 검증된 operation의 선언만 읽으며 사용자 입력으로 HTTP 메서드나 권한을 정하지 않습니다. */
+function route<O extends Operation>(request: {
+  operation: O;
+  input: Inputs[O];
+}): Route {
+  const spec = routes[request.operation];
+  const input: Record<string, unknown> = request.input;
+  const resource = spec[1];
+  let path: string;
+  if (typeof resource === 'string') path = resource;
+  else {
+    const [base, id, suffix, secondId] = resource;
+    path = `${base}/${encodeURIComponent(String(input[id]))}${suffix ? `/${suffix}` : ''}${secondId ? `/${encodeURIComponent(String(input[secondId]))}` : ''}`;
   }
+  if (spec[0] === 'GET')
+    return { path, method: 'GET', permission: null, query: spec[2] };
+  const permission = spec[2];
+  return {
+    path,
+    method: spec[0],
+    permission:
+      typeof permission === 'function'
+        ? permission(request.input)
+        : (permission ?? null),
+    omit: spec[3],
+  };
 }
 
 /** 변경 결과를 확정할 수 없으면 현재 자료의 대조를 요구하고 자동 재전송하지 않습니다. */
@@ -334,7 +301,7 @@ export function workspaceHttpFailure(
     failure = {
       ok: false,
       error: {
-        code: 'conflict',
+        code: code === 'catalog_changed' ? code : 'conflict',
         message:
           '기준 판본이나 목록이 변경되었습니다. 최신 자료를 읽고 변경 사항을 대조해 주세요.',
         status,
@@ -390,49 +357,7 @@ export function workspaceHttpFailure(
 export async function readWorkspaceJsonBody(
   response: Response,
 ): Promise<unknown> {
-  if (
-    !response.body ||
-    response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !==
-      'application/json'
-  ) {
-    await response.body?.cancel();
-    throw new Error('invalid_response');
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_RESPONSE_BYTES) throw new Error('response_too_large');
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel().catch((): void => {});
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-}
-
-/** 예상 범위는 권한 선언이 아니라 오래된 폼을 현재 작업 공간에 쓰지 않게 하는 비교값입니다. */
-function matchesExpected(
-  expected: WorkspaceScope,
-  context: AnalysisContext,
-): boolean {
-  return (
-    expected.userId === context.active.userId &&
-    expected.tenant === context.selection.tenant &&
-    expected.profileId === context.selection.profile &&
-    expected.policyRevision === context.active.policyRevision
-  );
+  return readApiJsonBody(response, MAX_RESPONSE_BYTES);
 }
 
 /** 서버와 같은 고정 ID로만 미확정 계획/변환/인계를 읽고 POST를 반복하지 않습니다. */
@@ -489,7 +414,7 @@ export class WorkspaceApiService {
     if (mutation && !request.expectedScope)
       return apiFailure(
         'invalid_request',
-        '저장할 자료의 현재 사용자·작업 공간·관점 기준을 함께 확인해 주세요.',
+        '저장할 자료의 현재 사용자와 작업 공간을 함께 확인해 주세요.',
       );
     const context = await this.#connection.analysisContext(
       request.connectionId,
@@ -498,11 +423,11 @@ export class WorkspaceApiService {
     const recovery = planningRecovery(request, context);
     if (
       request.expectedScope &&
-      !matchesExpected(request.expectedScope, context)
+      !matchesExpectedScope(request.expectedScope, context)
     )
       return apiFailure(
         'scope_changed',
-        '조회하거나 편집하던 작업 공간·관점이 변경되었습니다. 이전 초안을 보존하고 현재 자료를 다시 확인해 주세요.',
+        '조회하거나 편집하던 작업 공간 또는 조회 설정이 변경되었습니다. 이전 초안을 보존하고 현재 자료를 다시 확인해 주세요.',
       );
     const workspace = context.active.workspaces.find(
       (item: AnalysisContext['active']['workspaces'][number]): boolean =>
@@ -515,7 +440,7 @@ export class WorkspaceApiService {
     if (!workspace || !profile)
       return apiFailure(
         'scope_changed',
-        '현재 작업 공간과 관점을 다시 확인해 주세요.',
+        '현재 작업 공간을 다시 확인해 주세요.',
       );
     if (
       selectedRoute.permission &&
@@ -529,17 +454,7 @@ export class WorkspaceApiService {
     if (selectedRoute.method === 'GET') {
       for (const [key, value] of Object.entries(request.input)) {
         if (
-          key !== 'event_id' &&
-          key !== 'history_id' &&
-          !(key === 'record_id' && request.operation !== 'personalReceipt') &&
-          ![
-            'kind',
-            'request_id',
-            'extraction_id',
-            'plan_id',
-            'conversion_id',
-          ].includes(key) &&
-          !(key === 'job_id' && request.operation === 'artifactReceipt') &&
+          selectedRoute.query?.includes(key) &&
           (typeof value === 'string' || typeof value === 'number')
         )
           url.searchParams.set(key, String(value));
@@ -547,15 +462,7 @@ export class WorkspaceApiService {
       url.searchParams.set('profile', context.selection.profile);
     } else {
       const input: Record<string, unknown> = { ...request.input };
-      // 경로 식별자는 본문 스키마에 넣지 않으며 제안의 ID만 실제 본문 항목입니다.
-      delete input.record_id;
-      if (
-        request.operation === 'validateAnalysisPlan' ||
-        request.operation === 'handoffAnalysisPlan'
-      )
-        delete input.plan_id;
-      if (request.operation !== 'correspondencePropose')
-        delete input.correspondence_id;
+      for (const key of selectedRoute.omit ?? []) delete input[key];
       if (
         'context_request' in input &&
         typeof input.context_request === 'object' &&
@@ -624,20 +531,47 @@ export class WorkspaceApiService {
             );
       const parsed = envelopeSchema.parse(value);
       const access = accessSchema.parse(parsed.data.access);
+      // 지도 페이지는 전체 지식 JSON으로 위장하지 않고 별도 경량 계약까지 검사합니다.
+      if (request.operation === 'ontologySearch')
+        ontologySearchPageSchema.parse(parsed.data);
+      if (request.operation === 'ontologyNeighbors')
+        ontologyNeighborPageSchema.parse(parsed.data);
+      if (request.operation === 'ontologyGlossary') {
+        const card = ontologyGlossaryCardSchema.parse(parsed.data);
+        if (
+          card.document.document !== request.input.document ||
+          card.entity.id !== request.input.entity_id ||
+          card.document.state_revision !==
+            request.input.expected_state_revision ||
+          (card.source_passage !== null &&
+            card.source_passage.source_revision !==
+              card.document.source_revision)
+        )
+          return apiFailure(
+            'response_invalid',
+            '선택한 개념과 용어 설명의 판본이 다릅니다. 다시 불러와 주세요.',
+          );
+      }
       if (
         access.user_id !== context.active.userId ||
         access.tenant !== context.selection.tenant ||
         access.profile_id !== context.selection.profile ||
         access.domain !== profile.domain ||
         access.viewpoint !== profile.viewpoint ||
-        access.policy_revision !== context.active.policyRevision
+        !sameAccessRevision(
+          {
+            policyRevision: access.policy_revision,
+            accessRevision: access.access_revision,
+          },
+          context.active,
+        )
       ) {
         this.#connection.invalidateApiScope('scope_changed');
         return mutation
           ? unknownOutcome(parsed.meta.trace_id, recovery)
           : apiFailure(
               'scope_changed',
-              '서버의 현재 사용자·작업 공간·관점이 변경되어 결과를 숨겼습니다.',
+              '서버의 현재 사용자 또는 작업 공간의 조회 설정이 변경되어 결과를 숨겼습니다.',
             );
       }
       return {
@@ -653,6 +587,9 @@ export class WorkspaceApiService {
             domain: access.domain,
             viewpoint: access.viewpoint,
             policyRevision: access.policy_revision,
+            ...(access.access_revision
+              ? { accessRevision: access.access_revision }
+              : {}),
           },
           traceId: parsed.meta.trace_id,
         },

@@ -1,5 +1,6 @@
 import type {
   ConnectRequest,
+  AccountRequest,
   ConnectionBridge,
   ConnectionResult,
   SelectWorkspaceRequest,
@@ -12,10 +13,23 @@ function getConnectionBridge(): ConnectionBridge {
   return window.wiki.connection;
 }
 
+/** 변경 완료를 앱 프레임과 열린 화면에 알려 이전 계정 화면을 즉시 내립니다. */
+async function changed(
+  result: Promise<ConnectionResult>,
+): Promise<ConnectionResult> {
+  try {
+    return await result;
+  } finally {
+    window.dispatchEvent(new Event('wiki-connection-changed'));
+  }
+}
+
 /** renderer에 공개된 연결 명령만 타입 계약에 맞춰 전달합니다. */
 export const connectionGateway: ConnectionBridge = {
+  authenticate: async (request: AccountRequest): Promise<ConnectionResult> =>
+    changed(getConnectionBridge().authenticate(request)),
   restoreSaved: async (): Promise<ConnectionResult> =>
-    getConnectionBridge().restoreSaved(),
+    changed(getConnectionBridge().restoreSaved()),
   forgetSaved: async (): Promise<ConnectionResult> =>
     getConnectionBridge().forgetSaved(),
   connect: async (request: ConnectRequest): Promise<ConnectionResult> =>
@@ -25,7 +39,7 @@ export const connectionGateway: ConnectionBridge = {
   selectWorkspace: async (
     request: SelectWorkspaceRequest,
   ): Promise<ConnectionResult> =>
-    getConnectionBridge().selectWorkspace(request),
+    changed(getConnectionBridge().selectWorkspace(request)),
   disconnect: async (): Promise<ConnectionResult> =>
-    getConnectionBridge().disconnect(),
+    changed(getConnectionBridge().disconnect()),
 };

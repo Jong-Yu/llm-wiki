@@ -12,8 +12,10 @@
   },
   "include": [
     "../*.config.ts",
-    "../../tests/**/*.ts",
-    "../../tests/**/*.tsx",
-    "../../src/renderer/env.d.ts"
+    "../../src/renderer/env.d.ts",
+    "../../src/main/env.d.ts",
+    "../../tests/poc-ui/verify.ts",
+    "../../tests/ontology-cleanup/verify.ts",
+    "../../tests/ontology-review/verify.ts"
   ]
 }

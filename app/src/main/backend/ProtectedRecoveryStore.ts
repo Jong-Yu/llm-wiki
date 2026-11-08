@@ -17,6 +17,7 @@ export type RecoveryScope = {
   tenant: string;
   profileId: string;
   policyRevision: string;
+  accessRevision?: string;
   domain: string | null;
   viewpoint: string | null;
 };
@@ -28,10 +29,17 @@ const fileSchema = z.strictObject({
     tenant: z.string(),
     profileId: z.string(),
     policyRevision: z.string(),
+    accessRevision: z.string().min(1).optional(),
     domain: z.string().nullable(),
     viewpoint: z.string().nullable(),
   }),
   entries: z.array(recoveryEntrySchema).max(128),
+  legacySource: z
+    .strictObject({
+      policyRevision: z.string(),
+      entriesHash: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .optional(),
 });
 const MAX_BYTES = 32 * 1024 * 1024;
 /** 경로·암호문·본문을 예외 출력에 포함하지 않습니다. */
@@ -57,7 +65,7 @@ function scopeKey(scope: RecoveryScope): string {
     scope.userId,
     scope.tenant,
     scope.profileId,
-    scope.policyRevision,
+    scope.accessRevision ?? scope.policyRevision,
     scope.domain,
     scope.viewpoint,
   ]);
@@ -72,6 +80,10 @@ function success(
 /** OS 보호 저장 외에는 평문 fallback 없이 실패합니다. */
 export class ProtectedRecoveryStore {
   #queue: Promise<unknown> = Promise.resolve();
+  #legacySources = new Map<
+    string,
+    { policyRevision: string; entriesHash: string }
+  >();
   readonly directory: string;
   readonly cipher: ConnectionCipher;
   constructor(directory: string, cipher: ConnectionCipher) {
@@ -174,12 +186,53 @@ export class ProtectedRecoveryStore {
         ).size !== parsed.entries.length
       )
         throw new RecoveryError('recovery_corrupt');
+      if (parsed.legacySource) {
+        if (!scope.accessRevision) throw new RecoveryError('recovery_corrupt');
+        const legacyScope = {
+          ...scope,
+          accessRevision: undefined,
+          policyRevision: parsed.legacySource.policyRevision,
+        };
+        const legacy = await this.#paths(legacyScope);
+        const entries = await this.#read(legacy.path, legacyScope);
+        if (hash(JSON.stringify(entries)) !== parsed.legacySource.entriesHash)
+          throw new RecoveryError('recovery_conflict');
+        this.#legacySources.set(path, parsed.legacySource);
+      } else this.#legacySources.delete(path);
       return parsed.entries;
     } catch (error: unknown) {
       if (hasCode(error, 'ENOENT')) return [];
       if (error instanceof RecoveryError) throw error;
       throw new RecoveryError('recovery_corrupt');
     }
+  }
+  /** 새 기준의 파일이 없을 때만 같은 감사 기준의 구 파일을 읽고 후속 변경 충돌을 추적합니다. */
+  async #readCompatible(
+    path: string,
+    scope: RecoveryScope,
+  ): Promise<RecoveryEntry[]> {
+    try {
+      await lstat(path);
+      return await this.#read(path, scope);
+    } catch (error: unknown) {
+      if (!hasCode(error, 'ENOENT')) throw error;
+    }
+    this.#legacySources.delete(path);
+    if (!scope.accessRevision) return [];
+    const legacyScope = { ...scope, accessRevision: undefined };
+    const legacy = await this.#paths(legacyScope);
+    try {
+      await lstat(legacy.path);
+    } catch (error: unknown) {
+      if (hasCode(error, 'ENOENT')) return [];
+      throw error;
+    }
+    const entries = await this.#read(legacy.path, legacyScope);
+    this.#legacySources.set(path, {
+      policyRevision: scope.policyRevision,
+      entriesHash: hash(JSON.stringify(entries)),
+    });
+    return entries;
   }
   /** 읽기에는 저장 잠금이 남아 있어도 마지막 확정 파일만 사용합니다. */
   list(
@@ -189,7 +242,7 @@ export class ProtectedRecoveryStore {
   ): Promise<RecoveryResult> {
     return this.#serial(async (): Promise<RecoveryResult> => {
       const { path } = await this.#paths(scope);
-      const entries = await this.#read(path, scope);
+      const entries = await this.#readCompatible(path, scope);
       if (!current()) throw new RecoveryError('scope_changed');
       return success(
         entries.filter((entry: RecoveryEntry): boolean => entry.kind === kind),
@@ -240,7 +293,7 @@ export class ProtectedRecoveryStore {
     return this.#serial(async (): Promise<RecoveryResult> => {
       const { directory, path } = await this.#paths(scope);
       return this.#locked(directory, async (): Promise<RecoveryResult> => {
-        const entries = await this.#read(path, scope);
+        const entries = await this.#readCompatible(path, scope);
         const prior = entries.find(
           (entry: RecoveryEntry): boolean =>
             entry.kind === kind && entry.key === key,
@@ -262,7 +315,14 @@ export class ProtectedRecoveryStore {
           next.push(entry);
         }
         const plain = JSON.stringify(
-          fileSchema.parse({ version: 1, scope, entries: next }),
+          fileSchema.parse({
+            version: 1,
+            scope,
+            entries: next,
+            ...(this.#legacySources.has(path)
+              ? { legacySource: this.#legacySources.get(path) }
+              : {}),
+          }),
         );
         if (Buffer.byteLength(plain) > MAX_BYTES - 1024)
           throw new RecoveryError('recovery_too_large');

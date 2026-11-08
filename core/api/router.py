@@ -10,6 +10,8 @@ from core.api.v1.knowledge.router import router as knowledge
 from core.api.v1.sources.router import router as sources
 from core.api.v1.analysis_jobs.router import router as analysis_jobs
 from core.api.v1.reviews.router import router as reviews
+from core.api.v1.reviews.cleanup_router import router as cleanup
+from core.api.v1.reviews.relations_router import router as relations
 from core.api.v1.correspondences.router import router as correspondences
 from core.api.v1.extractions.router import router as extractions
 from core.api.v1.personal.router import router as personal
@@ -33,3 +35,7 @@ router.include_router(personal, prefix="/tenants/{tenant}")
 router.include_router(personal_workflows, prefix="/tenants/{tenant}")
 router.include_router(analysis_plans, prefix="/tenants/{tenant}")
 router.include_router(analysis_proposals, prefix="/tenants/{tenant}")
+
+router.include_router(cleanup, prefix="/tenants/{tenant}")
+
+router.include_router(relations, prefix="/tenants/{tenant}")

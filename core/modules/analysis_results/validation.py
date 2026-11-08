@@ -20,7 +20,7 @@ def execution_report(value):
     if value is None:
         return None
     required = {"provider", "cli_version", "prompt_sha256", "schema_sha256", "output_sha256"}
-    optional = {"requested_model", "reported_model", "published_schema_sha256"}
+    optional = {"requested_model", "reported_model", "published_schema_sha256", "execution_config_sha256"}
     # 허용한 키만 받는다. 사용자 신원/시각/승인 여부는 서버가 관리하는 다른 기록의 책임이다.
     if (type(value) is not dict or not required <= value.keys() or set(value) - required - optional
             or value["provider"] not in ("codex", "claude") or len(canonical_json_bytes(value)) > 4096):
@@ -33,7 +33,7 @@ def execution_report(value):
         if (type(text) is not str or not text.strip() or len(text) > maximum
                 or any(ord(character) < 32 or ord(character) == 127 for character in text)):
             raise ResultError("invalid_execution_report")
-    for name in ("prompt_sha256", "schema_sha256", "output_sha256", "published_schema_sha256"):
+    for name in ("prompt_sha256", "schema_sha256", "output_sha256", "published_schema_sha256", "execution_config_sha256"):
         if name in value and (type(value[name]) is not str or re.fullmatch(r"[0-9a-f]{64}", value[name]) is None):
             raise ResultError("invalid_execution_report")
     # 새 dict를 반환해 원래 제출값은 바꾸지 않는다. origin은 서버가 붙이는 출처 구분이지 승인 표시가 아니다.

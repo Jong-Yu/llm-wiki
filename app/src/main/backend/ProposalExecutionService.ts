@@ -1,8 +1,10 @@
-import { personalAi } from './personalAi';
+import { matchesExpectedScope } from './readApi';
+import { ExecutionStarts } from './ExecutionStarts';
+import type { AiActivity } from '@contracts/aiSessions.contract';
+import { aiModelArguments, personalAi } from './personalAi';
 import type { PersonalAi } from './personalAi';
 import { access } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
+import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { z } from 'zod';
 import {
@@ -22,6 +24,8 @@ import type { RecoveryService } from './RecoveryService';
 import {
   createPrivateExecution,
   spawnPersonalProcess,
+  personalRuntimePaths,
+  observePersonalProcess,
   stopPersonalProcess,
 } from './personalProcess';
 
@@ -40,6 +44,8 @@ type Running = {
   closed: Promise<void>;
   key: string;
   stopping: boolean;
+  activity: AiActivity;
+  context: AnalysisContext;
 };
 const id = z.string().regex(/^[a-f0-9]{32}$/);
 const revision = z.string().regex(/^[a-f0-9]{64}$/);
@@ -55,20 +61,7 @@ const executionSchema = z.object({
 /** 실행 경로는 renderer 입력 대신 설치된 개인 실행기 설정에서만 선택합니다. */
 async function defaultRuntime(): Promise<ProposalRuntime> {
   const { app } = await import('electron');
-  const projectRoot =
-    process.env.WIKI_CLIENT_ROOT ||
-    process.env.WIKI_ANALYSIS_PROJECT_ROOT ||
-    resolve(import.meta.dirname, '../../..');
-  const python =
-    process.env.WIKI_CLIENT_PYTHON ||
-    process.env.WIKI_PYTHON ||
-    process.env.WIKI_ANALYSIS_PYTHON ||
-    join(
-      projectRoot,
-      process.platform === 'win32'
-        ? '.venv/Scripts/python.exe'
-        : '.venv/bin/python',
-    );
+  const { projectRoot, python } = personalRuntimePaths();
   const ai = await personalAi('proposal');
   await access(python);
   await access(join(projectRoot, 'tools/proposal_cli.py'));
@@ -168,8 +161,9 @@ export class ProposalExecutionService {
   #runtime: () => Promise<ProposalRuntime>;
   #recovery: Pick<RecoveryService, 'capture'> | undefined;
   #local = new Map<string, ProposalExecutionLocal>();
-  #running: Running | null = null;
-  #starting = false;
+  #running = new Map<string, Running>();
+  #starts = new ExecutionStarts();
+  #epoch = 0;
   constructor(
     connection: ProposalConnection,
     proposals: Pick<AnalysisProposalsApi, 'execute'>,
@@ -193,16 +187,10 @@ export class ProposalExecutionService {
       request.connectionId,
     );
     if ('ok' in context) return context;
-    const scope = request.expectedScope;
-    if (
-      context.active.userId !== scope.userId ||
-      context.active.policyRevision !== scope.policyRevision ||
-      context.selection.tenant !== scope.tenant ||
-      context.selection.profile !== scope.profileId
-    )
+    if (!matchesExpectedScope(request.expectedScope, context))
       return failure(
         'scope_changed',
-        '연결·작업 공간·관점이 바뀌었습니다. 원래 범위에서 조회해 주세요.',
+        '연결 또는 작업 공간의 조회 설정이 바뀌었습니다. 이전 기록을 보존하고 현재 작업 공간에서 다시 확인해 주세요.',
       );
     return context;
   }
@@ -210,7 +198,7 @@ export class ProposalExecutionService {
   async read(value: ProposalExecutionRead): Promise<ProposalExecutionResult> {
     const parsed = proposalExecutionReadSchema.safeParse(value);
     if (!parsed.success)
-      return failure('invalid_request', '추출안·실행 ID를 확인해 주세요.');
+      return failure('invalid_request', '추출 결과·실행 ID를 확인해 주세요.');
     const request = parsed.data;
     const context = await this.#context(request);
     if ('ok' in context) return context;
@@ -278,14 +266,18 @@ export class ProposalExecutionService {
   async start(value: ProposalExecutionStart): Promise<ProposalExecutionResult> {
     const parsed = proposalExecutionStartSchema.safeParse(value);
     if (!parsed.success)
-      return failure('invalid_request', '현재 추출안 기준을 확인해 주세요.');
+      return failure('invalid_request', '현재 추출 결과 기준을 확인해 주세요.');
     const request = parsed.data;
-    if (this.#starting || this.#running)
+    const startKey = keyFor({ ...request, executionId: request.requestId });
+    const finish = this.#running.has(startKey)
+      ? null
+      : this.#starts.begin(startKey);
+    if (!finish)
       return failure(
         'execution_busy',
-        '개인 추출안을 실행 중입니다. 현재 실행을 확인해 주세요.',
+        '개인 추출 결과을 실행 중입니다. 현재 실행을 확인해 주세요.',
       );
-    this.#starting = true;
+    const epoch = this.#epoch;
     let attempted = false;
     try {
       const context = await this.#context(request);
@@ -343,7 +335,7 @@ export class ProposalExecutionService {
           '연결 범위가 바뀌어 AI를 시작하지 않았습니다.',
           request.requestId,
         );
-      await this.#spawn(context, request, runtime);
+      await this.#spawn(context, request, runtime, epoch);
       return this.read({
         connectionId: request.connectionId,
         expectedScope: request.expectedScope,
@@ -357,7 +349,7 @@ export class ProposalExecutionService {
         attempted ? request.requestId : undefined,
       );
     } finally {
-      this.#starting = false;
+      finish();
     }
   }
   /** 현재 실행의 서버 CAS 취소와 로컬 프로세스 중단을 각각 확인합니다. */
@@ -370,7 +362,7 @@ export class ProposalExecutionService {
     const request = parsed.data;
     const detail = await this.read(request);
     if (!detail.ok) {
-      if (this.#running?.key === keyFor(request)) await this.shutdown();
+      await this.#stopOne(keyFor(request));
       return detail;
     }
     const execution = executionSchema.safeParse(detail.data.server);
@@ -392,10 +384,10 @@ export class ProposalExecutionService {
         proposal_id: request.proposalId,
         job_id: execution.data.job_id,
         expected_job_revision: execution.data.job_revision,
-        reason: '사용자가 추출안 AI 실행 중단을 요청함',
+        reason: '사용자가 추출 결과 AI 실행 중단을 요청함',
       },
     });
-    if (this.#running?.key === keyFor(request)) await this.shutdown();
+    await this.#stopOne(keyFor(request));
     if (!result.ok)
       return {
         ok: false,
@@ -403,20 +395,50 @@ export class ProposalExecutionService {
       };
     return this.read(request);
   }
-  /** 연결 변경·앱 종료 때 공통 프로세스 helper로 자기 실행만 회수합니다. */
+  /** 연결 변경·명시 종료는 접수 중인 작업과 모든 프로세스를 정리합니다. */
   async shutdown(): Promise<void> {
-    const running = this.#running;
+    this.#epoch += 1;
+    await this.#starts.settled();
+    await Promise.all(
+      [...this.#running.keys()].map((key: string): Promise<void> =>
+        this.#stopOne(key),
+      ),
+    );
+  }
+
+  /** 선택한 추출 결과 실행만 중단합니다. */
+  async #stopOne(key: string): Promise<void> {
+    const running = this.#running.get(key);
     if (!running) return;
     running.stopping = true;
-    const local = this.#local.get(running.key);
-    if (local) this.#local.set(running.key, { ...local, status: 'stopping' });
+    const local = this.#local.get(key);
+    if (local) this.#local.set(key, { ...local, status: 'stopping' });
     await stopPersonalProcess(running.child, running.closed);
   }
+
+  /** 공개 활동에는 인증정보나 원문을 포함하지 않습니다. */
+  activities(): AiActivity[] {
+    return [...this.#running.values()]
+      .filter((run: Running): boolean =>
+        this.#connection.isAnalysisCurrent(run.context),
+      )
+      .map((run: Running): AiActivity => ({
+        ...run.activity,
+        status: run.stopping ? 'stopping' : 'running',
+      }));
+  }
+
+  /** 접수 중인 작업도 종료 확인에 포함합니다. */
+  get activeCount(): number {
+    return this.#running.size + this.#starts.size;
+  }
+
   /** 고정 모듈과 인자 배열만 실행하고 제한된 JSONL 이벤트만 읽습니다. */
   async #spawn(
     context: AnalysisContext,
     request: ProposalExecutionStart,
     runtime: ProposalRuntime,
+    epoch: number,
   ): Promise<void> {
     const execution = await createPrivateExecution(
       runtime,
@@ -425,7 +447,7 @@ export class ProposalExecutionService {
     );
     let child: ChildProcess;
     try {
-      if (!this.#connection.isAnalysisCurrent(context))
+      if (epoch !== this.#epoch || !this.#connection.isAnalysisCurrent(context))
         throw new Error('scope_changed');
       child = spawnPersonalProcess(runtime, [
         '-B',
@@ -450,6 +472,7 @@ export class ProposalExecutionService {
         runtime.ai.provider,
         '--ai-cli',
         runtime.ai.cli,
+        ...aiModelArguments(runtime.ai),
         ...(request.semanticCheck ? ['--semantic-check'] : []),
       ]);
     } catch (error: unknown) {
@@ -462,57 +485,32 @@ export class ProposalExecutionService {
       status: 'running',
       phase: 'starting',
     });
-    const decoder = new StringDecoder('utf8');
-    let buffer = '';
-    let discard = false;
-    child.stdout?.on('data', (chunk: Buffer): void => {
-      buffer += decoder.write(chunk);
-      for (;;) {
-        const index = buffer.indexOf('\n');
-        if (index < 0) break;
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        if (
-          !discard &&
-          line.length <= 1024 * 1024 &&
-          this.#connection.isAnalysisCurrent(context)
-        ) {
-          try {
-            const local = this.#local.get(key);
-            if (local) {
-              const next = applyProposalCliEvent(
-                local,
-                JSON.parse(line),
-                request.requestId,
-              );
-              this.#local.set(key, {
-                ...next,
-                preview: next.preview.replaceAll(
-                  context.token,
-                  '[인증정보 비공개]',
-                ),
-              });
-            }
-          } catch {
-            /* 잘못된 출력은 근거로 사용하지 않습니다. */
-          }
-        }
-        discard = false;
-      }
-      if (buffer.length > 1024 * 1024) {
-        buffer = '';
-        discard = true;
-      }
-    });
-    child.stderr?.resume();
     const running: Running = {
+      context,
       child,
       key,
       stopping: false,
+      activity: {
+        kind: 'proposal',
+        id: request.requestId,
+        connectionId: request.connectionId,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        proposalId: request.proposalId,
+      },
       closed: Promise.resolve(),
     };
-    running.closed = new Promise<void>((done: () => void): void => {
-      child.on('error', (): void => {
+    running.closed = observePersonalProcess(child, {
+      onEvent: (value: unknown): void => {
+        const local = this.#local.get(key);
+        if (!local || !this.#connection.isAnalysisCurrent(context)) return;
+        const next = applyProposalCliEvent(local, value, request.requestId);
+        this.#local.set(key, {
+          ...next,
+          preview: next.preview.replaceAll(context.token, '[인증정보 비공개]'),
+        });
+      },
+      onError: (): void => {
         const local = this.#local.get(key);
         if (local)
           this.#local.set(key, {
@@ -520,27 +518,24 @@ export class ProposalExecutionService {
             status: 'failed',
             errorCode: 'proposal_cli_unavailable',
           });
-      });
-      child.on('close', (code: number | null): void => {
+      },
+      onClose: (code: number | null): void => {
         const local = this.#local.get(key);
         if (local)
           this.#local.set(key, {
             ...local,
             status: code === 0 || running.stopping ? 'exited' : 'failed',
           });
-        void execution
-          .cleanupAuth()
-          .catch((): void => {
-            const latest = this.#local.get(key);
-            if (latest)
-              this.#local.set(key, { ...latest, cleanupWarning: true });
-          })
-          .finally((): void => {
-            if (this.#running === running) this.#running = null;
-            done();
-          });
-      });
+      },
+      cleanup: (): Promise<void> => execution.cleanupAuth(),
+      onCleanupError: (): void => {
+        const latest = this.#local.get(key);
+        if (latest) this.#local.set(key, { ...latest, cleanupWarning: true });
+      },
+      onFinished: (): void => {
+        if (this.#running.get(key) === running) this.#running.delete(key);
+      },
     });
-    this.#running = running;
+    this.#running.set(key, running);
   }
 }

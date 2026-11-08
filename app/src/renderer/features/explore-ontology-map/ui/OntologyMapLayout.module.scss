@@ -1,0 +1,143 @@
+// 안쪽 패널은 공통 틀과 같은 8px 간격과 8px 모서리를 씁니다.
+.layout {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: var(--wiki-layout-workbench-panel-gap);
+}
+.layout[data-details-open='true'] {
+  grid-template-columns: 280px minmax(0, 1fr) minmax(320px, 400px);
+}
+.panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 8px;
+  background-color: var(--wiki-color-surface-canvas);
+}
+.panel[hidden] {
+  display: none;
+}
+.center {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-layout-workbench-panel-gap);
+}
+.header {
+  display: none;
+  flex-shrink: 0;
+}
+// 화면 제목은 앱 Header가 보이므로 이 띠는 문서 범위 표시나 개념 목록 버튼이 필요할 때만 나옵니다.
+.header[data-scoped='true'] {
+  display: block;
+}
+.graph {
+  flex: 1;
+}
+.detailsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  // 지도 머리글과 같은 50px로 맞춰 두 패널의 선이 이어지게 합니다.
+  box-sizing: border-box;
+  height: 50px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  h2 {
+    margin: 0;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    min-height: 32px;
+    padding: 0;
+    border: 1px solid transparent;
+    background: transparent;
+  }
+}
+.detailsBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+// 1200px 미만에서는 목록을 접어 두고 헤더의 버튼으로 엽니다.
+@container ontology (width < 1200px) {
+  .header {
+    display: block;
+  }
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .layout[data-details-open='true'] {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  }
+  .layout[data-index-open='true'] {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+  .index {
+    display: none;
+  }
+  .layout[data-index-open='true'] .index {
+    display: flex;
+  }
+}
+@container ontology (width < 900px) {
+  .layout[data-details-open='true'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .layout[data-details-open='true'] .center,
+  .layout[data-index-open='true'] .center {
+    display: none;
+  }
+  .layout[data-index-open='true'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+// 개념·관계 상세는 지도 위에 겹쳐 열어 지도 크기를 바꾸지 않습니다(아래 확대 조절줄은 가리지 않음).
+.layout[data-overlay='true'][data-details-open='true'] {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+.layout[data-overlay='true'] .details {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 40px;
+  z-index: 6;
+  width: 360px;
+  box-shadow: -8px 0 24px #00000024;
+}
+@container ontology (width < 1200px) {
+  .layout[data-overlay='true'][data-details-open='true'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .layout[data-overlay='true'][data-details-open='true'][data-index-open='true'] {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+}
+@container ontology (width < 900px) {
+  .layout[data-overlay='true'][data-details-open='true'],
+  .layout[data-overlay='true'][data-details-open='true'][data-index-open='true'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .layout[data-overlay='true'] .details {
+    position: static;
+    width: auto;
+    box-shadow: none;
+  }
+}

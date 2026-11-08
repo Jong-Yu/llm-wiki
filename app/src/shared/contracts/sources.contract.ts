@@ -22,6 +22,7 @@ export const sourceExpectedScopeSchema = z.strictObject({
   tenant: z.string().min(1),
   profileId: z.string().min(1),
   policyRevision: z.string().regex(/^[a-f0-9]{64}$/),
+  accessRevision: z.string().min(1).optional(),
 });
 export type SourceExpectedScope = z.infer<typeof sourceExpectedScopeSchema>;
 export const sourceSessionSchema = session.strict();
@@ -152,6 +153,14 @@ const rawActorSchema = z.object({
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
   policy_revision: hash,
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 const rawVersionSchema = z.object({
   source_id: identifier,
@@ -191,9 +200,6 @@ export type SourceVersionsRequest = z.infer<typeof sourceVersionsRequestSchema>;
 export type SourceVersion = z.infer<typeof versionSchema>;
 export type SourceVersions = z.infer<typeof versionsSchema>;
 export type SourceVersionsResult = z.infer<typeof versionsResultSchema>;
-export type SourceVersionScope = SourceVersions['access'] & {
-  connectionId: string;
-};
 export type SourceDownloadRequest = SourcePreviewRequest;
 const downloadResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.object({ saved: z.boolean() }) }),
@@ -289,6 +295,7 @@ function publicVersionActor(
     domain: actor.domain,
     viewpoint: actor.viewpoint,
     policyRevision: actor.policy_revision,
+    ...(actor.access_revision ? { accessRevision: actor.access_revision } : {}),
   };
 }
 

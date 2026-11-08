@@ -16,6 +16,10 @@ import os
 import re
 import stat
 
+from core.common.json_codec import canonical_json_hash
+from core.common.read_index import read_index, CanonicalIndexUnavailable
+from core.common.read_metrics import cache_event, increment, span
+from core.common.read_snapshots import observation
 from core.modules.documents.store import DocumentTooLargeError, WikiStore
 
 
@@ -83,6 +87,63 @@ def _error_code(error):
 
 
 def _scan(store):
+    if not getattr(store, "tracked_reads", False):
+        return _scan_files(store)
+
+    def load():
+        directories = {}
+        return {"listing": _scan_files(store, directories=directories), "directories": directories}
+
+    def update(previous, paths):
+        records, skipped, scanned, truncated = previous["listing"]
+        if skipped or truncated:
+            return None
+        by_path = {record[0]: record for record in records}
+        checked_parents = set()
+        for path in paths:
+            if not path.startswith("wiki/"):
+                continue
+            document = path[len("wiki/"):]
+            # Newly published files can introduce directories and change the exact
+            # bounded scan count; preserve those limits with a full reconciliation.
+            if document not in by_path:
+                return None
+            try:
+                parent = document.rpartition("/")[0]
+                if parent not in checked_parents:
+                    directory = store.wiki_dir / parent
+                    store._check_path(directory)
+                    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    try:
+                        names = []
+                        with os.scandir(descriptor) as entries:
+                            for entry in entries:
+                                increment("scanned")
+                                names.append(entry.name)
+                                if len(names) > MAX_LIST_ENTRIES:
+                                    return None
+                        if sorted(names) != previous["directories"].get(parent):
+                            return None
+                    finally:
+                        os.close(descriptor)
+                    checked_parents.add(parent)
+                with span("fingerprint"):
+                    info = store._document_path(store.wiki_dir, document).lstat()
+                    if not stat.S_ISREG(info.st_mode):
+                        return None
+                    by_path[document] = [document, info.st_dev, info.st_ino, info.st_size,
+                                         info.st_mtime_ns, info.st_ctime_ns]
+            except (OSError, ValueError):
+                return None
+        previous["listing"] = ([by_path[key] for key in sorted(by_path)], skipped, scanned, truncated)
+        return previous
+
+    value = observation(store, "wiki", "document_files", load, update=update,
+                        cacheable=lambda value: not value["listing"][1] and not value["listing"][3])
+    return value["listing"]
+
+
+def _scan_files(store, *, directories=None):
     """디렉터리 descriptor를 기준으로 링크를 따라가지 않고 제한 탐색한다."""
     # 호출자가 잡은 잠금 안에서 파일 목록과 메타데이터를 읽는다. 내용을 전부 읽는 검색과는 다르다.
     records = []
@@ -106,11 +167,14 @@ def _scan(store):
             names = []
             with os.scandir(descriptor) as entries:
                 for entry in entries:
+                    increment("scanned")
                     if entries_seen >= MAX_LIST_ENTRIES:
                         truncated = True
                         return
                     entries_seen += 1
                     names.append(entry.name)
+            if directories is not None:
+                directories[prefix] = sorted(names)
             for name in sorted(names):
                 document = f"{prefix}/{name}" if prefix else name
                 try:
@@ -152,6 +216,17 @@ def _scan(store):
     return records, skipped, entries_seen, truncated
 
 
+def _indexed_keys(store, namespace, scope, entries, *, after, limit, reverse=False):
+    """검증된 목록의 키를 SQL로 페이지화하며 인덱스 장애에서는 기존 조회로 복귀한다."""
+    try:
+        with read_index(store) as index:
+            index.sync(namespace, scope, entries, lambda key: {"key": key})
+            return [key for key, _ in index.page(namespace, scope, after=after, limit=limit, reverse=reverse)]
+    except CanonicalIndexUnavailable as error:
+        cache_event("fallback", error.reason)
+        return None
+
+
 def list_documents(store: WikiStore, *, tenant: str, scope_key: str,
                    limit: int = DEFAULT_PAGE_SIZE, cursor: str | None = None) -> dict:
     """원문을 변경하지 않고 현재 페이지·불완전성과 새로고침 필요를 반환한다.
@@ -183,16 +258,22 @@ def list_documents(store: WikiStore, *, tenant: str, scope_key: str,
                 offset = paths.index(previous["after"]) + 1
             except ValueError:
                 raise InvalidCursorError("Invalid document cursor; read the first page again.") from None
-        page = paths[offset:offset + limit]
+        page = _indexed_keys(store, "documents", scope_hash,
+            [(record[0], canonical_json_hash(record)) for record in records],
+            after=None if previous is None else previous["after"], limit=limit)
+        if page is None:
+            page = paths[offset:offset + limit]
         items = []
         for document in page:
             try:
                 snapshot = store.read(document)
+                from .changes import document_fields
+                fields = document_fields(store, document, snapshot)
             except (OSError, ValueError) as error:
                 skipped.append({"document": document, "code": _error_code(error)})
                 continue
             items.append({"document": document, "revision": snapshot.revision,
-                          "source_status": "unlinked"})
+                          "source_status": "linked" if fields["metadata"].get("source") else "unlinked", **fields})
         more = offset + len(page) < len(paths)
         next_cursor = None
         if more and not truncated:

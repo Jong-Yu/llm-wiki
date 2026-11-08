@@ -1,7 +1,32 @@
+import { KnowledgeComparisonService } from '@main/backend/KnowledgeComparisonService';
+import { MarkdownExportService } from '@main/backend/MarkdownExportService';
+import { registerFileExportHandlers } from './registerFileExportHandlers';
+import { registerAttachmentHandlers } from './registerAttachmentHandlers';
+import { AttachmentReader } from '@main/backend/AttachmentReader';
+import {
+  KNOWLEDGE_COMPARISON_CHANNELS,
+  knowledgeComparisonListSchema,
+  knowledgeComparisonReadSchema,
+  knowledgeComparisonRestartSchema,
+} from '@contracts/knowledgeComparisons.contract';
+import type {
+  KnowledgeComparisonPageResult,
+  KnowledgeComparisonDetailResult,
+} from '@contracts/knowledgeComparisons.contract';
+import { AiSessionsService } from '@main/backend/AiSessionsService';
+import {
+  AI_SESSIONS_CHANNELS,
+  aiSessionsRequestSchema,
+} from '@contracts/aiSessions.contract';
+import type { AiSessionsResult } from '@contracts/aiSessions.contract';
+import { AccountPreferencesStore } from '@main/backend/AccountPreferencesStore';
 import { ProposalExecutionService } from '@main/backend/ProposalExecutionService';
 import { registerProposalExecutionHandlers } from './registerProposalExecutionHandlers';
 import { join } from 'node:path';
-import { RecoveryService } from '@main/backend/RecoveryService';
+import {
+  RecoveryService,
+  logoutWithRecovery,
+} from '@main/backend/RecoveryService';
 import { ProtectedRecoveryStore } from '@main/backend/ProtectedRecoveryStore';
 import { registerRecoveryHandlers } from './registerRecoveryHandlers';
 import { QuestionRunService } from '@main/backend/QuestionRunService';
@@ -45,6 +70,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
 import {
   CONNECTION_CHANNELS,
   parseConnectRequest,
+  parseAccountRequest,
   parseSelectWorkspaceRequest,
 } from '@contracts/connection.contract';
 import type { ConnectionResult } from '@contracts/connection.contract';
@@ -87,6 +113,9 @@ import type {
 } from '@contracts/sources.contract';
 
 type HandlerResult =
+  | KnowledgeComparisonPageResult
+  | KnowledgeComparisonDetailResult
+  | AiSessionsResult
   | ConnectionResult
   | DocumentListResult
   | DocumentContentResult
@@ -102,16 +131,33 @@ type HandlerResult =
   | ArtifactDownloadResult;
 type AnalysisHandlerResult = AnalysisDetailResult | AnalysisPageResult;
 
+export type ConnectionShutdown = (() => Promise<void>) & {
+  activeCount: () => number;
+};
+
 /** 허용 창의 연결 의도만 받고 외부 입력 오류를 비밀 없는 결과로 변환합니다. */
 export async function registerConnectionHandlers(
   getWindow: () => BrowserWindow | null,
   rendererLocation: string,
-): Promise<() => Promise<void>> {
+): Promise<ConnectionShutdown> {
   const service = new ConnectionService(
     createConnectionProtection(app.getPath('userData')),
+    new AccountPreferencesStore(
+      join(app.getPath('userData'), 'connection-protection'),
+    ),
   );
   // 앱 시작 때 한 번 복원하며 어떤 renderer 요청도 복원 완료 전에 받을 수 없습니다.
   await service.initialize();
+  registerFileExportHandlers(
+    getWindow,
+    rendererLocation,
+    new MarkdownExportService(service),
+  );
+  registerAttachmentHandlers(
+    getWindow,
+    rendererLocation,
+    new AttachmentReader(),
+  );
   const recovery = new RecoveryService(
     service,
     new ProtectedRecoveryStore(
@@ -132,6 +178,13 @@ export async function registerConnectionHandlers(
     undefined,
     recovery,
   );
+  const comparisons = new KnowledgeComparisonService(service, recovery);
+  const sessions = new AiSessionsService(service, [
+    analysis,
+    questions,
+    proposalExecution,
+    comparisons,
+  ]);
   registerAnalysisProposalHandlers(getWindow, rendererLocation, proposals);
   registerProposalExecutionHandlers(
     getWindow,
@@ -198,6 +251,12 @@ export async function registerConnectionHandlers(
     );
   };
   register(
+    CONNECTION_CHANNELS.authenticate,
+    1,
+    (value: unknown): Promise<ConnectionResult> =>
+      service.authenticate(parseAccountRequest(value)),
+  );
+  register(
     CONNECTION_CHANNELS.connect,
     1,
     (value: unknown): Promise<ConnectionResult> =>
@@ -212,28 +271,8 @@ export async function registerConnectionHandlers(
     (value: unknown): Promise<ConnectionResult> =>
       service.selectWorkspace(parseSelectWorkspaceRequest(value)),
   );
-  register(
-    CONNECTION_CHANNELS.disconnect,
-    0,
-    async (): Promise<ConnectionResult> => {
-      const current = service.getState();
-      if (
-        current.ok &&
-        current.data.status === 'connected' &&
-        current.data.selection
-      ) {
-        const cleared = await recovery.forgetCurrent(current.data.connectionId);
-        if (!cleared.ok)
-          return {
-            ok: false,
-            error: {
-              code: 'recovery_delete_failed',
-              message: cleared.error.message,
-            },
-          };
-      }
-      return service.logout();
-    },
+  register(CONNECTION_CHANNELS.disconnect, 0, (): Promise<ConnectionResult> =>
+    logoutWithRecovery(service, recovery),
   );
   register(CONNECTION_CHANNELS.restoreSaved, 0, (): Promise<ConnectionResult> =>
     service.restoreSaved(),
@@ -348,6 +387,36 @@ export async function registerConnectionHandlers(
       ),
   );
   register(
+    KNOWLEDGE_COMPARISON_CHANNELS.list,
+    1,
+    (value: unknown): Promise<KnowledgeComparisonPageResult> =>
+      comparisons.list(knowledgeComparisonListSchema.parse(value)),
+  );
+  register(
+    KNOWLEDGE_COMPARISON_CHANNELS.read,
+    1,
+    (value: unknown): Promise<KnowledgeComparisonDetailResult> =>
+      comparisons.read(knowledgeComparisonReadSchema.parse(value)),
+  );
+  register(
+    KNOWLEDGE_COMPARISON_CHANNELS.restart,
+    1,
+    (value: unknown): Promise<KnowledgeComparisonDetailResult> =>
+      comparisons.restart(knowledgeComparisonRestartSchema.parse(value)),
+  );
+  register(
+    KNOWLEDGE_COMPARISON_CHANNELS.stopLocal,
+    1,
+    (value: unknown): Promise<KnowledgeComparisonDetailResult> =>
+      comparisons.stopLocal(knowledgeComparisonReadSchema.parse(value)),
+  );
+  register(
+    AI_SESSIONS_CHANNELS.read,
+    1,
+    (value: unknown): Promise<AiSessionsResult> =>
+      sessions.read(aiSessionsRequestSchema.parse(value)),
+  );
+  register(
     ANALYSIS_CHANNELS.list,
     1,
     (value: unknown): Promise<AnalysisPageResult> =>
@@ -371,13 +440,17 @@ export async function registerConnectionHandlers(
     (value: unknown): Promise<AnalysisDetailResult> =>
       analysis.cancel(analysisCancelRequestSchema.parse(value)),
   );
-  return async (): Promise<void> => {
-    service.disconnect();
-    await Promise.all([
-      analysis.stop(),
-      questions.stop(),
-      stopConversions(),
-      proposalExecution.shutdown(),
-    ]);
-  };
+  return Object.assign(
+    async (): Promise<void> => {
+      service.disconnect();
+      await Promise.all([
+        analysis.stop(),
+        questions.stop(),
+        stopConversions(),
+        proposalExecution.shutdown(),
+        comparisons.shutdown(),
+      ]);
+    },
+    { activeCount: (): number => sessions.activeCount },
+  );
 }

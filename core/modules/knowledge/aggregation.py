@@ -4,6 +4,7 @@
 문서끼리 같은 전역 시점을 보장하지 않으므로 각 자료의 판본을 따로 보존한다.
 """
 
+from core.modules.reviews.values import actor_basis
 from hashlib import sha256
 
 from core.common.json_codec import canonical_json_bytes, canonical_json_hash
@@ -20,6 +21,7 @@ from core.modules.analysis_jobs.contracts import identifier as job_identifier
 from core.modules.analysis_plans.store import PlanStore
 from core.modules.analysis_inputs.contracts import InputConflictError
 from core.modules.sources.store import SourceStore
+from core.modules.personal.web_evidence import validate_web_evidence
 from .schema import documents as validate_documents
 from .capture_errors import _error_code
 
@@ -77,7 +79,7 @@ def _page(actor, kind, scope, items, resources, skipped, limit, cursor, *, cover
     if len({item["key"] for item in ordered}) != len(ordered):
         raise ValueError("Aggregate item references must be unique")
     refs = [_resource_ref(resource) for resource in resources]
-    scope_hash = canonical_json_hash({"actor": actor, "kind": kind, "scope": scope if scope_basis is None else scope_basis})
+    scope_hash = canonical_json_hash({"actor": actor_basis(actor), "kind": kind, "scope": scope if scope_basis is None else scope_basis})
     snapshot_value = {"items": ordered, "resources": refs, "skipped": skipped}
     if "resource_discovery_revision" in scope:
         snapshot_value["resource_discovery_revision"] = scope["resource_discovery_revision"]
@@ -110,12 +112,12 @@ def _queue_items(resources, skipped, states):
         value, reference = resource["value"], resource["reference"]
         ref = _resource_ref(resource)
         if resource["kind"] == "document":
-            for claim in value["claims"]:
+            for claim in value.get("current_claims", value["claims"]):
                 decision = claim["decision"]
                 if decision in states:
                     items.append({"key": f"document:{reference}:claim:{claim['claim_id']}",
                         "kind": "document_claim", "status": decision, "ref": ref, "claim": claim})
-            for event_id in value["pending_history"]:
+            for event_id in value.get("current_pending_history", value["pending_history"]):
                 if "pending" in states:
                     items.append({"key": f"document:{reference}:pending:{event_id}",
                         "kind": "pending_document_event", "status": "pending", "ref": ref, "event_id": event_id})
@@ -154,7 +156,7 @@ def review_queue(store, actor, *, documents, correspondence_ids, states, limit=2
 
 
 def _history_items(store, actor, resources, skipped, job_ids):
-    """전체 원장 검증 후 실제 이력 항목을 만든다. 범위 선택과 출력 페이지는 호출자가 맡는다."""
+    """원본 이력을 조립한다. 작업 결과물 검증은 작업 상세 조회에서 수행한다."""
     items = []
     for resource in resources:
         reference, value, ref = resource["reference"], resource["value"], _resource_ref(resource)
@@ -167,7 +169,7 @@ def _history_items(store, actor, resources, skipped, job_ids):
         try:
             while True:
                 versions = list_versions(store, reference, tenant=actor["tenant"],
-                    scope_key=canonical_json_hash(actor), limit=50, cursor=position)
+                    scope_key=canonical_json_hash(actor_basis(actor)), limit=50, cursor=position)
                 for version in versions["items"]:
                     items.append({"key": f"document:{reference}:version:{version['history_id']}",
                         "kind": "document_version", "ref": ref, "version": version})
@@ -186,8 +188,8 @@ def _history_items(store, actor, resources, skipped, job_ids):
     jobs = JobStore(store)
     for job_id in job_ids:
         try:
-            job = jobs.query(job_id, tenant=actor["tenant"], user_id=actor["user_id"])
-            # 본인 작업의 index를 먼저 확인하는 기존 query를 사용한다. 다른 사용자의 파일을 먼저 읽지 않는다.
+            job = jobs.history(job_id, tenant=actor["tenant"], user_id=actor["user_id"])
+            # 소유·원본 상태·lease/등록은 확인하며 결과/입력 상세 조립은 이력에 사용하지 않는다.
             resource = {"kind": "job", "reference": job_id, "value": job}
             resources.append(resource)
             for index, event in enumerate(job["events"]):
@@ -215,12 +217,32 @@ def history_query(store, actor, *, documents, correspondence_ids, job_ids, limit
         "job_ids": job_ids}, _history_items(store, actor, resources, skipped, job_ids), resources, skipped, limit, cursor)
 
 
-def prepare_question(store, actor, *, documents, required_documents, claims, source_refs):
+def prepare_question(store, actor, *, documents, required_documents, claims, source_refs, allow_empty=False, web=None,
+                     retrieval_scope=None, lookup_question=None):
     """선택 근거의 전체 본문·현재 판단·고정 원본을 읽어 질문 준비값을 반환한다.
 
     snapshot_revision은 이 조회의 내용 지문이다. 영구 보관이나 쓰기 CAS가 아니며
     다음 질문/저장 때는 해당 자료의 현재 권한과 판본을 다시 검사해야 한다.
     """
+    retrieval = None
+    if retrieval_scope is not None:
+        if retrieval_scope not in {"selected", "workspace"} or not isinstance(lookup_question, str) or not lookup_question.strip():
+            raise ValueError("Question retrieval requires an explicit scope and question")
+        if retrieval_scope == "workspace":
+            from .question_index import discover
+            pinned = list(dict.fromkeys([*required_documents, *(c["document"] for c in claims)]))
+            retrieval = discover(store, actor, lookup_question, documents, pinned)
+            documents = retrieval.pop("documents")
+            allow_empty = allow_empty or not documents
+        else:
+            retrieval = {"coverage": "explicit_selection_only", "complete": True, "truncated": False,
+                         "skipped": [], "absence_proven": False, "policy": "question_grounding_v1"}
+        retrieval["question_sha256"] = sha256(lookup_question.encode()).hexdigest()
+        retrieval["query_prefix_length"] = len(lookup_question)
+    elif lookup_question is not None:
+        raise ValueError("Select a question retrieval scope")
+    # 외부 자료는 개인 PC의 보고다. 형식과 보관한 문자 hash만 검사하며 서버에서 웹에 접속하지 않는다.
+    web = validate_web_evidence(web) if web is not None else None
     # 새 선택 항목을 생략한 기존 md/txt 요청은 이전 응답 구조와 지문을 유지한다.
     source_refs = [{key: value for key, value in reference.items()
         if key != "conversion_ref" or value is not None} for reference in source_refs]
@@ -231,7 +253,7 @@ def prepare_question(store, actor, *, documents, required_documents, claims, sou
     # 아직 파생 위키가 없는 원본만으로도 질문할 수 있다. 빈 전체 범위는 허용하지 않는다.
     if selected:
         validate_documents(selected, store)
-    elif not source_refs:
+    elif not source_refs and not allow_empty:
         raise ValueError("Select documents or original source references")
     for claim in claims:
         if claim["document"] not in selected:
@@ -327,9 +349,22 @@ def prepare_question(store, actor, *, documents, required_documents, claims, sou
             skipped.append({"kind": "source", "reference": reference, "code": _error_code(error)})
     scope = {"documents": documents, "required_documents": required_documents, "claims": claims,
         "source_refs": source_refs, "coverage": "explicit_selection_only", "profile": actor}
+    if allow_empty and not selected and not source_refs:
+        # 검색으로 관련 자료를 찾지 못한 질문임을 근거 묶음에 남겨, 빈 선택을 실수로 허용한 것과 구별한다.
+        scope["empty_selection"] = "no_matching_documents"
+
     value = {"kind": "question_context", "scope": scope, "documents": snapshots,
         "selected_claims": selected_claims, "originals": originals,
         "can_prepare": not skipped, "complete": not skipped,
         "truncated": any(item["code"].endswith("limit") for item in skipped), "skipped": skipped,
         "consistency": "per_resource_snapshots", "read_only": True, "ai_executed": False, "persisted": False}
+    if web is not None:
+        value["web"] = web
+    if retrieval is not None:
+        if retrieval_scope == "workspace":
+            from .question_index import catalog_revision
+            with store._write_lock():
+                if catalog_revision(store) != retrieval["catalog_revision"]:
+                    raise CatalogChangedError()
+        value["retrieval"] = retrieval
     return {**value, "snapshot_revision": canonical_json_hash(value)}

@@ -102,11 +102,11 @@ def submit(self, job_id, *, tenant, user_id, run_id, expected_job_revision, bund
     if len(capture.encoded(payload).encode("utf-8")) > limits.MAX_BUNDLE_BYTES:
         raise limits.InputLimitError("The logical extraction submission exceeds eight MiB.")
     payload_hash = canonical_json_hash(payload)
-    directory = self.jobs.jobs_dir / job_id / "extraction_requests"
-    path = directory / (request_key(tenant, user_id, request_id) + ".json")
     with self.jobs.sources._coordination_lock():
         # 재전송은 현재 권한/실행 범위를 먼저 확인하되 자신의 성공한 job advance를 허용한다.
         job, actor = bundles.opened(self, job_id, tenant, user_id, run_id, authorize, "source_write")
+        directory = self.jobs.job_root(job_id) / "extraction_requests"
+        path = directory / (request_key(tenant, user_id, request_id) + ".json")
         try:
             prior = records.read(self.jobs, path)
         except FileNotFoundError:

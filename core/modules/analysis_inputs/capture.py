@@ -5,6 +5,7 @@
 
 from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.modules.reviews.store import ReviewStore
+from core.modules.documents.metadata import parse_document
 from . import contracts as limits
 
 
@@ -74,8 +75,11 @@ def documents_locked(store, selected, actor):
         tokens = {key: current[key] for key in ("source_revision", "graph_revision", "review_revision",
                                                "history_revision", "state_revision")}
         dependencies.append({"document": document, "status": "captured", **tokens})
+        parsed = parse_document(source.content)
         values.append({"kind": "source_and_current_review_data", **item,
                        "source": {"document": document, "content": source.content, "revision": source.revision,
+                                  "body_start_line": parsed.body_start_line, "body_revision": parsed.body_revision,
+                                  "document_id": parsed.document_id, "evidence_coordinates": "full_file",
                                   "line_count": len(source.content.splitlines())},
                        "review": current})
         if current["status"] == "unavailable":

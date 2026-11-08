@@ -1,0 +1,15 @@
+.page {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--wiki-space-24);
+  min-width: 0;
+  color: var(--wiki-color-text-primary);
+  background: var(--wiki-color-surface-canvas);
+  font: var(--wiki-font-size-13) / var(--wiki-component-control-line-height)
+    var(--wiki-font-family-ui);
+}
+@container workspace (width < 900px) {
+  .page {
+    padding: var(--wiki-space-16);
+  }
+}

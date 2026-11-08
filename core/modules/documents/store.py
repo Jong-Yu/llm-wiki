@@ -22,6 +22,9 @@ import stat
 import tempfile
 import time
 from typing import Iterator, List, Optional, Tuple, Union
+
+from core.common.read_changes import before_change, bind_lock
+from core.common.read_metrics import increment, span
 from uuid import uuid4
 
 
@@ -54,6 +57,8 @@ class SaveResult:
     history_path: Optional[Path]
     changed: bool
     cleanup_failures: Tuple[CleanupFailure, ...] = ()
+    audit_status: str = "recorded"
+    audit_error: Optional[str] = None
 
 
 @dataclass
@@ -112,7 +117,11 @@ class WikiStore:
         data_dir: Union[str, Path] = DEFAULT_DATA_DIR,
         *,
         lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+        tracked_reads: bool = False,
     ):
+        if type(tracked_reads) is not bool:
+            raise TypeError("tracked_reads must be a boolean")
+        self.tracked_reads = tracked_reads
         if isinstance(lock_timeout_seconds, bool) or not isinstance(
             lock_timeout_seconds, (int, float)
         ):
@@ -141,7 +150,7 @@ class WikiStore:
 
     def save(
         self, document: str, content: str, *, expected_revision: Optional[str],
-        before_commit=None,
+        before_commit=None, actor=None, origin=None, reason=None,
     ) -> SaveResult:
         """Save bounded UTF-8 text and return its committed result.
 
@@ -174,6 +183,9 @@ class WikiStore:
             raise DocumentTooLargeError(document, len(encoded))
         revision = self._revision(encoded)
         cleanup_failures: List[CleanupFailure] = []
+        from . import changes
+        actor, origin, reason = changes.provenance(actor, origin, reason)
+        audit_status, audit_error = "recorded", None
 
         try:
             with self._write_lock():
@@ -193,33 +205,70 @@ class WikiStore:
                 if before_commit is not None:
                     before_commit()
 
-                if previous == encoded:
-                    return SaveResult(revision=revision, history_path=None, changed=False)
+                ledger = changes.reconcile(self, document, current_revision, cleanup_failures)
 
+                if previous == encoded:
+                    return SaveResult(revision=revision, history_path=None, changed=False,
+                                      cleanup_failures=tuple(cleanup_failures))
+
+                self._validate_metadata(document, content, previous)
+
+                before_change(self, "wiki", "wiki/" + document)
                 self._mkdir(target.parent)
                 with self._staged_file(target.parent, encoded, cleanup_failures) as staged:
                     version = None
                     if previous is not None:
                         # 수정 전 전체 파일을 공개한 뒤에만 최신 파일을 교체한다.
                         version = self._archive(document, previous, cleanup_failures)
+                    changes.begin(self, document, ledger, current_revision, revision, version,
+                                  actor, origin, reason, cleanup_failures)
+                    if previous is not None:
                         os.replace(staged.path, target)
                         # replace() consumed this name; there is nothing to unlink.
                         staged.consumed = True
                     else:
                         # Publish without overwriting a file created outside our lock.
                         os.link(staged.path, target)
+                    try:
+                        changes.finish(self, document, ledger, cleanup_failures)
+                    except (OSError, ValueError) as error:
+                        # The document is already published. Preserve the intent and
+                        # report success separately from the unfinished audit commit.
+                        audit_status, audit_error = "pending_reconcile", type(error).__name__
         except Exception as error:
             if cleanup_failures:
                 error.cleanup_failures = tuple(cleanup_failures)
             raise
 
         # Both staging contexts have exited, so all cleanup outcomes are known.
-        return SaveResult(revision, version, True, tuple(cleanup_failures))
+        return SaveResult(revision, version, True, tuple(cleanup_failures), audit_status, audit_error)
+
+    def _validate_metadata(self, document, content, previous):
+        from .metadata import parse_document, DocumentMetadataError
+        parsed = parse_document(content)
+        old = parse_document(previous.decode("utf-8")) if previous is not None else None
+        if old is not None and old.document_id is not None and parsed.document_id != old.document_id:
+            raise DocumentMetadataError("Document identity cannot be replaced or removed")
+        if parsed.document_id is not None and (old is None or old.document_id is None):
+            from .listing import _scan
+            records, skipped, _, truncated = _scan(self)
+            if skipped or truncated:
+                raise DocumentMetadataError("Document identity scan is incomplete")
+            for record in records:
+                if record[0] != document and parse_document(self.read(record[0]).content).document_id == parsed.document_id:
+                    raise DocumentMetadataError("Document identity already belongs to another file")
+        source = parsed.metadata.get("source")
+        if source is not None:
+            from core.modules.sources.store import SourceStore
+            catalog = SourceStore(self)._get_source_locked(source["id"])
+            if not any(item["source_version"] == source["version"] for item in catalog["versions"]):
+                raise DocumentMetadataError("The fixed original version is not registered")
 
     @staticmethod
     def _read_document(path: Path, document: str) -> bytes:
         # One bounded read also catches growth without trusting a prior stat().
-        with path.open("rb") as stream:
+        increment("canonical_reads")
+        with span("canonical_read"), path.open("rb") as stream:
             raw = stream.read(MAX_DOCUMENT_BYTES + 1)
         if len(raw) > MAX_DOCUMENT_BYTES:
             raise DocumentTooLargeError(document, len(raw))
@@ -289,20 +338,22 @@ class WikiStore:
                 raise ValueError("storage lock must be a regular file")
             # Nonblocking attempts keep lock contention bounded without changing
             # the critical section. A zero timeout still makes one attempt.
-            deadline = time.monotonic() + self.lock_timeout_seconds
-            while True:
-                try:
-                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError as error:
-                    if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
-                        raise
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise StorageBusyError(self.lock_timeout_seconds) from error
-                    time.sleep(min(0.05, remaining))
-                else:
-                    break
-            yield
+            with span("lock_wait"):
+                deadline = time.monotonic() + self.lock_timeout_seconds
+                while True:
+                    try:
+                        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except OSError as error:
+                        if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                            raise
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise StorageBusyError(self.lock_timeout_seconds) from error
+                        time.sleep(min(0.05, remaining))
+                    else:
+                        break
+            with bind_lock(self, "wiki", descriptor), span("lock_hold"):
+                yield
         finally:
             os.close(descriptor)
 

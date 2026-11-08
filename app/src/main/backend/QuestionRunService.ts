@@ -1,12 +1,14 @@
-import { personalAi } from './personalAi';
+import { ExecutionStarts } from './ExecutionStarts';
+import { researchPublicWeb } from './webResearch';
+import type { AiActivity } from '@contracts/aiSessions.contract';
+import { aiModelArguments, personalAi } from './personalAi';
 import type { PersonalAi } from './personalAi';
 import type { ChildProcess } from 'node:child_process';
-import { access } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
+import { access, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { ConnectionService, AnalysisContext } from './ConnectionService';
-import { apiFailure, readApiJson } from './readApi';
+import { apiFailure, readScopedApiJson, matchesExpectedScope } from './readApi';
 import type { ApiFailure, ReadApiResult } from './readApi';
 import {
   readProcessJournal,
@@ -19,8 +21,12 @@ import {
   assertPersonalRuntime,
   createPrivateExecution,
   spawnPersonalProcess,
+  personalRuntimePaths,
+  observePersonalProcess,
+  runPersonalCommand,
   stopPersonalProcess,
 } from './personalProcess';
+import type { PrivateExecution } from './personalProcess';
 import type {
   QuestionSession,
   QuestionCreateRequest,
@@ -32,8 +38,17 @@ import type {
   QuestionDetailResult,
   QuestionPageResult,
   QuestionLocal,
+  QuestionResumableRequest,
+  QuestionResumableResult,
+  QuestionSearchTermsRequest,
+  QuestionSearchTermsResult,
+  QuestionWebSearchRequest,
+  QuestionWebSearchResult,
 } from '@contracts/questionRuns.contract';
-import { questionReceiptSchema } from '@contracts/questionRuns.contract';
+import {
+  parseQuestionSearchTermsResult,
+  questionReceiptSchema,
+} from '@contracts/questionRuns.contract';
 import {
   projectQuestion,
   projectQuestionAnswers,
@@ -42,6 +57,12 @@ import {
 } from './questionRunProjection';
 
 const id = z.string().regex(/^[a-f0-9]{32}$/);
+const pointerSchema = z.looseObject({
+  version: z.literal(1),
+  conversation_id: id,
+  provider: z.enum(['codex', 'claude']),
+  turns_seen: z.number().int().min(0),
+});
 const envelopeSchema = z.object({
   data: z.looseObject({
     access: z.object({
@@ -49,6 +70,14 @@ const envelopeSchema = z.object({
       tenant: z.string(),
       profile_id: z.string(),
       policy_revision: z.string(),
+      access_revision: z
+        .string()
+        .min(1)
+        .nullish()
+        .transform(
+          (value: string | null | undefined): string | undefined =>
+            value ?? undefined,
+        ),
     }),
   }),
 });
@@ -79,31 +108,22 @@ type Running = {
   key: string;
   closed: Promise<void>;
   stopping: boolean;
+  activity: AiActivity;
+  context: AnalysisContext;
 };
 export type QuestionRuntime = {
   projectRoot: string;
   python: string;
   ai: PersonalAi;
   privateRoot: string;
+  /** AI 세션 기록과 이어가기 포인터를 두는 안정된 개인 폴더입니다. */
+  sessionRoot: string;
 };
 
 /** renderer가 실행 경로·토큰을 정하지 못하도록 main의 설치 설정만 사용합니다. */
-async function defaultRuntime(): Promise<QuestionRuntime> {
+export async function defaultRuntime(): Promise<QuestionRuntime> {
   const { app } = await import('electron');
-  const projectRoot =
-    process.env.WIKI_CLIENT_ROOT ||
-    process.env.WIKI_ANALYSIS_PROJECT_ROOT ||
-    resolve(import.meta.dirname, '../../..');
-  const python =
-    process.env.WIKI_CLIENT_PYTHON ||
-    process.env.WIKI_PYTHON ||
-    process.env.WIKI_ANALYSIS_PYTHON ||
-    join(
-      projectRoot,
-      process.platform === 'win32'
-        ? '.venv/Scripts/python.exe'
-        : '.venv/bin/python',
-    );
+  const { projectRoot, python } = personalRuntimePaths();
   const ai = await personalAi('question');
   await access(python);
   await access(join(projectRoot, 'tools/question_cli.py'));
@@ -112,6 +132,7 @@ async function defaultRuntime(): Promise<QuestionRuntime> {
     python,
     ai,
     privateRoot: join(app.getPath('userData'), 'questions'),
+    sessionRoot: join(app.getPath('userData'), 'question-sessions'),
   };
 }
 /** 로컬 표시를 연결·주체·관점·실행별로 나눕니다. */
@@ -122,7 +143,7 @@ function keyFor(session: QuestionSession, runId: string): string {
 function changed(): ApiFailure {
   return apiFailure(
     'scope_changed',
-    '연결·작업 공간·관점이 바뀌었습니다. 원래 범위에서 다시 확인해 주세요.',
+    '연결 또는 작업 공간의 조회 설정이 바뀌었습니다. 이전 기록을 보존하고 현재 작업 공간에서 다시 확인해 주세요.',
   );
 }
 /** 질문의 명시 실행·서버 영수증 조회와 개인 CLI 수명만 관리합니다. */
@@ -130,11 +151,9 @@ export class QuestionRunService {
   #connection: QuestionConnection;
   #recovery: ProcessRecovery | undefined;
   #runtime: () => Promise<QuestionRuntime>;
-  #running: Running | null = null;
-  #starting = false;
+  #running = new Map<string, Running>();
+  #starts = new ExecutionStarts();
   #epoch = 0;
-  #startSettled: Promise<void> = Promise.resolve();
-  #finishStart: (() => void) | undefined;
   #local = new Map<string, QuestionLocal>();
   #requests = new Set<AbortController>();
 
@@ -162,14 +181,7 @@ export class QuestionRunService {
       session.connectionId,
     );
     if ('ok' in context) return context;
-    const scope = session.expectedScope;
-    if (
-      context.active.userId !== scope.userId ||
-      context.active.policyRevision !== scope.policyRevision ||
-      context.selection.tenant !== scope.tenant ||
-      context.selection.profile !== scope.profileId
-    )
-      return changed();
+    if (!matchesExpectedScope(session.expectedScope, context)) return changed();
     return context;
   }
 
@@ -179,46 +191,14 @@ export class QuestionRunService {
     path: string,
     body?: Record<string, unknown>,
   ): Promise<ReadApiResult> {
-    if (!this.#connection.isAnalysisCurrent(context)) return changed();
-    const query = new URLSearchParams({ profile: context.selection.profile });
-    const url = `${context.active.serverUrl}tenants/${encodeURIComponent(context.selection.tenant)}/${path}`;
-    const controller = new AbortController();
-    this.#requests.add(controller);
-    const result = await readApiJson(
-      body ? url : `${url}${url.includes('?') ? '&' : '?'}${query.toString()}`,
-      context.token,
-      controller,
-      {
-        maxResponseBytes: 16 * 1024 * 1024,
-        ...(body
-          ? {
-              method: 'POST',
-              body: { ...body, profile: context.selection.profile },
-            }
-          : {}),
-      },
-    );
-    this.#requests.delete(controller);
-    if (!this.#connection.isAnalysisCurrent(context)) return changed();
-    if (!result.ok) {
-      this.#connection.analysisAccessFailure(result);
-      return result;
-    }
-    const parsed = envelopeSchema.safeParse(result.value);
-    if (!parsed.success)
-      return apiFailure(
-        'invalid_response',
-        '질문 실행 응답의 형식을 확인할 수 없습니다.',
-      );
-    const scope = parsed.data.data.access;
-    if (
-      scope.user_id !== context.active.userId ||
-      scope.tenant !== context.selection.tenant ||
-      scope.profile_id !== context.selection.profile ||
-      scope.policy_revision !== context.active.policyRevision
-    )
-      return changed();
-    return { ok: true, value: parsed.data.data };
+    return readScopedApiJson(this.#connection, this.#requests, context, path, {
+      body,
+      schema: envelopeSchema,
+      changed,
+      profile: 'get-query',
+      maxResponseBytes: 16 * 1024 * 1024,
+      invalidMessage: '질문 실행 응답의 형식을 확인할 수 없습니다.',
+    });
   }
 
   /** 실행 상태와 별도로 실제 영수증·대화 답변을 확인합니다. */
@@ -285,7 +265,7 @@ export class QuestionRunService {
       }
       if (!this.#connection.isAnalysisCurrent(context)) return changed();
       if (
-        !this.#running &&
+        !this.#running.has(keyFor(session, runId)) &&
         detail.receipts.some(
           (receipt: (typeof detail.receipts)[number]): boolean =>
             receipt.saved === true,
@@ -495,16 +475,14 @@ export class QuestionRunService {
 
   /** 이미 읽은 실행 판본을 확인한 명시 동작에서만 선택한 개인 AI를 시작합니다. */
   async start(request: QuestionStartRequest): Promise<QuestionDetailResult> {
-    if (this.#starting || this.#running)
+    const key = keyFor(request, request.questionRunId);
+    const finish = this.#running.has(key) ? null : this.#starts.begin(key);
+    if (!finish)
       return apiFailure(
         'question_busy',
         '이 앱에서 질문을 실행 중입니다. 현재 실행을 먼저 확인해 주세요.',
       );
-    this.#starting = true;
     const epoch = this.#epoch;
-    this.#startSettled = new Promise<void>((done: () => void): void => {
-      this.#finishStart = done;
-    });
     try {
       const context = await this.#context(request);
       if ('ok' in context) return context;
@@ -537,7 +515,13 @@ export class QuestionRunService {
         );
       const runtime = await this.#runtime();
       await assertPersonalRuntime(runtime);
-      await this.#spawn(context, request, runtime, epoch);
+      await this.#spawn(
+        context,
+        request,
+        runtime,
+        epoch,
+        detail.data.conversationId,
+      );
       return this.#detail(context, request, request.questionRunId);
     } catch {
       return apiFailure(
@@ -549,9 +533,7 @@ export class QuestionRunService {
           : '개인 질문 실행기를 시작하지 못했습니다. Python·선택한 AI CLI 설치와 보호 저장 설정을 확인해 주세요.',
       );
     } finally {
-      this.#starting = false;
-      this.#finishStart?.();
-      this.#finishStart = undefined;
+      finish();
     }
   }
 
@@ -567,24 +549,177 @@ export class QuestionRunService {
         expected_state_revision: request.expectedStateRevision,
       },
     );
-    if (this.#running?.key === keyFor(request, request.questionRunId))
-      await this.stop();
+    await this.#stopOne(keyFor(request, request.questionRunId));
     if (!result.ok) return result;
     return this.#detail(context, request, request.questionRunId);
   }
 
-  /** 창 닫기·연결 변경은 같은 Python 프로세스에 협력 취소를 전달합니다. */
+  /** 계정·연결 변경과 명시 종료는 모든 실행을 정리합니다. */
   async stop(): Promise<void> {
     this.#epoch += 1;
-    await this.#startSettled;
-    const running = this.#running;
+    for (const request of this.#requests) request.abort();
+    await this.#starts.settled();
+    await Promise.all(
+      [...this.#running.keys()].map((key: string): Promise<void> =>
+        this.#stopOne(key),
+      ),
+    );
+  }
+
+  /** 한 질문의 중단은 다른 세션의 실행에 영향을 주지 않습니다. */
+  async #stopOne(key: string): Promise<void> {
+    const running = this.#running.get(key);
     if (!running) return;
     if (!running.stopping) {
       running.stopping = true;
-      const local = this.#local.get(running.key);
-      if (local) this.#local.set(running.key, { ...local, status: 'stopping' });
+      const local = this.#local.get(key);
+      if (local) this.#local.set(key, { ...local, status: 'stopping' });
     }
     await stopPersonalProcess(running.child, running.closed);
+  }
+
+  /** 공개 활동에는 인증정보나 원문을 포함하지 않습니다. */
+  activities(): AiActivity[] {
+    return [...this.#running.values()]
+      .filter((run: Running): boolean =>
+        this.#connection.isAnalysisCurrent(run.context),
+      )
+      .map((run: Running): AiActivity => ({
+        ...run.activity,
+        status: run.stopping ? 'stopping' : 'running',
+      }));
+  }
+
+  /**
+   * 질문 문장만 선택한 AI에 보내 위키 검색어를 받아 옵니다. 위키 자료와 인증정보는 보내지 않으며,
+   * 실패·취소·시간 초과는 오류가 아닌 빈 목록으로 돌려 호출자가 기존 검색으로 계속하게 합니다.
+   */
+  async searchTerms(
+    request: QuestionSearchTermsRequest,
+  ): Promise<QuestionSearchTermsResult> {
+    const none: QuestionSearchTermsResult = { terms: [] };
+    const abort = new AbortController();
+    this.#requests.add(abort);
+    let execution: PrivateExecution | null = null;
+    try {
+      const context = await this.#context(request);
+      if ('ok' in context) return none;
+      const runtime = await this.#runtime();
+      await assertPersonalRuntime(runtime);
+      await access(join(runtime.projectRoot, 'tools/search_terms_cli.py'));
+      // 이 실행은 서버에 접속하지 않으므로 실제 토큰 대신 자리표시 값을 둡니다.
+      execution = await createPrivateExecution(
+        runtime,
+        runtime.privateRoot,
+        'unused',
+      );
+      const questionFile = join(execution.workDirectory, 'question.txt');
+      await writeFile(questionFile, request.question, {
+        encoding: 'utf8',
+        mode: 0o600,
+        flag: 'wx',
+      });
+      if (abort.signal.aborted) return none;
+      const output = await runPersonalCommand(
+        runtime,
+        [
+          '-B',
+          '-m',
+          'tools.search_terms_cli',
+          '--work-dir',
+          execution.workDirectory,
+          '--question-file',
+          questionFile,
+          '--ai-provider',
+          runtime.ai.provider,
+          '--ai-cli',
+          runtime.ai.cli,
+          ...aiModelArguments(runtime.ai),
+          '--ai-timeout',
+          '30',
+        ],
+        { maxBytes: 65_536, timeoutMs: 40_000, signal: abort.signal },
+      );
+      if (abort.signal.aborted || output.timedOut || output.tooLarge)
+        return none;
+      const line = output.output.trim().split('\n').at(-1) ?? '';
+      const parsed = z
+        .object({
+          protocol: z.literal('search-terms-cli-v1'),
+          ok: z.literal(true),
+          terms: z.array(z.string()),
+        })
+        .parse(JSON.parse(line));
+      return parseQuestionSearchTermsResult({ terms: parsed.terms });
+    } catch {
+      return none;
+    } finally {
+      this.#requests.delete(abort);
+      if (execution) {
+        await execution.cleanupAuth().catch((): void => {});
+        await rm(execution.directory, { recursive: true, force: true }).catch(
+          (): void => {},
+        );
+      }
+    }
+  }
+
+  /** 현재 접근 범위를 확인한 뒤 검색어만 별도 웹 조사에 전달합니다. */
+  async webSearch(
+    request: QuestionWebSearchRequest,
+  ): Promise<QuestionWebSearchResult> {
+    const context = await this.#context(request);
+    if ('ok' in context) throw new Error('scope_changed');
+    const abort = new AbortController();
+    this.#requests.add(abort);
+    try {
+      const runtime = await this.#runtime();
+      if (abort.signal.aborted || !this.#connection.isAnalysisCurrent(context))
+        throw new Error('scope_changed');
+      const result = await researchPublicWeb(
+        runtime,
+        request.query,
+        abort.signal,
+      );
+      if (abort.signal.aborted || !this.#connection.isAnalysisCurrent(context))
+        throw new Error('scope_changed');
+      return result;
+    } finally {
+      this.#requests.delete(abort);
+    }
+  }
+
+  /** 포인터 파일만 읽어 이어 갈 세션이 있는지 확인하며 어떤 실패도 false로 처리합니다. */
+  async resumable(
+    request: QuestionResumableRequest,
+  ): Promise<QuestionResumableResult> {
+    try {
+      const runtime = await this.#runtime();
+      const text = await readFile(
+        join(
+          runtime.sessionRoot,
+          'pointers',
+          `${request.conversationId}.${request.provider}.json`,
+        ),
+        'utf8',
+      );
+      const pointer = pointerSchema.parse(JSON.parse(text));
+      return {
+        resumable:
+          pointer.provider === request.provider &&
+          pointer.conversation_id === request.conversationId &&
+          // 세션이 본 턴이 지금 앞선 턴 이하이면 모르는 턴만 이어 붙여 이어 갈 수 있다.
+          pointer.turns_seen > 0 &&
+          pointer.turns_seen <= request.precedingTurns,
+      };
+    } catch {
+      return { resumable: false };
+    }
+  }
+
+  /** 접수 중인 작업도 명시 종료 확인에 포함합니다. */
+  get activeCount(): number {
+    return this.#running.size + this.#starts.size;
   }
 
   /** 인증 파일은 main만 만들고 CLI 출력에서 경로·원본·실행 지문을 renderer에 전달하지 않습니다. */
@@ -593,6 +728,7 @@ export class QuestionRunService {
     request: QuestionStartRequest,
     runtime: QuestionRuntime,
     epoch: number,
+    conversationId: string,
   ): Promise<void> {
     const execution = await createPrivateExecution(
       runtime,
@@ -633,11 +769,14 @@ export class QuestionRunService {
         execution.tokenFile,
         '--work-dir',
         execution.workDirectory,
+        '--session-dir',
+        runtime.sessionRoot,
         '--run-ai',
         '--ai-provider',
         runtime.ai.provider,
         '--ai-cli',
         runtime.ai.cli,
+        ...aiModelArguments(runtime.ai),
         ...(request.reclaim ? ['--reclaim'] : []),
       ]);
     } catch {
@@ -650,81 +789,57 @@ export class QuestionRunService {
       status: 'running',
       phase: 'starting',
     });
-    const decoder = new StringDecoder('utf8');
-    let buffer = '';
-    let discard = false;
-    child.stdout?.on('data', (chunk: Buffer): void => {
-      buffer += decoder.write(chunk);
-      for (;;) {
-        const index = buffer.indexOf('\n');
-        if (index < 0) break;
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        if (!discard && line.length <= 1024 * 1024) {
-          try {
-            const local = this.#local.get(key);
-            if (local && this.#connection.isAnalysisCurrent(context)) {
-              const next = applyQuestionCliEvent(
-                local,
-                JSON.parse(line),
-                request.questionRunId,
-              );
-              if (next.requestId && next.requestId !== local.requestId) {
-                journalWrites = journalWrites
-                  .then(async (): Promise<void> => {
-                    if (journal)
-                      journal = await writeProcessJournal(
-                        this.#recovery,
-                        context,
-                        'pending-question-run',
-                        journal.key,
-                        {
-                          operation: 'run',
-                          runId: request.questionRunId,
-                          stateRevision: request.expectedStateRevision,
-                          requestId: next.requestId,
-                        },
-                        journal.revision,
-                      );
-                  })
-                  .catch((): void => {
-                    const latest = this.#local.get(key);
-                    if (latest)
-                      this.#local.set(key, { ...latest, cleanupWarning: true });
-                    void this.stop();
-                  });
-              }
-              this.#local.set(key, {
-                ...next,
-                preview: next.preview.replaceAll(
-                  context.token,
-                  '[인증정보 비공개]',
-                ),
-              });
-            }
-          } catch {
-            /* 잘못된 한 줄을 원문 오류로 공개하지 않습니다. */
-          }
-        }
-        discard = false;
-      }
-      if (buffer.length > 1024 * 1024) {
-        buffer = '';
-        discard = true;
-      }
-    });
-    child.stderr?.resume();
-    child.stdin?.on('error', (): void => {
-      /* 종료된 프로세스의 취소 입력은 무시합니다. */
-    });
     const running: Running = {
+      context,
       child,
       key,
       closed: Promise.resolve(),
       stopping: false,
+      activity: {
+        kind: 'question',
+        conversationId,
+        id: request.questionRunId,
+        connectionId: request.connectionId,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      },
     };
-    running.closed = new Promise<void>((done: () => void): void => {
-      child.on('error', (): void => {
+    running.closed = observePersonalProcess(child, {
+      onEvent: (value: unknown): void => {
+        const local = this.#local.get(key);
+        if (!local || !this.#connection.isAnalysisCurrent(context)) return;
+        const next = applyQuestionCliEvent(local, value, request.questionRunId);
+        if (next.requestId && next.requestId !== local.requestId) {
+          journalWrites = journalWrites
+            .then(async (): Promise<void> => {
+              if (journal)
+                journal = await writeProcessJournal(
+                  this.#recovery,
+                  context,
+                  'pending-question-run',
+                  journal.key,
+                  {
+                    operation: 'run',
+                    runId: request.questionRunId,
+                    stateRevision: request.expectedStateRevision,
+                    requestId: next.requestId,
+                  },
+                  journal.revision,
+                );
+            })
+            .catch((): void => {
+              const latest = this.#local.get(key);
+              if (latest)
+                this.#local.set(key, { ...latest, cleanupWarning: true });
+              void this.stop();
+            });
+        }
+        this.#local.set(key, {
+          ...next,
+          preview: next.preview.replaceAll(context.token, '[인증정보 비공개]'),
+        });
+      },
+      onError: (): void => {
         const local = this.#local.get(key);
         if (local)
           this.#local.set(key, {
@@ -732,27 +847,27 @@ export class QuestionRunService {
             status: 'failed',
             errorCode: 'question_cli_unavailable',
           });
-      });
-      child.on('close', (code: number | null): void => {
+      },
+      onClose: (code: number | null): void => {
         const local = this.#local.get(key);
         if (local)
           this.#local.set(key, {
             ...local,
             status: code === 0 || running.stopping ? 'exited' : 'failed',
           });
-        void journalWrites
-          .then((): Promise<void> => execution.cleanupAuth())
-          .catch((): void => {
-            const latest = this.#local.get(key);
-            if (latest)
-              this.#local.set(key, { ...latest, cleanupWarning: true });
-          })
-          .finally((): void => {
-            if (this.#running === running) this.#running = null;
-            done();
-          });
-      });
+      },
+      cleanup: async (): Promise<void> => {
+        await journalWrites;
+        await execution.cleanupAuth();
+      },
+      onCleanupError: (): void => {
+        const latest = this.#local.get(key);
+        if (latest) this.#local.set(key, { ...latest, cleanupWarning: true });
+      },
+      onFinished: (): void => {
+        if (this.#running.get(key) === running) this.#running.delete(key);
+      },
     });
-    this.#running = running;
+    this.#running.set(key, running);
   }
 }

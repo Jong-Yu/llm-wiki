@@ -20,7 +20,9 @@ from core.modules.ontology.errors import OntologyCorruptError, OntologyValidatio
 from core.modules.reviews.contracts import (
     ReviewConflictError, ReviewCorruptError, ReviewLimitError, ReviewValidationError,
 )
+from core.modules.documents.listing import CatalogChangedError, InvalidCursorError
 from core.modules.documents.store import DocumentTooLargeError, RevisionConflictError, StorageBusyError, WikiStore
+from core.modules.documents.changes import AuthorshipCorruptError
 from core.modules.analysis_jobs.contracts import JobConflictError, JobCorruptError, JobLimitError, JobValidationError
 from core.modules.sources.validation import cleanup_failures as validate_serialized_cleanup
 from core.modules.extraction_rules.contracts import RulesetError
@@ -60,7 +62,11 @@ def _error_details(error: Exception, operation: str) -> dict:
     # isinstance로 예외의 종류를 구분해 고정 오류 코드로 바꾼다.
     # 구체적인 업무 오류를 먼저 검사해야, 부모 클래스인 ValueError 등에 먼저 묶이지 않는다.
     details = {"retryable": False}
-    if isinstance(error, ResultError):
+    if isinstance(error, CatalogChangedError):
+        details.update(code="catalog_changed", requires_refresh=True, message="Listing basis changed; restart from the first page.")
+    elif isinstance(error, InvalidCursorError):
+        details.update(code="invalid_cursor", message="Cursor does not match the selected scope.")
+    elif isinstance(error, ResultError):
         details.update(error.details)
         details.update(code=error.code, retryable=error.code == "storage_busy",
             message="The analysis result could not be accepted or confirmed; inspect its retained report and receipt before retrying.")
@@ -85,7 +91,8 @@ def _error_details(error: Exception, operation: str) -> dict:
         details.update(code="job_limit", message="A job or metadata limit was reached; existing records are preserved.")
     elif isinstance(error, JobValidationError):
         details.update(code="invalid_job", message="Check the analysis-job arguments and reported status.")
-    elif isinstance(error, FileNotFoundError) and operation in {"source_read", "analysis_job_query", "analysis_job_claim", "analysis_job_update"}:
+    elif isinstance(error, FileNotFoundError) and operation in {"source_read", "analysis_job_query", "analysis_job_claim", "analysis_job_update",
+            "analysis_job_list", "analysis_job_cancel", "analysis_job_heartbeat"}:
         details.update(code="not_found", message="The requested job is not available to this user.")
     elif isinstance(error, ConceptLimitError):
         details.update(code="concept_limit", message="A concept-query budget was exceeded; narrow the requested scope. Existing records are preserved.")
@@ -112,7 +119,7 @@ def _error_details(error: Exception, operation: str) -> dict:
     elif isinstance(error, ReviewLimitError):
         details.update(code="review_limit", message="A review or source-history limit was reached; existing records are preserved.")
     elif isinstance(error, ReviewValidationError):
-        details.update(code="invalid_review", message=str(error))
+        details.update(code="invalid_argument" if operation.startswith(("ontology_cleanup_", "ontology_relation_")) else "invalid_review", message=str(error))
     elif isinstance(error, OntologyCorruptError):
         details.update(code="ontology_corrupt", message="The derived ontology is invalid. Inspect it before regenerating.")
     elif isinstance(error, OntologyValidationError):
@@ -141,12 +148,19 @@ def _error_details(error: Exception, operation: str) -> dict:
         )
     elif isinstance(error, UnicodeError):
         details.update(code="invalid_encoding", message="Document content must be valid UTF-8 text.")
+    elif isinstance(error, AuthorshipCorruptError):
+        details.update(code="authorship_corrupt", message="The preserved authorship journal is inconsistent; inspect it before writing.")
     elif isinstance(error, (ValueError, TypeError)):
         details.update(
             code="invalid_argument",
             message="Check the arguments: use a relative .md document path without symlinks and a nonblank search query.",
         )
-    elif isinstance(error, FileNotFoundError) and (operation in CONCEPT_TOOLS or operation in CORRESPONDENCE_TOOLS or operation in (
+    elif isinstance(error, FileNotFoundError) and operation in {
+        "wiki_list", "wiki_versions", "wiki_version_read", "wiki_restore", "knowledge_context_prepare",
+        "ontology_review_queue", "wiki_history_query", "ontology_glossary_query", "ontology_relation_create", "ontology_relation_undo", "ontology_relation_request",
+    }:
+        details.update(code="not_found", message="The selected document, preserved version or request is not available in this scope.")
+    elif isinstance(error, FileNotFoundError) and (operation.startswith("ontology_cleanup_") or operation in CONCEPT_TOOLS or operation in CORRESPONDENCE_TOOLS or operation in (
         "read", "ontology_generate", "ontology_query", "ontology_connections", "ontology_context",
         "ontology_review_query", "ontology_review", "ontology_review_undo", "ontology_policy", "ontology_policy_undo", "ontology_impact",
     )):
@@ -161,12 +175,15 @@ def _error_details(error: Exception, operation: str) -> dict:
     return details
 
 
-def _invoke(store: WikiStore, operation: str, action: Callable[[], dict]) -> CallToolResult:
+def _invoke(store: WikiStore, operation: str, action: Callable[[], dict], *, response_mode="full") -> CallToolResult:
     # action은 아직 실행하지 않은 업무 함수다. 여기서 한 번 호출하고 공통 응답으로 감싼다.
     # except에서 오류를 응답으로 바꿀 뿐, 실패한 작업을 자동으로 다시 호출하지 않는다.
     try:
-        return _result({"ok": True, **action()})
-    except (OSError, ValueError, TypeError, RevisionConflictError, JobConflictError, InputConflictError) as error:
+        from core.mcp.response_views import project
+        if response_mode not in {"full", "compact"}:
+            raise ValueError("Unknown response mode")
+        return _result({"ok": True, **project(operation, action(), response_mode)})
+    except (OSError, ValueError, TypeError, RevisionConflictError, JobConflictError, InputConflictError, CatalogChangedError) as error:
         details = _error_details(error, operation)
         failures = getattr(error, "cleanup_failures", ())
         if failures:

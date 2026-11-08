@@ -1,0 +1,87 @@
+.root {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 4;
+  width: 180px;
+  max-width: calc(100% - 24px);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 8px;
+  background: var(--wiki-color-surface-canvas);
+  overflow: hidden;
+}
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
+}
+.current {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  i {
+    width: 10px;
+    height: 8px;
+    border: 1.5px solid var(--wiki-color-action-primary);
+  }
+}
+.map {
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 3;
+  touch-action: none;
+  cursor: crosshair;
+  &:focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: -3px;
+  }
+  &:active {
+    cursor: grabbing;
+  }
+}
+.edge {
+  fill: none;
+  stroke: var(--wiki-color-text-secondary);
+  stroke-width: 0.75;
+}
+.node {
+  fill: var(--wiki-color-surface-panel);
+  stroke: var(--wiki-color-text-secondary);
+  stroke-width: 1;
+}
+.topic {
+  fill: var(--wiki-color-action-surface);
+  stroke: var(--wiki-color-text-primary);
+  stroke-width: 1.5;
+}
+.selected {
+  stroke: var(--wiki-color-action-primary);
+  stroke-width: 2;
+}
+.visible {
+  fill: color-mix(in srgb, var(--wiki-color-action-primary) 8%, transparent);
+  stroke: var(--wiki-color-action-primary);
+  stroke-width: 2;
+}
+// 좁은 지도에서는 왼쪽 아래 범례와 겹치지 않는 위쪽 모서리를 사용합니다.
+@container ontology (width < 480px) {
+  .root {
+    top: 12px;
+    bottom: auto;
+    width: 160px;
+  }
+}
+// 이 폭의 상세 패널은 지도 전체를 가리므로 뒤쪽 미니맵도 함께 숨깁니다.
+@container ontology (width < 700px) {
+  .root[data-covered='true'] {
+    display: none;
+  }
+}

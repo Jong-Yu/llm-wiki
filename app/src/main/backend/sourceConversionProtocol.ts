@@ -85,6 +85,14 @@ export const conversionStoredSchema = z.object({
       tenant: z.string(),
       profile_id: z.string(),
       policy_revision: z.string(),
+      access_revision: z
+        .string()
+        .min(1)
+        .nullish()
+        .transform(
+          (value: string | null | undefined): string | undefined =>
+            value ?? undefined,
+        ),
     }),
   }),
 });

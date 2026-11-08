@@ -15,7 +15,8 @@ from hashlib import sha256
 
 def initialize(ctx):
     """연결이 소비한 바이트/탐색 수를 이어받아 중복 예산을 허용하지 않는다."""
-    ctx.connections, ctx.captured = ctx.owner.ontology._connections_snapshot_locked(ctx.document, contracts.MAX_CONNECTION_LIMIT)
+    ctx.connections, ctx.captured = ctx.owner.ontology._connections_snapshot_locked(
+        ctx.document, contracts.MAX_CONNECTION_LIMIT, capture_validated=True)
     ctx.sources, ctx.raw_graphs = ctx.captured["sources"], ctx.captured["raw_graphs"]
     ctx.remaining = [contracts.MAX_CONNECTION_BYTES - ctx.captured["captured_bytes"]]
     ctx.entry_budget = [contracts.MAX_CONNECTION_SCAN_ENTRIES - ctx.captured["scan_entries"]]
@@ -75,11 +76,12 @@ def capture_states(ctx):
         try:
             raw_review = ctx.owner.ontology._context_bytes(ctx.owner.reviews._path(name), ctx.remaining, name, "ontology", max_bytes=contracts.MAX_REVIEW_BYTES)
             state["review_revision"] = sha256(raw_review).hexdigest() if raw_review is not None else None
-            ledger = ctx.owner.reviews._ledger(raw_review, name)
+            ledger, validated = ctx.owner.reviews._captured_ledger(name, source, raw, raw_review, history_revision,
+                machine=ctx.captured.get("validated_graphs", {}).get(name))
             ctx.ledgers[name] = ledger
             if history_revision is not None and graph_available:
                 reviewed = ctx.owner.reviews._query_captured(name, source, raw, raw_review, history_revision,
-                                                        domain=ctx.domain, viewpoint=ctx.viewpoint)
+                    domain=ctx.domain, viewpoint=ctx.viewpoint, validated_capture=validated)
                 ctx.review_snapshots[name] = reviewed
                 state.update(state_revision=reviewed["state_revision"], state_available=True,
                              review_status="pending" if reviewed["pending_history"] else "available",

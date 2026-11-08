@@ -1,46 +1,28 @@
+@use 'button';
+
 .button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--wiki-space-8);
-  padding: var(--wiki-space-5) var(--wiki-space-12);
-  border: var(--wiki-border-width-default) solid transparent;
-  border-radius: var(--wiki-radius-5);
-  font: inherit;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  transition: background-color var(--wiki-motion-duration-hover);
+  @include button.base;
+}
+
+.surface {
+  @include button.surface;
 }
 
 .primary {
-  color: var(--wiki-color-button-primary-foreground);
-  background: var(--wiki-color-button-primary-background);
-  border-color: var(--wiki-color-button-primary-background);
+  @include button.primary;
 }
 
 .secondary {
   color: var(--wiki-color-text-secondary);
   background: transparent;
-  border-color: var(--wiki-color-border-default);
+  border-color: var(--wiki-color-border-control);
 }
 
 .secondary:enabled:hover {
-  background: var(--wiki-color-surface-subtle);
+  background: var(--wiki-color-surface-hover);
 }
 
-.button:focus-visible {
-  outline: var(--wiki-border-width-selected) solid
-    var(--wiki-color-action-primary);
-  outline-offset: var(--wiki-space-4);
-}
-
-.button:disabled {
-  opacity: var(--wiki-opacity-disabled);
-  cursor: not-allowed;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .button {
-    transition-duration: var(--wiki-motion-duration-reduced);
-  }
+.small {
+  min-height: var(--wiki-component-control-height-small);
+  padding-block: 5px;
 }

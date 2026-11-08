@@ -13,7 +13,8 @@ from core.modules.sources import files
 from core.modules.correspondences.schema import identifier as correspondence_id
 from core.modules.correspondences.store import CorrespondenceStore
 from core.modules.analysis_jobs.store import JobStore
-from core.modules.analysis_jobs import records, contracts as jobs_contracts
+from core.modules.reviews.values import actor_basis
+from core.modules.analysis_jobs import contracts as jobs_contracts
 from .aggregation import _capture, _queue_items, _history_items, _page, MAX_AGGREGATE_BYTES
 
 MAX_TENANT_RESOURCES = 1000
@@ -77,11 +78,32 @@ def tenant_query(store, actor, *, kind, states=None, limit=20, cursor=None):
         skipped.append({"kind": "document", "reference": "tenant", "code": "resource_scan_limit"})
     correspondences = CorrespondenceStore(store, actor)
     with files.coordination(store):
-        correspondence_ids = _directory_refs(store, correspondences.correspondence_dir, "correspondence", skipped)
+        correspondence_ids = sorted({cid for directory in correspondences.correspondence_dirs
+            for cid in _directory_refs(store, directory, "correspondence", skipped)})
+        if len(correspondence_ids) > MAX_TENANT_RESOURCES:
+            skipped.append({"kind": "correspondence", "reference": "tenant", "code": "resource_scan_limit"})
+            correspondence_ids = correspondence_ids[:MAX_TENANT_RESOURCES]
+    own_jobs = []
+    if kind == "history":
         jobs = JobStore(store)
-        # 서버 인증으로 받은 주체의 index만 열어 다른 주체의 개인 작업을 노출하지 않는다.
-        own_jobs = _directory_refs(store, jobs.jobs_dir / "_owners" / records.owner_key(actor["tenant"], actor["user_id"]),
-            "job", skipped) if kind == "history" else []
+        position = None
+        try:
+            while True:
+                page = jobs.list_history_ids(tenant=actor["tenant"], user_id=actor["user_id"],
+                    scope_key=canonical_json_hash(actor_basis(actor)), limit=50, cursor=position)
+                own_jobs.extend(item["job_id"] for item in page["items"])
+                skipped.extend({"kind": "job", "reference": "tenant", **item} for item in page["skipped"])
+                position = page["next_cursor"]
+                if page.get("truncated") or len(own_jobs) > MAX_TENANT_RESOURCES or (position and len(own_jobs) >= MAX_TENANT_RESOURCES):
+                    skipped.append({"kind": "job", "reference": "tenant", "code": "resource_scan_limit"})
+                    own_jobs = own_jobs[:MAX_TENANT_RESOURCES]
+                    break
+                if position is None:
+                    break
+        except StorageBusyError:
+            raise
+        except (OSError, ValueError, CatalogChangedError):
+            skipped.append({"kind": "job", "reference": "tenant", "code": "resource_scan_failed"})
     discovered = {"documents": documents, "correspondences": correspondence_ids, "own_jobs": own_jobs}
     resources, items, used = [], [], 0
     pending = [("document", value) for value in documents] + [("correspondence", value) for value in correspondence_ids]

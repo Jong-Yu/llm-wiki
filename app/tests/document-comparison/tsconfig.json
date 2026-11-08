@@ -1,0 +1,9 @@
+{
+  "extends": "../../config/typescript/tsconfig.tools.json",
+  "include": [
+    "verify.ts",
+    "registration-fixture.tsx",
+    "../../src/renderer/env.d.ts",
+    "../../src/main/env.d.ts"
+  ]
+}

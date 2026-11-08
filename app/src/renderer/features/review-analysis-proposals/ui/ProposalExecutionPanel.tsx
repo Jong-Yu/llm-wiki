@@ -2,8 +2,13 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX, ChangeEvent } from 'react';
 import { Button } from '@renderer/shared/ui/Button';
 import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
-import type { ProposalExecutionSession } from '../model/ProposalExecutionSession';
+import type {
+  ProposalExecutionSession,
+  ProposalExecutionState,
+} from '../model/ProposalExecutionSession';
+import { parseObject } from '../model/analysisProposal.schema';
 import type { ProposalRecord } from '../model/analysisProposal.schema';
+import { ProposalGraphDetails } from './ProposalGraphDetails';
 import styles from './ReviewAnalysisProposals.module.scss';
 
 type ProposalExecutionPanelProps = {
@@ -20,7 +25,7 @@ const statusLabels = {
   failed: '개인 실행 실패',
 };
 const phaseLabels: Record<string, string> = {
-  starting: '고정 입력 준비',
+  starting: '입력 준비',
   claimed: '실행 사용권 확인',
   extracting: '새 후보 생성',
   submitting_candidate: '추출 결과 제출',
@@ -38,7 +43,21 @@ const phaseLabels: Record<string, string> = {
   not_started: '서버 기록 조회',
   restored_receipt_check: '복원된 실행 기록 확인',
 };
-/** 고정 입력의 명시 실행과 실제 후보 영수증·부분 실패를 별도 표시합니다. */
+const serverStateLabels: Record<string, string> = {
+  pending_reconcile: '실행 접수 확인 필요',
+  ready: '실행 접수 확인됨',
+  candidate_ready: '새 후보 저장 확인됨',
+  cancelled: '실행 취소됨',
+  superseded: '다른 실행이나 후보로 변경됨',
+  basis_changed: '원문이나 입력 기준이 변경됨',
+};
+/** 확인된 서버 상태만 사용자 문구로 표시하고 알 수 없는 상태는 추정하지 않습니다. */
+function serverState(value: unknown): string {
+  return typeof value === 'string'
+    ? (serverStateLabels[value] ?? '서버 기록 확인 필요')
+    : '서버 기록 미확인';
+}
+/** 입력의 명시 실행과 실제 후보 확인 기록·부분 실패를 별도 표시합니다. */
 export function ProposalExecutionPanel({
   execution,
   record,
@@ -61,34 +80,55 @@ export function ProposalExecutionPanel({
     <section className={styles.form} aria-label="개인 AI 재추출">
       {state.previous.length > 0 && (
         <details>
-          <summary>보존한 이전 실행 요청·영수증</summary>
-          <pre>{JSON.stringify(state.previous, null, 2)}</pre>
+          <summary>이전 실행 · {state.previous.length}건</summary>
+          <ol>
+            {state.previous.map(
+              (
+                previous: ProposalExecutionState['previous'][number],
+                index: number,
+              ): JSX.Element => (
+                <li key={index}>
+                  {previous.detail
+                    ? statusLabels[previous.detail.local.status]
+                    : '실행 결과 미확인'}{' '}
+                  · {serverState(previous.detail?.server?.state)}
+                  {previous.detail?.local.cleanupWarning && (
+                    <p>임시 파일 정리 경고가 있습니다.</p>
+                  )}
+                </li>
+              ),
+            )}
+          </ol>
         </details>
       )}
-      <h2>개인 AI로 새 후보 만들기</h2>
-      <p>
-        고정한 전체 원문·맥락·규약과 현재 후보를 기준으로 실행합니다. 결과는
-        후보로 보관하며 적용과 사람 검토는 별도입니다.
-      </p>
-      <label className={styles.check}>
-        <input
-          type="checkbox"
-          checked={semanticCheck}
-          disabled={disabled || !!state.request}
-          onChange={(event: ChangeEvent<HTMLInputElement>): void =>
-            setSemanticCheck(event.target.checked)
-          }
-        />
-        <span>새 후보의 별도 AI 의미 검사도 실행</span>
-      </label>
-      <Button
-        disabled={disabled || state.busy || !!state.request}
-        onClick={(): void => {
-          void execution.start(record, semanticCheck);
-        }}
-      >
-        명시 AI 재추출 실행
-      </Button>
+      <details className={styles.executionPrepare} open={!record.submission}>
+        <summary>개인 AI로 새 후보 만들기</summary>
+        <div className={styles.form}>
+          <p>
+            전체 원문·맥락·규약과 현재 후보를 기준으로 실행합니다. 결과는 후보로
+            보관하며 적용과 사람 검토는 별도입니다.
+          </p>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={semanticCheck}
+              disabled={disabled || !!state.request}
+              onChange={(event: ChangeEvent<HTMLInputElement>): void =>
+                setSemanticCheck(event.target.checked)
+              }
+            />
+            <span>새 후보의 별도 AI 의미 검사도 실행</span>
+          </label>
+          <Button
+            disabled={disabled || state.busy || !!state.request}
+            onClick={(): void => {
+              void execution.start(record, semanticCheck);
+            }}
+          >
+            명시 AI 재추출 실행
+          </Button>
+        </div>
+      </details>
       {state.error && (
         <StatusNotice tone="warning" title="실행 확인 필요">
           {state.error}
@@ -104,9 +144,6 @@ export function ProposalExecutionPanel({
       )}
       {state.request && (
         <>
-          <p>
-            실행 요청 <code>{state.request.requestId}</code>
-          </p>
           <p role="status">
             {state.detail
               ? statusLabels[state.detail.local.status]
@@ -117,7 +154,10 @@ export function ProposalExecutionPanel({
               : '같은 실행 기록을 조회해 주세요.'}
           </p>
           {state.detail?.local.errorCode && (
-            <p>실행 오류: {state.detail.local.errorCode}</p>
+            <p>
+              AI 실행을 마치지 못했습니다. 연결 상태를 확인하고 같은 실행 기록을
+              조회해 주세요.
+            </p>
           )}
           {state.detail?.local.cleanupWarning && (
             <p>
@@ -132,7 +172,7 @@ export function ProposalExecutionPanel({
               void execution.read();
             }}
           >
-            같은 실행·후보 영수증 조회
+            같은 실행·후보 확인 기록 조회
           </Button>
           <Button
             variant="secondary"
@@ -149,14 +189,21 @@ export function ProposalExecutionPanel({
                 생성 중 미저장 미리보기
                 {state.detail.local.previewTruncated ? ' · 일부 표시' : ''}
               </summary>
-              <pre>{state.detail.local.preview}</pre>
+              {((): JSX.Element => {
+                const graph = parseObject(state.detail.local.preview);
+                return graph ? (
+                  <ProposalGraphDetails graph={graph} />
+                ) : (
+                  <p>
+                    새 후보를 작성하고 있습니다. 저장 확인 후 전체 내용을 비교할
+                    수 있습니다.
+                  </p>
+                );
+              })()}
             </details>
           )}
           {state.detail?.server && (
-            <details>
-              <summary>실제 실행·후보 저장 기록</summary>
-              <pre>{JSON.stringify(state.detail.server, null, 2)}</pre>
-            </details>
+            <p>서버 확인: {serverState(state.detail.server.state)}</p>
           )}
           <p>
             프로세스 종료만으로 후보 저장을 확정하지 않습니다. 의미 검사 실패

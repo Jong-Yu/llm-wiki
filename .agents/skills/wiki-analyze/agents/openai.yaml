@@ -1,4 +1,4 @@
 interface:
   display_name: "Wiki 분석 실행"
-  short_description: "등록된 분석 작업과 온톨로지 재추출을 입력·영수증에 연결"
+  short_description: "등록 원본의 분석 준비·실행과 온톨로지 초안 검사·재추출"
   default_prompt: "$wiki-analyze를 사용해 요청한 대상의 분석 입력과 권한을 확인하고 위키·온톨로지 결과를 처리해줘."

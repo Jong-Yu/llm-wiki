@@ -44,10 +44,23 @@ export function createRecoverySlot<T>(
   key: string,
   decode: (value: unknown) => T,
 ): RecoverySlot<T> {
-  const { connectionId, userId, tenant, profileId, policyRevision } = session;
+  const {
+    connectionId,
+    userId,
+    tenant,
+    profileId,
+    accessRevision,
+    policyRevision,
+  } = session;
   const scope = {
     connectionId,
-    expectedScope: { userId, tenant, profileId, policyRevision },
+    expectedScope: {
+      userId,
+      tenant,
+      profileId,
+      accessRevision,
+      policyRevision,
+    },
     kind,
   };
   let revision: string | null | undefined;

@@ -16,6 +16,8 @@ const savedConnectionSchema = z
       .regex(/^[\x21-\x7e]+$/),
     userId: z.string().min(1).max(4096),
     policyRevision: z.string().min(1).max(4096),
+    accessRevision: z.string().min(1).max(4096).optional(),
+    displayName: z.string().min(1).max(160).optional(),
     selection: z
       .object({
         tenant: z.string().min(1).max(4096),

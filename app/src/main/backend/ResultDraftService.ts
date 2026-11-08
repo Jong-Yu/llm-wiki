@@ -1,3 +1,5 @@
+import { matchesExpectedScope } from './readApi';
+import { sameAccessRevision } from '@contracts/connection.contract';
 import { createHash } from 'node:crypto';
 import type { RecoveryService } from './RecoveryService';
 import { z } from 'zod';
@@ -29,6 +31,14 @@ const accessSchema = z.object({
   domain: z.string().nullable(),
   viewpoint: z.string().nullable(),
   policy_revision: z.string(),
+  access_revision: z
+    .string()
+    .min(1)
+    .nullish()
+    .transform(
+      (value: string | null | undefined): string | undefined =>
+        value ?? undefined,
+    ),
 });
 /** 한정된 결과 초안 업무를 고정 URL과 서버 권한으로 대응시킵니다. */
 export function resultDraftRoute(request: ResultDraftRequest): Route {
@@ -165,15 +175,10 @@ export class ResultDraftService {
     );
     if ('ok' in context) return context;
     const expected = request.expectedScope;
-    if (
-      expected.userId !== context.active.userId ||
-      expected.tenant !== context.selection.tenant ||
-      expected.profileId !== context.selection.profile ||
-      expected.policyRevision !== context.active.policyRevision
-    )
+    if (!matchesExpectedScope(expected, context))
       return failure(
         'scope_changed',
-        '편집 당시 사용자·작업 공간·관점을 다시 확인해 주세요.',
+        '편집 당시 사용자와 작업 공간을 다시 확인해 주세요.',
       );
     const workspace = context.active.workspaces.find(
       (item: (typeof context.active.workspaces)[number]): boolean =>
@@ -276,7 +281,13 @@ export class ResultDraftService {
         access.user_id !== expected.userId ||
         access.tenant !== expected.tenant ||
         access.profile_id !== expected.profileId ||
-        access.policy_revision !== expected.policyRevision ||
+        !sameAccessRevision(
+          {
+            policyRevision: access.policy_revision,
+            accessRevision: access.access_revision,
+          },
+          expected,
+        ) ||
         access.domain !== profile.domain ||
         access.viewpoint !== profile.viewpoint
       ) {

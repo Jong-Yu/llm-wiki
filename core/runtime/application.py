@@ -15,15 +15,23 @@ from core.api.operations import install_body_schemas
 from core.mcp.tenant import create_tenant_server
 from core.modules.access.policy import AccessPolicy
 from core.runtime.http_security import HTTP_HOST, HttpAccessMiddleware, transport_security_settings
+from core.runtime.http_metrics import HttpMetricsMiddleware
+from core.runtime.ontology_index import OntologyIndexPreparer
 
 
-def create_application(policy: AccessPolicy, *, rulesets=None) -> FastAPI:
+def create_application(policy: AccessPolicy, *, rulesets=None, auth=None, credential_key_path=None) -> FastAPI:
     """import 시 저장소를 열지 않으며 기동 시 현재 정책을 검증한다."""
     server = create_tenant_server(policy, rulesets=rulesets)
+    # 정책 검증 이후에만 키·암호화 자격 증명 준비를 담당 서비스에 위임한다.
+    # 없는 자료 루트나 손상된 정책을 빈 서버로 대체하지 않는다.
+    if auth is None:
+        from core.modules.access.auth import initialize_auth
+        auth = initialize_auth(policy, key_path=credential_key_path)
     mcp_app = server.streamable_http_app(
         json_response=True, stateless_http=True, host=HTTP_HOST,
         max_request_body_size=8 * 1024 * 1024, transport_security=transport_security_settings())
     mcp_app.router.redirect_slashes = False
+    index_preparer = OntologyIndexPreparer(policy) if policy.tracked_reads else None
 
     # asynccontextmanager의 yield 앞은 기동 준비, 뒤는 종료 정리 구간이다. MCP 자원도 이 부모 앱이 관리한다.
     @asynccontextmanager
@@ -32,12 +40,22 @@ def create_application(policy: AccessPolicy, *, rulesets=None) -> FastAPI:
         await to_thread.run_sync(policy.validate)
         # Mount된 앱의 lifespan은 자동 실행되지 않는다. 이 부모가 정확히 한 번 소유한다.
         async with mcp_app.router.lifespan_context(mcp_app):
-            yield
+            if index_preparer is not None:
+                index_preparer.start()
+            try:
+                if index_preparer is not None:
+                    await to_thread.run_sync(index_preparer.wait_initial)
+                yield
+            finally:
+                if index_preparer is not None:
+                    await to_thread.run_sync(index_preparer.close)
 
     app = FastAPI(title="LLM Wiki API", version="1.1.0", lifespan=lifespan,
                   docs_url=None, redoc_url=None, redirect_slashes=False)
     app.state.policy = policy
+    app.state.auth = auth
     app.state.rulesets = rulesets
+    app.state.ontology_index_preparer = index_preparer
     # multipart spool·직접 JSON 수신의 동시 자원 사용도 단일 worker에서 제한한다.
     app.state.upload_limiter = CapacityLimiter(4)
     app.state.mcp_app = mcp_app
@@ -60,4 +78,6 @@ def create_application(policy: AccessPolicy, *, rulesets=None) -> FastAPI:
     app.mount("/", mcp_app)
     app.add_middleware(ReadApiLimits)
     app.add_middleware(HttpAccessMiddleware, policy=policy, error_response=error_response)
+    app.add_middleware(HttpMetricsMiddleware,
+                       route_templates=lambda: (*app.openapi()["paths"], "/api/{path:path}", "/mcp"))
     return app

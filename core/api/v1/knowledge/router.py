@@ -15,11 +15,17 @@ from core.modules.knowledge.concepts import ConceptStore
 from core.modules.knowledge.impact import ImpactStore
 from core.modules.knowledge.aggregation import review_queue, history_query, prepare_question
 from core.modules.reviews.store import ReviewStore
+from core.modules.sources.store import SourceStore
 from .schemas import (
     DocumentKnowledge, KnowledgeQuery, SearchQuery, ConnectionsQuery,
     ContextRequest, FindRequest, ConceptRequest, ImpactRequest,
     ReviewQueueRequest, HistoryRequest, QuestionContextRequest,
 )
+from .exploration_schemas import (
+    OntologySearchRequest, OntologyNeighborsRequest,
+    OntologySearchPage, OntologyNeighborPage,
+)
+from .glossary_schemas import GlossaryRequest, GlossaryCard
 
 router = APIRouter(tags=["knowledge"])
 
@@ -35,7 +41,9 @@ def knowledge(query: Annotated[KnowledgeQuery, Query()], scope: Annotated[Access
 def search(query: Annotated[SearchQuery, Query()], scope: Annotated[AccessScope, Depends(authorized)]):
     """허용 저장소에서 원문 문자열을 찾고 읽지 못한 항목·탐색 한도를 그대로 알린다."""
     value = search_documents(scope.store, query.query, query.limit, read_error_code=_error_code)
-    return envelope({**value, "access": access_value(scope)})
+    # 목록에는 아직 위키로 변환되지 않은 등록 원본도 보이므로 제목 검색 결과를 따로 덧붙인다.
+    sources = SourceStore(scope.store).search_titles(query.query, query.limit)
+    return envelope({**value, "sources": sources, "access": access_value(scope)})
 
 
 @router.get("/documents/ontology", response_model=Envelope[dict[str, JsonValue]])
@@ -79,6 +87,27 @@ async def concept(request: Request, tenant: str, token: Annotated[str, Depends(c
     return await json_operation(request, tenant, token, ConceptRequest, "read", lambda scope, body: _concept(scope, body, "query"))
 
 
+@router.post("/ontology/search", response_model=Envelope[OntologySearchPage], openapi_extra=body_schema(OntologySearchRequest))
+async def ontology_search(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    """현재 허용 공간의 검색·최근 항목을 전체 문서 지식과 구분한 페이지로 읽는다."""
+    return await json_operation(request, tenant, token, OntologySearchRequest, "read", lambda scope, body:
+        ConceptStore(scope.store, actor=access_value(scope)).explore_search(**body.model_dump(exclude={"profile"})))
+
+
+@router.post("/ontology/neighbors", response_model=Envelope[OntologyNeighborPage], openapi_extra=body_schema(OntologyNeighborsRequest))
+async def ontology_neighbors(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    """선택 판본의 직접 관계만 페이지로 읽으며 속성·상세 인용은 전체 조회에 남긴다."""
+    return await json_operation(request, tenant, token, OntologyNeighborsRequest, "read", lambda scope, body:
+        ConceptStore(scope.store, actor=access_value(scope)).explore_neighbors(**body.model_dump(exclude={"profile"})))
+
+
+@router.post("/ontology/glossary", response_model=Envelope[GlossaryCard], openapi_extra=body_schema(GlossaryRequest))
+async def ontology_glossary(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    """선택한 현재 개체의 원문 문맥·속성·관계를 저장 없이 묶는다."""
+    return await json_operation(request, tenant, token, GlossaryRequest, "read", lambda scope, body:
+        ConceptStore(scope.store, actor=access_value(scope)).glossary(**body.model_dump(exclude={"profile"})))
+
+
 @router.post("/documents/impact/query", response_model=Envelope[dict[str, JsonValue]], openapi_extra=body_schema(ImpactRequest))
 async def impact(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """기준 네 판본과 현재 직접 영향을 비교한다. 저장·재추출은 실행하지 않는다."""
@@ -105,5 +134,11 @@ async def history(request: Request, tenant: str, token: Annotated[str, Depends(c
 @router.post("/question-context/prepare", response_model=Envelope[dict[str, JsonValue]], openapi_extra=body_schema(QuestionContextRequest))
 async def question_context(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """질문 근거의 현재 판본을 고정해 반환한다. AI 실행·영구 snapshot 저장은 하지 않는다."""
-    return await json_operation(request, tenant, token, QuestionContextRequest, "read", lambda scope, body:
-        prepare_question(scope.store, access_value(scope), **body.model_dump(exclude={"profile"})))
+    def operation(scope, body):
+        basis = prepare_question(scope.store, access_value(scope), **body.model_dump(exclude={"profile", "mode"}))
+        if body.mode == "on_demand":
+            from core.modules.personal.question_basis import describe_basis
+            return {**describe_basis(basis), "kind": "question_context", "mode": "on_demand",
+                    "read_only": True, "persisted": False, "ai_executed": False}
+        return basis
+    return await json_operation(request, tenant, token, QuestionContextRequest, "read", operation)

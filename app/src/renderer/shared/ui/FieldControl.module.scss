@@ -2,13 +2,16 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  padding: var(--wiki-space-8) var(--wiki-space-12);
+  min-height: var(--wiki-component-control-height);
+  padding: 7px 12px;
   border: var(--wiki-border-width-default) solid
-    var(--wiki-color-border-default);
-  border-radius: var(--wiki-radius-5);
+    var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
   background: var(--wiki-color-surface-canvas);
   color: var(--wiki-color-text-primary);
   font: inherit;
+  font-size: var(--wiki-font-size-13);
+  line-height: var(--wiki-component-control-line-height);
   -webkit-app-region: no-drag;
 }
 
@@ -29,9 +32,4 @@
 .control:disabled {
   opacity: var(--wiki-opacity-disabled);
   cursor: not-allowed;
-}
-
-.textarea {
-  resize: vertical;
-  overflow-wrap: anywhere;
 }
