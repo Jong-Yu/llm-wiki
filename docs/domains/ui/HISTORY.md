@@ -7,7 +7,8 @@
 - `useOntologyMap.ts`에서 문서 범위 전환 중 이전 수정의 늦은 `refreshDocument`가 현재 범위 읽기를 무효화하면서 `loadedPath`를 갱신하지 않아 화면이 비는 경쟁을 수정했습니다. 수정 후에는 현재 범위의 첫 페이지를 다시 읽고, 요청 문서가 첫 페이지 밖이면 해당 문서를 합치며 다른 문서에서 시작된 오래된 응답이 현재 범위 읽기를 덮지 않게 합니다. 위 최종 검토 18개·Clean Up 14개는 이 제품 수정 이후 통과한 결과입니다.
 - `ontology-exploration/run.mjs`는 자동 단언 실행기가 아닌 수동 웹 미리보기였습니다. 임시 하네스를 정상 종료했으며 단언 0개로 자동 검사 통과나 남은 자동 검사 항목에 포함하지 않습니다. 시작 확인은 지도 탐색 동작 전체의 검증이 아닙니다.
 - 최종 앱 검사(5종 TypeScript·Oxc·441파일 포맷·194토큰×3모드)와 electron-vite 제품 빌드가 통과했습니다. [앱 검사 로그](../../../.local/releases/v0.1.0-20261109/release-final-check-0.log)·[제품 빌드 로그](../../../.local/releases/v0.1.0-20261109/release-final-check-1.log)를 보존하고 Mac/Windows 패키지를 다시 생성해 양쪽0.1.0·제품 출력 10파일 일치를 확인했습니다. 실제 설치 파일 추출·Mac ZIP/DMG·개인 실행기 소스까지 대조했으며 상세 수치와 배포 파일 확인은 [플랫폼 기록](../platform/HISTORY.md#2026-11-09--010-공개-준비와-전체-python-회귀)을 따릅니다.
-- 현재는 0.1.0 공개 준비 상태이며 GitHub 공개는 아직 완료하지 않았습니다. 격리 fixture/API 검사는 실제 외부 AI 호출·운영 자료 변경·Windows 네이티브 설치/OCR/보호 저장 전체의 검증이 아니며, macOS/Windows 미서명 배포와 Windows 실기기 미검증 범위는 [변경 기록](../../../CHANGELOG.md)에 명시했습니다.
+- 격리 fixture/API 검사는 실제 외부 AI 호출·운영 자료 변경·Windows 네이티브 설치/OCR/보호 저장 전체의 검증이 아니며, macOS/Windows 미서명 배포와 Windows 실기기 미검증 범위는 [변경 기록](../../../CHANGELOG.md)에 명시했습니다.
+- 2026-11-09 02:41:50 KST에 [0.1.0](https://github.com/Jong-Yu/llm-wiki/releases/tag/v0.1.0)을 GitHub 최신 정식 릴리스로 공개했습니다. 11파일의 원격 SHA-256/크기와 익명 메타파일 다운로드를 확인했으며 상세 결과는 [플랫폼 공개 기록](../platform/HISTORY.md#2026-11-09--010-공개-준비와-전체-python-회귀)·[공개 영수증](../../../.local/releases/v0.1.0-20261109/github-published.json)을 따릅니다. 이 공개는 기존 설치 앱·운영 서버·전역 설정을 변경하지 않았고, 제품 태그를 고정한 뒤 후속 문서 기록만 갱신합니다.
 
 ## 2026-11-08 — 새 채팅의 서버 색인 준비 연결
 
