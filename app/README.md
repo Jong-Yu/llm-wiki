@@ -141,7 +141,7 @@ node app/scripts/build-design-tokens.mjs --check
 
 **연결 설정 → AI 실행**에서 Codex 또는 Claude Code를 선택하고 **실행 준비 확인**을 누릅니다. 같은 PC·OS 사용자로 CLI에 로그인했다면 기본 설치 위치의 실행 파일은 앱이 자동으로 찾으므로 경로를 직접 알 필요가 없습니다. Claude는 터미널/Windows PowerShell의 어느 폴더에서든 `claude auth login`으로 로그인합니다. **설치된 CLI 다시 찾기**는 설치 위치를 재검색하며, 검색 성공만으로 로그인 완료를 표시하지 않습니다. 자동 탐지가 안 되거나 다른 실행 파일을 쓸 때 **고급 설정 · 실행 환경 경로**에서 직접 선택합니다. 기존 **작업 공간 → 개인 실행 환경**에서도 시작·진단 시 자동 탐지가 적용됩니다. 진단은 기존 `tools.runtime_doctor`와 `tools.source_conversion_cli --diagnose --ocr-language kor+eng`를 실행하며 모델 호출·로그인·설치를 자동 시작하지 않습니다. 선택한 CLI의 로그인 정보 존재와 실제 모델 호출 가능성을 구별하며 OCR 실행 파일·언어 준비와 인식 정확도도 구별합니다.
 
-설정 화면은 현재 실행 제공자와 다음 시작에 사용할 선택을 함께 표시합니다. 설정 저장은 다음 앱 시작에 적용되며 분석·질문·추출안에 공통으로 사용합니다. 기존 v1 설정은 Codex로 읽고 다음 명시 저장에서 v2로 전환합니다. 진행 중 실행에는 기존 설정을 유지합니다. 설정 충돌·파일 손상 때는 기존 파일을 보존합니다. 설치·고정 버전 업데이트 명령은 화면과 [프로젝트 실행 안내](../README.md)에 있습니다. 앱 업데이트는 제공받은 새 설치 파일로 교체하며 자동 다운로드 채널은 구성하지 않았습니다.
+설정 화면은 현재 실행 제공자와 다음 시작에 사용할 선택을 함께 표시합니다. 설정 저장은 다음 앱 시작에 적용되며 분석·질문·추출안에 공통으로 사용합니다. 기존 v1 설정은 Codex로 읽고 다음 명시 저장에서 v2로 전환합니다. 진행 중 실행에는 기존 설정을 유지합니다. 설정 충돌·파일 손상 때는 기존 파일을 보존합니다. 설치·고정 버전 업데이트 명령은 화면과 [프로젝트 실행 안내](../README.md)에 있습니다. 설치 앱의 업데이트 채널과 배포 명령은 아래 자동 업데이트 절을 따릅니다.
 
 앱 시작과 진단에서 기본 명령 `codex`/`claude`에 한해 설치 위치를 탐지합니다. Claude는 사용자 홈의 `.local/bin`을 먼저 확인하고 절대 PATH 디렉터리, macOS Homebrew 또는 Windows 사용자 npm/WinGet 위치를 확인합니다. Windows의 native `claude.exe`도 PATH 등록 전부터 찾으며 Codex의 기존 Mac 번들 우선순위는 유지합니다. 파일·POSIX 실행 권한을 검사하고 빈/상대 PATH는 제외합니다. 직접 고른 경로는 자동으로 바꾸지 않으며 명시 재검색이 성공했을 때만 초안의 경로를 교체합니다. 재검색 실패 시 기존 경로를 유지하며 저장·다음 앱 시작 적용 규칙도 동일합니다.
 
@@ -157,7 +157,7 @@ npm run package:runtime       # Python 개인 실행기 소스 ZIP + SHA256
 npm run package               # 현재 OS: macOS DMG/ZIP, Windows NSIS, Linux tar.gz
 ```
 
-`config/electron-builder.json`은 기본 미서명 구성이며 게시하지 않습니다. 개발 실행 파일은 먼저 `npm run electron:install`로 준비합니다. 패키징은 지정한 OS·CPU용 공식 Electron을 받아 사용하며 개발 PC의 Electron 폴더를 다른 OS용으로 재사용하지 않습니다. 최초 대상 빌드에는 Electron과 electron-builder 도구의 공식 배포 서버에 접근해야 합니다. 산출물은 `app/release/`에 둡니다. DMG의 앱을 Applications에 복사한 뒤 실행합니다. 미서명 앱의 Gatekeeper 허용은 사용자가 출처를 확인한 뒤 OS에서 결정합니다. 검증 과정에서 격리 속성이나 Gatekeeper를 자동 해제하지 않습니다. Windows는 NSIS 설치 파일을 실행해 현재 사용자 계정으로 설치하며, 앱 자료 삭제 옵션은 사용하지 않습니다.
+`config/electron-builder.json`은 기본 미서명 구성입니다. 위 패키징 명령은 게시하지 않으며, 공개 배포는 아래 `npm run release`를 사용합니다. 개발 실행 파일은 먼저 `npm run electron:install`로 준비합니다. 패키징은 지정한 OS·CPU용 공식 Electron을 받아 사용하며 개발 PC의 Electron 폴더를 다른 OS용으로 재사용하지 않습니다. 최초 대상 빌드에는 Electron과 electron-builder 도구의 공식 배포 서버에 접근해야 합니다. 산출물은 `app/release/`에 둡니다. DMG의 앱을 Applications에 복사한 뒤 실행합니다. 미서명 앱의 Gatekeeper 허용은 사용자가 출처를 확인한 뒤 OS에서 결정합니다. 검증 과정에서 격리 속성이나 Gatekeeper를 자동 해제하지 않습니다. Windows는 NSIS 설치 파일을 실행해 현재 사용자 계정으로 설치하며, 앱 자료 삭제 옵션은 사용하지 않습니다.
 
 Windows는 **설치 EXE 하나만 옮깁니다.** 설치 후 서버 주소·인증 정보를 설정하고 사용할 AI CLI를 직접 설치·로그인합니다. 개인 실행기 ZIP이나 시스템 Python·Tesseract 설치는 필요하지 않습니다. `resources/personal-runtime`에 앱 전용 Python 3.13.17, 고정 패키지 40개, Tesseract 5.5.3과 한국어·영어 데이터를 둡니다. 기존에 저장한 외부 실행 경로가 있으면 그 설정을 유지합니다. 기존 설정을 계속 사용하는 PC에는 포함된 실행 환경으로 자동 전환하지 않습니다.
 
@@ -174,6 +174,21 @@ Word·PDF·Excel·PowerPoint 내보내기는 앱에 포함된 라이브러리(`m
 서명과 공증은 기존 Developer ID identity 및 기존 키체인 공증 profile을 준비한 환경에서만 실행합니다. `CSC_NAME`, `APPLE_KEYCHAIN`, `APPLE_KEYCHAIN_PROFILE`을 해당 환경에 지정하고 `npm run package:mac:signed`를 사용합니다. `config/electron-builder.signed.cjs`는 누락된 자격에서 중단하고 `forceCodeSigning`, hardened runtime, 공증을 활성화합니다. 산출물은 `release/signed/`이며 자동 게시하지 않습니다. 비밀번호·API 키를 코드나 문서에 넣지 않습니다.
 
 현재 Mac에서 사용 가능한 코드 서명 identity는 0개이며 공증 환경도 제공되지 않았습니다. 실제 DMG·ZIP 생성/시작 결과는 UI 검증 기록 (정리로 삭제된 참고 자료)에 기록합니다. Windows NSIS 교차 빌드는 실제 Windows 설치·보호 저장·취소 통과를 뜻하지 않습니다. Windows의 개인 실행은 현재 PC의 보호 파일·프로세스 트리 진단에 성공해야 진행할 수 있으며, 별도의 실제 Windows 릴리스 검증은 아직 완료하지 않았습니다.
+
+### 자동 업데이트와 릴리스
+
+앱 배포 전용 저장소는 [Jong-Yu/llm-wiki-releases](https://github.com/Jong-Yu/llm-wiki-releases/releases)입니다. `config/electron-builder.json`의 `publish` 설정을 릴리스 사전 확인·게시와 설치 앱의 `app-update.yml`에서 함께 사용합니다. 소스 저장소의 릴리스를 앱 다운로드 채널로 사용하지 않습니다.
+
+변경을 커밋한 뒤 `app/`에서 실행합니다. 현재 버전으로 게시할 때는 버전 인자를 생략합니다. 플랫폼을 지정하지 않으면 현재 OS만 빌드합니다.
+
+```sh
+npm run release -- --mac --win        # 현재 0.1.0: 양 플랫폼 빌드·게시
+npm run release -- patch --mac --win  # 다음 패치 버전으로 올려 빌드·게시
+```
+
+명령은 앱 검사·빌드 후 설치 파일과 `latest.yml`·`latest-mac.yml`·블록맵을 같은 전용 저장소 릴리스에 게시합니다. 인증은 `GH_TOKEN`, 저장소 루트의 무시된 `.github_token`, 기존 `gh` 로그인 순으로 사용하며 게시 대상의 쓰기 권한이 필요합니다. 이미 존재하는 같은 버전의 릴리스에는 다시 게시하지 않습니다. `--dry-run`은 빌드하되 업로드하지 않습니다.
+
+설치 앱은 시작할 때와 4시간마다 더 높은 버전을 확인해 자동으로 내려받고 재시작 설치를 안내합니다. `0.1.0`에서 같은 `0.1.0`은 업데이트로 인식하지 않습니다. 이전 주소를 내장한 설치본은 올바른 채널을 내장한 설치 파일로 한 번 수동 교체합니다. macOS 자동 설치에는 서명된 앱이 필요하며 현재 미서명 배포에서는 수동 설치를 사용합니다. 서명·공증 환경은 위 서명 절을 따릅니다. 실제 Windows의 업데이트 설치 성공은 별도 실기기 검증 대상입니다.
 
 ### 수동 업데이트
 

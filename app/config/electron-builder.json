@@ -10,7 +10,7 @@
   "publish": {
     "provider": "github",
     "owner": "Jong-Yu",
-    "repo": "llm-wiki",
+    "repo": "llm-wiki-releases",
     "releaseType": "release"
   },
   "mac": {
