@@ -1,5 +1,11 @@
 # 실행 환경 작업 기록
 
+## 2026-11-09 — release 폴더의 최종 배포 파일만 정리
+
+- 사용자 재확인에 따라 `app/release/`에 `0.1.0/` 폴더 하나만 남기고 정식 배포 파일10개를 그 안으로 이동했습니다. 모든 SHA-256은 공개 릴리스 검증 당시 값과 같습니다. 현재 패키지의 압축 해제 디렉터리와 Windows 의존성 캐시3개는 제거했습니다.
+- 이전 검증 기록13파일은 삭제하지 않고 `.local/releases/20261109-cleanup/retained-records/`로 원래 하위 구조와 함께 이동해 해시 일치를 확인했습니다. 이 문서의 해당 검증 링크4개도 새 보관 경로로 갱신했습니다. 이전 정리에서 임시 앱·캐시·기록 폴더를 남겨 release가 복잡하게 보이던 점을 바로잡았습니다.
+- [명시 이동/정리 목록](../../../.local/releases/20261109-cleanup/DIRECTORY-CLEANUP-PLAN.json)·[최종 확인](../../../.local/releases/20261109-cleanup/DIRECTORY-CLEANUP.json)을 보존합니다. GitHub의 정식 릴리스·파일과 설치 앱·사용자 자료·전역 설정은 변경하지 않았으며 제품 코드 변경이나 추가 AI 호출은 없습니다.
+
 ## 2026-11-09 — 정식 0.1.0 외 배포 산출물 정리
 
 - 사용자 요청으로 정식 `app-0.1.0`을 유지하고 이전 시험/시안·잘못된 중복 배포를 정리했습니다. 소스 저장소의 사전 릴리스 ID438409307만 삭제했고 Git 태그는 삭제하지 않았습니다. 전용 배포 저장소에는 정식 ID438504104 한 건·공개 파일10개만 남았으며 원격/로컬 SHA-256 일치를 재확인했습니다.
@@ -71,11 +77,11 @@
 ## 2026-11-08 — 속성 상세 선택 수정본의 앱 단독 설치
 
 - 앞선 지도 개선 설치 후 제보된 속성 선택 무반응을 UI1파일에서 고친 수정본을 전체 검사/빌드하고 고정10파일·패키지/설치 ASAR·deep strict 서명을 대조했습니다. ASAR `edde34e8d0da69cfea8e230c7cccab20069363fe541db1d2bbc078724dd2fa83`를 `/Applications/LLM Wiki.app`에 설치하고 직전 `e2b239…` 앱은 새 release의 `previous-LLM Wiki.app`으로 보존했습니다. 설치 중 runtime-settings1·work-recovery10·question-sessions0·connection-protection2파일의 집합/해시가 같았습니다.
-- 정상 Quit 후 남은 정확한 기존 main에 SIGTERM1회를 보냈고 새 설치 경로의 실행 프로세스를 확인했습니다. native 화면 조회 시간 초과 후 재연결에서 Mac 재잠금이 확인돼 마지막 직접 클릭 검증은 미실행입니다. 격리 실제 앱 전송의 클릭·키보드·원문 왕복과 설치 검증 범위는 [후속 확인서](../../../app/test-results/ontology-attribute-detail-20261108/verification.md), 패키지는 [설치 영수증](../../../app/release/ontology-attribute-install-20261108-zz023ug3/VERIFICATION.json)을 따릅니다. 서버·guardian·터널·기존 주소와 업무 자료를 다시 변경하지 않았습니다.
+- 정상 Quit 후 남은 정확한 기존 main에 SIGTERM1회를 보냈고 새 설치 경로의 실행 프로세스를 확인했습니다. native 화면 조회 시간 초과 후 재연결에서 Mac 재잠금이 확인돼 마지막 직접 클릭 검증은 미실행입니다. 격리 실제 앱 전송의 클릭·키보드·원문 왕복과 설치 검증 범위는 [후속 확인서](../../../app/test-results/ontology-attribute-detail-20261108/verification.md), 패키지는 [설치 영수증](../../../.local/releases/20261109-cleanup/retained-records/ontology-attribute-install-20261108-zz023ug3/VERIFICATION.json)을 따릅니다. 서버·guardian·터널·기존 주소와 업무 자료를 다시 변경하지 않았습니다.
 
 ## 2026-11-08 — 개념 선택·원문 지도 앱과 서버의 동시 반영
 
-- 사용자 승인으로 최종 전체 앱 검사/제품 빌드(5종 타입·lint·441파일 포맷·194토큰×3모드)를 통과한10파일을 고정하고 arm64/Electron45 앱을 준비했습니다. 설치/ASAR10파일 일치·ad-hoc deep strict 서명 검증 뒤 기존 앱을 복구용으로 옮기고 검증한 앱을 `/Applications/LLM Wiki.app`에 원자 교체했습니다. ASAR는 `e2b2397789539138942f16f62e579a71b1c8f95f08b0f5ba466228b766e3202a`이며 [패키지·설치 영수증](../../../app/release/ontology-map-install-20261107-cz1x4jv5/VERIFICATION.json)과 `previous-LLM Wiki.app`을 보존했습니다.
+- 사용자 승인으로 최종 전체 앱 검사/제품 빌드(5종 타입·lint·441파일 포맷·194토큰×3모드)를 통과한10파일을 고정하고 arm64/Electron45 앱을 준비했습니다. 설치/ASAR10파일 일치·ad-hoc deep strict 서명 검증 뒤 기존 앱을 복구용으로 옮기고 검증한 앱을 `/Applications/LLM Wiki.app`에 원자 교체했습니다. ASAR는 `e2b2397789539138942f16f62e579a71b1c8f95f08b0f5ba466228b766e3202a`이며 [패키지·설치 영수증](../../../.local/releases/20261109-cleanup/retained-records/ontology-map-install-20261107-cz1x4jv5/VERIFICATION.json)과 `previous-LLM Wiki.app`을 보존했습니다.
 - 현재 Bash 런처가 서버 종료 때 터널까지 정리하므로 기존 Bash 지원 인계 helper를 재사용해 정확한 PID/시작시각/실행 파일/argv를 검사했습니다.17모의시험 후 현재 터널을 유지해 인수했고, 첫 tracked 기동이 정상 색인 준비12,398.864ms를 기존 약10초 확인 한도 안에 끝내지 못해 무tracking fallback으로 내려갔습니다. 기존 Python guardian 인계 helper의60초 deadline·18모의시험/독립 검토로 재인수해 최종 guardian78885/server78928/tunnel64855, status=updated·tracking/metrics=True·오류/잔여0을 확인했습니다. 인계 중 터널에는 신호를 보내지 않았습니다.
 - 기존 공개 주소·터널 전체 identity, 새 PID의8766 소유와 loopback/공개 무인증401을 확인했습니다. 서버 source246·보호 설정23파일과 원문/이력/그래프/검토/등록 원본1,208파일의 집합·바이트 해시가 같았습니다. 현재 디스크 소스 관측이며 이전 프로세스가 시작 시 읽은 전체 바이트나 정확한 source rollback을 입증한 것은 아닙니다. 최종 운영 guardian은 계속 실행하며 [서버 근거](../../../.local/deployments/ontology-map-install-20261107-tracked-ylozhb_2/rollout-verification.json)와 첫 fallback 기록을 보존했습니다.
 - 실제 사용자 설정 경로 `llm-wiki-app`의 runtime-settings1·work-recovery10·question-sessions0·connection-protection2파일은 앱 종료 후/교체 후/재시작 후 관측에서 해시가 같았습니다. 정상 Quit으로 창이 닫힌 뒤 남은 기존 main은 정확한 identity를 재검사해 SIGTERM1회로 종료했습니다. 잠긴 Mac은 사용자가 직접 해제했고 초기 native 실행 조회 시간 초과 뒤 설치 file URL·연결·새 지도 제어를 확인했습니다. 사용자가 지도 조작을 시작해 추가 UI 조작은 멈췄습니다. 실제 AI·실자료 쓰기·게시/공증·모든 업무 회귀는 수행하지 않았습니다. 상세 범위는 [설치 확인서](../../../app/test-results/installed-ontology-map-20261108/verification.md)를 따릅니다.
@@ -94,7 +100,7 @@
 ## 2026-11-07 — 온톨로지 후속 개선의 Mac 설치
 
 - 사용자 요청으로 UI의 관련23시험·최종 제품 전체 검사/빌드와 실제 격리 화면 검증을 마친 출력을 고정했습니다. 기존 electron-builder26.18/Electron45 arm64와 설치된 Electron 배포본으로 `release/ontology-usability-20261107-w7YS5r/mac-arm64/LLM Wiki.app`을 만들었습니다. 패키지의10개 out 파일이 고정본과 일치하며 ad-hoc 서명과 `codesign --verify --deep --strict`를 통과했습니다. 게시/버전 증가는 하지 않았습니다.
-- 앱을 정상 종료하고 실행 프로세스 부재를 대조한 뒤 준비한 앱의 서명·ASAR를 확인해 교체했습니다. 기존 앱은 같은 release 폴더의 `previous-LLM Wiki.app`으로 보존하고 실패 시 원위치 복구 경로를 두었습니다. 설치 후에도 ASAR SHA-256 `91aca644313b5a9791db29bb186ab24c3bec4970d45d589ce854eecad876d340`과 서명이 일치합니다. [설치 영수증](../../../app/release/ontology-usability-20261107-w7YS5r/VERIFICATION.json)을 보존했습니다.
+- 앱을 정상 종료하고 실행 프로세스 부재를 대조한 뒤 준비한 앱의 서명·ASAR를 확인해 교체했습니다. 기존 앱은 같은 release 폴더의 `previous-LLM Wiki.app`으로 보존하고 실패 시 원위치 복구 경로를 두었습니다. 설치 후에도 ASAR SHA-256 `91aca644313b5a9791db29bb186ab24c3bec4970d45d589ce854eecad876d340`과 서명이 일치합니다. [설치 영수증](../../../.local/releases/20261109-cleanup/retained-records/ontology-usability-20261107-w7YS5r/VERIFICATION.json)을 보존했습니다.
 - 실제 `/Applications/.../app.asar` 창의 연결된 작업 공간·원본/위키 구분, CO2 Measure 검색2건과 같은 연결 미리보기2건, 주제1/불러온 관계2 및 원문 위치1122–1126행 안내를 확인했습니다. native 앱 연결/AX 관찰 일부는 시간 초과되어 재연결했으며 최종 현재 문서 화면을 강제로 되돌리지 않았습니다. 같은 bundle ID의 복구본 등 여러 경로가 있어 앱 지정은 절대 설치 경로를 사용했습니다.
 - 사전 설정 검사에 사용한 `Application Support/LLM Wiki`는 실제 경로가 아니었습니다. 실제 `llm-wiki-app`의 실행 후 runtime-settings1파일·work-recovery9파일·question-sessions0파일과 기존 연결을 확인했습니다. 사전 hash 비교가 없으므로 전후 바이트 동일성을 주장하지 않으며 설치기는 앱 번들만 교체했고 설정·인증 폴더를 삭제/대체하지 않았습니다. 사용자 원문/위키/원장·운영 서버·인증 정책은 변경하지 않았습니다.
 - 임시 고정 출력·소유 웹 검증 서버/자료/번들은 정리했습니다. 기존 다른 세션 서버·배포물은 보존했습니다. Windows·게시/공증·실제 모델 실행·모든 업무 회귀를 수행했다는 뜻은 아닙니다. 화면 변경·동작과 검증 범위는 [UI 기록](../ui/HISTORY.md#2026-11-07--첫-사용-검토의-후속-개선과-mac-설치)을 따릅니다.
@@ -117,7 +123,7 @@
 ## 2026-11-07 — Mac 설치 앱의 테마·상태바 반영
 
 - 사용자 요청으로 최신 개발본의 `npm run build`를 실행했습니다.5종 TypeScript·전체 lint·421파일 포맷·194토큰×3테마 및 main/preload/renderer 제품 빌드를 통과했습니다. 공식 Electron45.0.0 arm64와 기존 electron-builder 설정으로 로컬 실행 앱을 만들었으며 게시/버전 증가는 하지 않았습니다. 기존 `/Applications`·`~/Applications`에는 앱이 없고 예전 release/마운트 이미지에만 남아 있어, 검증한 앱을 `/Applications/LLM Wiki.app`에 새로 설치했습니다. 기존 앱 파일·Dock 항목·사용자 자료는 삭제하지 않았습니다.
-- 첫 패키지의 가이드 reference HTML에서 끝37바이트 차이를 발견해 설치하지 않았습니다. 고정 빌드 snapshot을 사용한 두 번째 시도는 패키징 도구가 외부 `/private/tmp` 경로를 거부했고, 허용되는 프로젝트 내부 임시 snapshot으로 재생성했습니다. 최종10개 out 파일 모두 SHA256이 같고 설치 ASAR도 같은 `108624fd096362f78a84994325942b4bff997ffc096ec48c3fa431f842915d46`입니다. 로컬 ad-hoc 서명과 설치 후 `codesign --verify --deep --strict`를 통과했습니다. [패키지/설치 검증](../../../app/release/theme-update-20261107-verified/VERIFICATION.json)을 보존하고 불완전 패키지2개·중간 snapshot·임시 로그는 정리했습니다. 서명/공증 정책을 해제하지 않았습니다.
+- 첫 패키지의 가이드 reference HTML에서 끝37바이트 차이를 발견해 설치하지 않았습니다. 고정 빌드 snapshot을 사용한 두 번째 시도는 패키징 도구가 외부 `/private/tmp` 경로를 거부했고, 허용되는 프로젝트 내부 임시 snapshot으로 재생성했습니다. 최종10개 out 파일 모두 SHA256이 같고 설치 ASAR도 같은 `108624fd096362f78a84994325942b4bff997ffc096ec48c3fa431f842915d46`입니다. 로컬 ad-hoc 서명과 설치 후 `codesign --verify --deep --strict`를 통과했습니다. [패키지/설치 검증](../../../.local/releases/20261109-cleanup/retained-records/theme-update-20261107-verified/VERIFICATION.json)을 보존하고 불완전 패키지2개·중간 snapshot·임시 로그는 정리했습니다. 서명/공증 정책을 해제하지 않았습니다.
 - 실제 창의 `file:///Applications/LLM Wiki.app/...` 경로와4테마 선택지·크림 적용·잔여96% 문구/막대의 같은 줄 정렬을 확인했습니다. 검증 뒤 원래 선택인 화이트로 복원하고 앱을 열어 두었습니다. 초기 저장 주소의 로그인 복원이 실패했고 '연결 다시 확인'은 외부 인증정보 전송의 구체적 승인 부족으로 자동 검토가 차단했습니다. 해당 동작을 우회/재시도하지 않았으며 사용자가 현재 주소로 직접 로그인한 뒤 연결됨·실제 작업 공간을 확인했습니다. [설치 앱 크림](../../../app/test-results/installed-theme-update/cream.png)·[화이트 복원](../../../app/test-results/installed-theme-update/white.png)을 보존했습니다.
 - 설치/첫 실행 직후 기존 runtime-settings1파일·work-recovery9파일과 question-sessions 폴더는 동일했습니다. connection-protection2파일은 앱 시작/사용자의 새 주소 로그인 과정에서 갱신됐으며 전체 설정의 바이트 동일성을 주장하지 않습니다. 설정 폴더를 삭제/대체하지 않았고 운영 원문·위키·분석/질문을 쓰거나 실행하지 않았습니다. 실제 모델 호출·Windows 설치·모든 업무 회귀는 이번 설치 검증에 포함하지 않습니다.
 
