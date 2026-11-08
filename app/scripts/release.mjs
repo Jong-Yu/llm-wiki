@@ -108,6 +108,21 @@ console.log(`릴리스 ${tag}${dryRun ? ' (dry-run: 업로드 안 함)' : ''}`);
 
 run('npm', ['run', 'build']);
 
+// 여러 플랫폼의 publisher가 같은 초안에 업로드하고 모두 성공한 뒤에만 공개합니다.
+if (!dryRun) {
+  run('gh', [
+    'release',
+    'create',
+    tag,
+    '--repo',
+    releaseRepository,
+    '--draft',
+    '--title',
+    version,
+  ]);
+  process.env.EP_DRAFT = 'true';
+}
+
 if (process.env.CSC_NAME) {
   config.mac = {
     ...config.mac,
@@ -132,6 +147,17 @@ if (targets.includes('win')) {
     'scripts/package-desktop.mjs',
     '--win',
     ...(dryRun ? [] : ['--publish']),
+  ]);
+}
+if (!dryRun) {
+  run('gh', [
+    'release',
+    'edit',
+    tag,
+    '--repo',
+    releaseRepository,
+    '--draft=false',
+    '--latest',
   ]);
 }
 console.log(`${tag} 완료 (${targets.join(', ')})`);
