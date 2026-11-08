@@ -1,5 +1,9 @@
 # UI 작업 기록
 
+## 2026-11-09 — 앱 배포 경로 정정 상태
+
+화면 회귀 결과는 유지하며 `npm run release`와 설치 패키지의 업데이트 주소를 전용 저장소로 정정했습니다. 두 플랫폼 빌드·초안 업로드 뒤 변경 불가 태그 제한으로 공개가 보류됐고 기존 소스 저장소 릴리스는 사전 릴리스로 표시했습니다. 사용자 태그/버전 선택과 새 파일명 재패키징이 남아 있으며 자세한 실행·실패·보존 범위는 [platform 기록](../platform/HISTORY.md#2026-11-09--앱-자동-업데이트-배포-경로-정정)을 따릅니다. 설치 앱·자료·전역 설정은 변경하지 않았습니다.
+
 ## 2026-11-09 — 0.1.0 공개 준비와 앱 회귀
 
 - Node 24.22.1에서 선택한 기존 앱 8묶음 중 `on-demand-question`·`ai-sessions`·`knowledge-comparisons`·`review-workspace`·`user-guide`의 최초 실행이 통과했습니다. [최초 실행 결과](../../../.local/releases/v0.1.0-20261109/app-tests.json)와 [온톨로지 중간 결과](../../../.local/releases/v0.1.0-20261109/ontology-ui-final.json)는 첫 실패와 중간 재실행을 보존합니다. 아래 세션 fixture 보완과 지도 범위 전환 수정 후 [기존 8묶음 모두 통과](../../../.local/releases/v0.1.0-20261109/app-tests-final.json)했으며, 최종 `ontology-review` 18개·`ontology-cleanup` 14개는 [검토 로그](../../../.local/releases/v0.1.0-20261109/ontology-review-release-final.log)·[Clean Up 로그](../../../.local/releases/v0.1.0-20261109/ontology-cleanup-release-final.log)에 구분했습니다.

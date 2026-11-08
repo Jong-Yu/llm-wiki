@@ -15,13 +15,14 @@
   },
   "mac": {
     "target": ["dmg", "zip"],
-    "artifactName": "${productName}-${version}.${ext}",
+    "artifactName": "LLM-Wiki-${version}.${ext}",
     "icon": "design/brand/llm-wiki-icon.icns",
     "identity": null,
     "category": "public.app-category.productivity"
   },
   "win": {
     "target": ["nsis"],
+    "artifactName": "LLM-Wiki-Setup-${version}.${ext}",
     "icon": "design/brand/llm-wiki-icon.ico",
     "signExecutable": false
   },
