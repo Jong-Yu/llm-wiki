@@ -1,5 +1,12 @@
 # 실행 환경 작업 기록
 
+## 2026-11-09 — 정식 0.1.0 외 배포 산출물 정리
+
+- 사용자 요청으로 정식 `app-0.1.0`을 유지하고 이전 시험/시안·잘못된 중복 배포를 정리했습니다. 소스 저장소의 사전 릴리스 ID438409307만 삭제했고 Git 태그는 삭제하지 않았습니다. 전용 배포 저장소에는 정식 ID438504104 한 건·공개 파일10개만 남았으며 원격/로컬 SHA-256 일치를 재확인했습니다.
+- `app/release/`의 과거 패키지 디렉터리12개와 이전 배포 파일20개를 명시 목록으로 제거했습니다. 대상의 inode 중복을 제외한 논리 크기는 약4.05GiB이며 실제 디스크 회수량을 측정한 값은 아닙니다. 과거 검증 파일12개는 원래 경로와 SHA-256을 유지했고, 현재0.1.0의 Mac/Windows 패키지·의존성 캐시와 `.local`/`app/test-results`의 실행 기록을 보존했습니다.
+- 최초 삭제는 소유자 읽기 전용 `frozen-out` 디렉터리 때문에 일부 진행 후 PermissionError로 중단됐습니다. 정확한 삭제 대상 내부의 소유자 디렉터리14개에만 쓰기를 허용해 이어서 완료했습니다. 사용자 자료·Wiki/이력·인증정보·전역 설정은 변경하지 않았습니다.
+- [명시 삭제 목록과 보존 해시](../../../.local/releases/20261109-cleanup/DELETE-MANIFEST.json)·[로컬 완료](../../../.local/releases/20261109-cleanup/LOCAL-CLEANUP.json)·[삭제한 중복 릴리스 메타정보](../../../.local/releases/20261109-cleanup/removed-superseded-release-metadata.json)·[최종 확인](../../../.local/releases/20261109-cleanup/FINAL-VERIFICATION.json)을 보존합니다. 제품 코드 변경이 없어 AI/제품 회귀를 다시 실행하지 않았습니다.
+
 ## 2026-11-09 — 앱 자동 업데이트 배포 경로 정정
 
 - 사용자가 요청한 흐름은 `npm run release`로 앱을 기존 공개 저장소 `Jong-Yu/llm-wiki-releases`에 게시하는 것입니다. 앞선 소스 저장소의 수동 공개는 이 경로와 달랐습니다. 현재 config와 기존 Mac/Windows `app-update.yml`이 소스 저장소를 가리키는 원인도 확인했습니다.
