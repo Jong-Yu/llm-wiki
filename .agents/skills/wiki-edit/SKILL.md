@@ -7,6 +7,8 @@ description: LLM Wiki MCP로 본문을 작성·수정하거나 전체 이력을 
 
 [공통 보존 규칙](../../../AGENTS.md#공통-데이터-보존)을 적용한다. 문서 수정과 판단 기록은 별개다. 검토·정책 변경도 요청되면 [wiki-review](../wiki-review/SKILL.md)의 해당 경로를 함께 사용한다.
 
+연결은 `write` 도구 묶음(stdio `--toolset write`, HTTP `/mcp?toolset=write`)을 사용한다. 대상은 `wiki_search`로 좁히고 수정할 문서만 한 번 읽어 그 내용·revision으로 저장한다. 여러 업무가 섞인 요청은 [wiki-route](../wiki-route/SKILL.md)로 나눈다.
+
 ## 대상 선택과 읽기
 
 - `access_context`로 실제 tenant·허용 profile·`read`/`write` 권한을 확인하고 현재 노출된 도구의 스키마를 읽는다. 명확하게 요청된 수정·복원은 실행 지시이며 같은 허락을 반복해 묻지 않는다.

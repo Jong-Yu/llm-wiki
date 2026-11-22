@@ -38,6 +38,9 @@ def main():
     add_ai_arguments(parser)
     parser.add_argument("--input-view", choices=("full", "current-review-v1"), default="full",
                         help="Explicit model input view; full frozen inputs and published rules remain preserved.")
+    from core.client.ai.rule_selection import RULES_VIEWS
+    parser.add_argument("--rules-view", choices=RULES_VIEWS, default="full",
+                        help="Select stage-specific model instructions; retain and verify the full frozen ruleset.")
     args = parser.parse_args()
     try:
         token = read_token(args.token_file)
@@ -49,7 +52,7 @@ def main():
             return await prepare(base_url=args.server, tenant=args.tenant, job_id=job_id,
                                      token=token, work_dir=args.work_dir, reclaim=args.reclaim,
                                      adapter=adapter, profile=args.profile, expected_job_revision=expected_job_revision,
-                                     semantic_check=args.semantic_check, input_view=args.input_view,
+                                     semantic_check=args.semantic_check, input_view=args.input_view, rules_view=args.rules_view,
                                      session_registry=args.session_registry,
                                      prepare_input=args.prepare_input, context_documents=[{
                                          "document": document, "required": True, "reason": "Explicit CLI context selection"}

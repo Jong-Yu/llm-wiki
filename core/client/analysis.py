@@ -124,12 +124,47 @@ async def _download(http, endpoint, directory, source):
 # 이 비동기 함수는 작업 인계만 수행한다. await는 다음 단계가 쓰는 결과가 도착할 때까지 기다린다는 뜻이다.
 async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
                   prepare_input=False, context_documents=None, adapter=None, profile=None,
-                  expected_job_revision=None, semantic_check=False, input_view="full", session_registry=None):
+                  expected_job_revision=None, semantic_check=False, input_view="full", rules_view="full",
+                  session_registry=None):
     """작업을 확인해 인계하고, 어댑터를 명시한 경우에만 실제 AI 단계를 실행한다."""
+    from .ai.timings import StageTimings, outcome
+    timings, local = StageTimings(), {}
+    try:
+        return await _prepare(base_url=base_url, tenant=tenant, job_id=job_id, token=token,
+            work_dir=work_dir, reclaim=reclaim, prepare_input=prepare_input,
+            context_documents=context_documents, adapter=adapter, profile=profile,
+            expected_job_revision=expected_job_revision, semantic_check=semantic_check,
+            input_view=input_view, rules_view=rules_view, session_registry=session_registry,
+            timings=timings, local=local)
+    except BaseException as error:
+        # workflow 진입 뒤에는 기존 ai-failure가 기록한다. 준비 실패 관측은
+        # 원래 예외를 가리지 않고, 이미 생성한 이번 실행 디렉터리에만 보존한다.
+        if timings.ended is None:
+            timings.finish(outcome(error))
+            if "directory" in local:
+                from .ai.workflow import _record
+                try:
+                    _record(local["directory"] / "preparation-failure.json", {
+                        "status": timings.status,
+                        "error_code": error.code if isinstance(error, AnalysisClientError) else (
+                            "ai_cancelled" if timings.status == "cancelled" else "analysis_preparation_failed"),
+                        "error_type": type(error).__name__, "automatic_retry": False,
+                        "usage_observations": {"adapter_call_count": 0, "calls": [],
+                                               "timings": timings.summary()}})
+                except OSError:
+                    pass
+        raise
+
+
+async def _prepare(*, base_url, tenant, job_id, token, work_dir, reclaim,
+                   prepare_input, context_documents, adapter, profile, expected_job_revision,
+                   semantic_check, input_view, rules_view, session_registry, timings, local):
     base = server_url(base_url)
     from .ai.input_view import INPUT_VIEWS
     if input_view not in INPUT_VIEWS:
         raise AnalysisClientError("invalid_input_view")
+    from .ai.rule_selection import rules_view_configuration
+    rules_view_configuration(rules_view)
     _identifier(job_id)
     if expected_job_revision is not None and _HASH.fullmatch(expected_job_revision) is None:
         raise AnalysisClientError("invalid_job_revision")
@@ -141,8 +176,10 @@ async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
     root = _private_directory(work_dir)
     async with httpx2.AsyncClient(base_url=base + "/", headers={"Authorization": "Bearer " + token},
                                  timeout=15, trust_env=False, follow_redirects=False) as http:
-        api_access = await api_call(http, "GET", base + "/api/v1/access-context")
-        api_job = await api_call(http, "GET", base + f"/api/v1/tenants/{tenant}/analysis-jobs/{job_id}")
+        api_access = await timings.wait("preparation", api_call(http, "GET", base + "/api/v1/access-context"),
+                                        operation="api_access")
+        api_job = await timings.wait("preparation", api_call(http, "GET", base + f"/api/v1/tenants/{tenant}/analysis-jobs/{job_id}"),
+                                     operation="api_job")
         if expected_job_revision is not None and api_job.get("job_revision") != expected_job_revision:
             raise AnalysisClientError("analysis_job_changed")
         from .ai.resume import fixed_selection, completed_results
@@ -154,37 +191,41 @@ async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
             if not api_job.get("registration") and "wiki" in api_job["outputs"] and api_job["source_ref"]["size_bytes"] > MAX_LITERAL_SOURCE_BYTES:
                 raise AnalysisClientError("analysis_source_limit")
         async with Client(streamable_http_client(base + "/mcp", http_client=http), mode="legacy") as mcp:
-            mcp_access = await tool_call(mcp, "access_context", {})
+            mcp_access = await timings.wait("preparation", tool_call(mcp, "access_context", {}), operation="mcp_access")
             if (api_access.get("user_id") != mcp_access.get("user_id")
                     or api_access.get("access_revision", api_access.get("policy_revision")) != mcp_access.get("access_revision", mcp_access.get("policy_revision"))
                     or tenant not in api_access.get("memberships", {})
                     or tenant not in mcp_access.get("memberships", {})):
                 raise AnalysisClientError("api_mcp_access_mismatch")
-            job = await tool_call(mcp, "analysis_job_query", {"tenant": tenant, "job_id": job_id})
+            job = await timings.wait("preparation", tool_call(mcp, "analysis_job_query", {"tenant": tenant, "job_id": job_id}),
+                                     operation="mcp_job")
             _same_job(api_job, job, job_id=job_id, tenant=tenant, user=mcp_access["user_id"])
             prepare_input = prepare_input or bool(job.get("registration"))
             execution_config = execution_config_hash = None
             if adapter is not None:
                 preflight = getattr(adapter, "preflight", None)
-                info = await preflight() if preflight is not None else None
+                info = await timings.wait("preparation", preflight(), operation="adapter_preflight") if preflight is not None else None
                 from .ai.observations import execution_configuration
                 execution_config, execution_config_hash = execution_configuration(
-                    adapter, info, input_view=input_view, semantic_check=semantic_check)
-            completed, prior_receipts = await completed_results(mcp, tenant=tenant, job=job, profile=profile,
-                execution_config_sha256=execution_config_hash)
+                    adapter, info, input_view=input_view, semantic_check=semantic_check, rules_view=rules_view)
+            completed, prior_receipts = await timings.wait("preparation", completed_results(mcp, tenant=tenant,
+                job=job, profile=profile, execution_config_sha256=execution_config_hash), operation="verify_reuse")
             required = {(target["document"], "prepare_wiki" if kind == "wiki" else "extract_ontology")
                         for target in job["targets"] for kind in job["outputs"]}
             if adapter is not None and required <= completed:
+                timings.finish("reused")
                 return {"job_id": job_id, "run_id": job["run_id"], "tenant": tenant,
                     "job_revision": job["job_revision"], "lease_revision": job["lease_revision"],
                     "ai_execution": {"status": "stored", "receipts": prior_receipts,
                         "executions": [], "resumed": True, "new_execution": False, "human_approval": False,
                         "execution_configuration": execution_config,
-                        "usage_observations": {"adapter_call_count": 0, "calls": [], "reused_result": True}}}
-            claimed = await tool_call(mcp, "analysis_job_claim", {"tenant": tenant, "job_id": job_id,
-                "expected_job_revision": job["job_revision"], "reclaim": reclaim})
+                        "usage_observations": {"adapter_call_count": 0, "calls": [], "reused_result": True,
+                                               "timings": timings.summary()}}}
+            claimed = await timings.wait("preparation", tool_call(mcp, "analysis_job_claim", {"tenant": tenant, "job_id": job_id,
+                "expected_job_revision": job["job_revision"], "reclaim": reclaim}), operation="claim")
             run = _identifier(claimed["run_id"])
-            source_input = await tool_call(mcp, "source_read", {"tenant": tenant, "job_id": job_id, "run_id": run})
+            source_input = await timings.wait("preparation", tool_call(mcp, "source_read", {"tenant": tenant, "job_id": job_id, "run_id": run}),
+                                             operation="source_reference")
             source = source_input["source_ref"]
             if source != claimed["source_ref"]:
                 raise AnalysisClientError("source_reference_changed")
@@ -195,18 +236,20 @@ async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
             parent = _private_directory(root / job_id)
             directory = parent / run
             private_directory(directory, exist_ok=False)  # 재연결로 기존 작업용 사본·초안을 덮어쓰지 않는다.
+            local["directory"] = directory
             fixed_input = None
             if prepare_input:
-                fixed_input = await receive_input(mcp, tenant=tenant, job_id=job_id, run_id=run,
+                fixed_input = await timings.wait("preparation", receive_input(mcp, tenant=tenant, job_id=job_id, run_id=run,
                     expected_job_revision=source_input["job_revision"], directory=directory,
-                    context_documents=context_documents, profile=profile, ruleset_ref=ruleset_ref)
-            original = None if job.get("registration") else await _download(http, base + endpoint, directory, source)
+                    context_documents=context_documents, profile=profile, ruleset_ref=ruleset_ref), operation="receive_initial_input")
+            original = None if job.get("registration") else await timings.wait("preparation",
+                _download(http, base + endpoint, directory, source), operation="download_original")
             # 입력 준비도 job을 갱신하므로 준비 후 받은 revision으로 진행 상황을 보고한다.
-            reported = await tool_call(mcp, "analysis_job_update", {"tenant": tenant, "job_id": job_id,
+            reported = await timings.wait("preparation", tool_call(mcp, "analysis_job_update", {"tenant": tenant, "job_id": job_id,
                 "run_id": run, "expected_job_revision": (fixed_input or source_input)["job_revision"],
                 "reported_status": "input_ready", "message": (
                     "Host bridge verified the fixed registration reference; Markdown preparation uses the preserved source."
-                    if job.get("registration") else "Host bridge received the fixed original and verified its bytes.")})
+                    if job.get("registration") else "Host bridge received the fixed original and verified its bytes.")}), operation="report_input_ready")
             output = {"user_id": mcp_access["user_id"], "tenant": tenant, "job_id": job_id, "run_id": run,
                 "job_revision": reported["job_revision"], "lease_revision": reported["lease_revision"],
                 "source_ref": source, "execution_ready": reported["execution_ready"], "blockers": reported["blockers"],
@@ -226,12 +269,15 @@ async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
                     job_revision=reported["job_revision"], lease_revision=reported["lease_revision"],
                     fixed_input=fixed_input, adapter=adapter, profile=profile, context_documents=context_documents,
                     completed_stages=completed, prior_receipts=prior_receipts, semantic_check=semantic_check,
-                    input_view=input_view, execution_configuration=execution_config,
+                    input_view=input_view, rules_view=rules_view, execution_configuration=execution_config,
                     execution_config_sha256=execution_config_hash,
-                    session_registry=registry_path(root, session_registry))
+                    session_registry=registry_path(root, session_registry), timings=timings)
                 output["job_revision"] = output["ai_execution"]["job_revision"]
                 output["lease_revision"] = output["ai_execution"]["lease_revision"]
                 # 처음 인계 시점의 준비 상태와 지금 확인한 저장 결과를 혼동하지 않게 구분한다.
                 output["handoff_readiness"] = {"execution_ready": output.pop("execution_ready"),
                                                "blockers": output.pop("blockers")}
+            else:
+                timings.finish("prepared")
+                output["timings"] = timings.summary()
             return output

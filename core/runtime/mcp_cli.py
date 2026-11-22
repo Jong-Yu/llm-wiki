@@ -14,6 +14,7 @@ from core.modules.access.policy import AccessDenied, AccessPolicy, PolicyError
 from core.mcp.http import HTTP_HOST, _validate_http_token, create_http_app, create_tenant_http_app
 from core.mcp.server import create_server
 from core.mcp.tenant import create_tenant_server
+from core.mcp.toolsets import TOOLSET_NAMES
 from core.modules.documents.store import DEFAULT_DATA_DIR, DEFAULT_LOCK_TIMEOUT_SECONDS, WikiStore
 from core.runtime.rulesets import configured_rulesets
 
@@ -49,6 +50,11 @@ def main() -> None:
                         help="Legacy HTTP shared token or multi-tenant stdio personal token (default: LLM_WIKI_TOKEN).")
     parser.add_argument("--ruleset-root", type=Path)
     parser.add_argument("--ruleset-policy", type=Path)
+    parser.add_argument("--guidance-mode", choices=("full", "compact"), default="full",
+                        help="MCP startup instructions: full (default) or compact with on-demand workflow guidance.")
+    parser.add_argument("--toolset", choices=TOOLSET_NAMES, default="all",
+                        help="Role tool bundle: all (default), ask, write, extract or review. "
+                             "HTTP clients of an all server may also select one with ?toolset=.")
     args = parser.parse_args()
     if bool(args.access_config) != bool(args.tenant_root):
         parser.error("--access-config and --tenant-root must be specified together.")
@@ -61,11 +67,13 @@ def main() -> None:
             policy = AccessPolicy(args.access_config, args.tenant_root, lock_timeout_seconds=args.lock_timeout)
             rulesets = configured_rulesets(args.ruleset_root, args.ruleset_policy, policy)
             if args.transport == "streamable-http":
-                app = create_tenant_http_app(policy, rulesets=rulesets)
+                app = create_tenant_http_app(policy, rulesets=rulesets, guidance_mode=args.guidance_mode,
+                                             toolset=args.toolset)
             else:
                 token = os.environ.get(args.token_env)
                 policy.authenticate(token)  # No implicit unauthenticated stdio fallback.
-                server = create_tenant_server(policy, token, rulesets=rulesets)
+                server = create_tenant_server(policy, token, rulesets=rulesets, guidance_mode=args.guidance_mode,
+                                              toolset=args.toolset)
         except (PolicyError, AccessDenied, OSError, ValueError, TypeError):
             parser.error("Multi-tenant policy or credentials are invalid.")
         if args.transport == "streamable-http":
@@ -85,10 +93,10 @@ def main() -> None:
     except (OSError, ValueError, TypeError) as error:
         parser.error(str(error))
     if args.transport == "streamable-http":
-        uvicorn.run(create_http_app(store, token), host=HTTP_HOST, port=args.port,
+        uvicorn.run(create_http_app(store, token, guidance_mode=args.guidance_mode, toolset=args.toolset), host=HTTP_HOST, port=args.port,
                     log_level="warning", access_log=False)
     else:
-        create_server(store).run(transport="stdio")
+        create_server(store, guidance_mode=args.guidance_mode, toolset=args.toolset).run(transport="stdio")
 
 
 if __name__ == "__main__":

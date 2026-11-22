@@ -19,9 +19,10 @@ from core.runtime.http_metrics import HttpMetricsMiddleware
 from core.runtime.ontology_index import OntologyIndexPreparer
 
 
-def create_application(policy: AccessPolicy, *, rulesets=None, auth=None, credential_key_path=None) -> FastAPI:
+def create_application(policy: AccessPolicy, *, rulesets=None, auth=None, credential_key_path=None,
+                       guidance_mode: str = "full") -> FastAPI:
     """import 시 저장소를 열지 않으며 기동 시 현재 정책을 검증한다."""
-    server = create_tenant_server(policy, rulesets=rulesets)
+    server = create_tenant_server(policy, rulesets=rulesets, guidance_mode=guidance_mode)
     # 정책 검증 이후에만 키·암호화 자격 증명 준비를 담당 서비스에 위임한다.
     # 없는 자료 루트나 손상된 정책을 빈 서버로 대체하지 않는다.
     if auth is None:

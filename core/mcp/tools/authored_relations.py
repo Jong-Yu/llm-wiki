@@ -2,6 +2,7 @@
 from typing import Annotated, Literal
 
 from mcp.types import CallToolResult, ToolAnnotations
+from core.mcp.presentation import ADDITIVE_REPLAYABLE, REPLAYABLE_MUTATION
 from pydantic import Field, JsonValue, StrictStr, ValidationError
 
 from core.api.v1.reviews.relations_router import RelationCreate, RelationUndo
@@ -73,7 +74,6 @@ def validate_arguments(name, arguments):
 
 def _register_authored_relation_tools(server, get_store):
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
-    mutation = ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False)
 
     def invoke(name, method, document, **fields):
         scope = _authorized_scope.get()
@@ -98,7 +98,7 @@ def _register_authored_relation_tools(server, get_store):
         except PolicyError:
             return _access_error("access_unavailable")
 
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=ADDITIVE_REPLAYABLE, structured_output=False)
     def ontology_relation_create(
         document: Document, request_id: Identifier, expected_state_revision: Revision,
         kind: Literal["source", "policy"], replacement: Replacement, reason: Reason,
@@ -119,7 +119,7 @@ def _register_authored_relation_tools(server, get_store):
                       expected_state_revision=expected_state_revision, kind=kind,
                       replacement=replacement, reason=reason)
 
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=REPLAYABLE_MUTATION, structured_output=False)
     def ontology_relation_undo(
         document: Document, request_id: Identifier, event_id: Identifier,
         expected_state_revision: Revision, kind: Literal["source", "policy"], reason: Reason,

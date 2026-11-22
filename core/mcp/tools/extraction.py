@@ -6,6 +6,7 @@
 from typing import Annotated, Literal
 
 from mcp.types import CallToolResult, ToolAnnotations
+from core.mcp.presentation import ADDITIVE, ADDITIVE_REPLAYABLE
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool, StrictInt, StrictStr
 
 from core.mcp.request_context import _authorized_scope
@@ -109,7 +110,6 @@ def _authorize(permission=None):
 # 규약·고정 입력 도구를 등록하고 읽기/변경 동작을 클라이언트에 안내한다. 실제 권한 판단은 정책이 한다.
 def _register_extraction_tools(server, get_store):
     read_only = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
-    mutation = ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False)
 
     # 요청의 사용자/tenant와 규약 설정을 확인한 뒤 InputStore로 처리한다. 규약이 없을 때 임의 기본 규약을 만들지 않는다.
     def invoke(operation, action):
@@ -144,7 +144,7 @@ def _register_extraction_tools(server, get_store):
             scope.tenant, ruleset_id=ruleset_id, ruleset_version=ruleset_version))
 
     # 원본/맥락/규약을 이번 실행과 단계에 묶어 고정한다. 이것은 입력 기록이며 AI가 분석했다는 증거가 아니다.
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=ADDITIVE, structured_output=False)
     def analysis_job_input_prepare(job_id: Identifier, run_id: Identifier,
             expected_job_revision: SourceRevisionInput, stage: Stage,
             context_documents: list[ContextDocument] | None = None,
@@ -193,7 +193,7 @@ def _register_extraction_tools(server, get_store):
             authorize=_authorize, tenant=scope.tenant, user_id=scope.user_id))
 
     # CLI가 읽은 문자와 경고/누락을 불변 자료로 보관한다. 위키·그래프 결과 저장은 다음 단계의 별도 도구다.
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=ADDITIVE_REPLAYABLE, structured_output=False)
     def source_extraction_submit(job_id: Identifier, run_id: Identifier,
             expected_job_revision: SourceRevisionInput, bundle_id: Identifier,
             bundle_revision: SourceRevisionInput, request_id: Identifier, content: StrictStr,

@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import httpx2
 from core.client.analysis import prepare
-from core.client.ai import draft_validation, workflow
+from core.client.ai import assembly, draft_validation, workflow
 from core.client.ai.observations import reported_usage
 from core.client.transport import AnalysisClientError, client_error_code
 from core.common.json_codec import canonical_json_bytes
@@ -53,7 +53,35 @@ class DraftAdapter:
         report = empty_report()
         if outcome == "unread":
             report["unread_ranges"] = ["대상 원문 확인 미완료"]
-        evidence = "A pump moves water." if outcome == "valid" else "A pump moves oil."
+        if outcome.startswith("diagnostic_"):
+            line = next(index for index, text in enumerate(source["content"].splitlines(), 1)
+                        if text == "A pump moves water.")
+            report.update(reviewer_kind="ai_self_check", findings=[{
+                "rule_id": "R-S01", "verdict": "supported", "source": {
+                    "start_line": line, "end_line": line, "quote": "A pump moves water."},
+                "target": {"collection": "entities", "index": 0},
+                "reason": "The fixed source explicitly identifies the pump.",
+                "recommendation": None, "question": None}])
+            if outcome == "diagnostic_missing_evidence":
+                report["findings"][0]["source"] = None
+            elif outcome == "diagnostic_wrong_line":
+                report["findings"][0]["source"].update(start_line=line - 1, end_line=line - 1)
+            elif outcome == "diagnostic_limit":
+                report["warnings"] = ["x" * 2000] * 150
+            elif outcome == "diagnostic_input_mismatch":
+                manifest = data["manifest"]
+                report.update(schema_version=2, rule_results=[{
+                    "rule_id": f"R-S{number:02d}", "status": "not_run", "reason": "Not checked.",
+                    "finding_indices": []} for number in range(1, 11)], findings=[], semantic_check={
+                    "check_id": "1" * 32, "input": {
+                        "job_id": manifest["job_id"], "run_id": manifest["run_id"],
+                        "bundle_id": manifest["bundle_id"], "bundle_revision": "0" * 64,
+                        "document": "pump.md", "source_revision": source["revision"],
+                        "submission_sha256": "0" * 64, "schema_version": 3,
+                        "ruleset_ref": manifest["ruleset_ref"]},
+                    "source_audit_execution": None, "assessment_execution": None,
+                    "source_audit_sha256": None, "source_audit": None})
+        evidence = "A pump moves oil." if outcome == "invalid" else "A pump moves water."
         value = {"submission": {"schema_version": 3,
             "entities": [{"id": "pump", "type": "physical_object", "label": "pump", "evidence": evidence}],
             "relations": [], "relation_candidates": [], "attributes": []}, "diagnostics": report}
@@ -153,6 +181,11 @@ class DraftWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter.calls, 1)
         self.assertEqual(len(self.graph_writes()), 1)
         self.assertEqual(result["ai_execution"]["execution_configuration"]["draft_validation"]["max_repairs"], 2)
+        self.assertIn(assembly.DIAGNOSTIC_GUIDANCE, adapter.prompts[0])
+        config = result["ai_execution"]["execution_configuration"]["draft_validation"]
+        self.assertEqual(config["diagnostic_guidance"], assembly.diagnostic_guidance_configuration())
+        assembled = json.loads(next((self.root / "work").rglob("assembly.json")).read_text())
+        self.assertEqual(assembled["diagnostic_guidance"], config["diagnostic_guidance"])
         repeated = await self.execute(adapter)
         self.assertEqual(adapter.calls, 1)
         self.assertEqual(repeated["ai_execution"]["usage_observations"]["adapter_call_count"], 0)
@@ -162,10 +195,22 @@ class DraftWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client_error_code(stopped.exception), "analysis_execution_settings_changed")
         self.assertEqual(adapter.calls, 1)
         from core.modules.ontology import draft
+        self.assertEqual(config["validation_version"], draft.DRAFT_VALIDATION_VERSION)
+        self.assertEqual(config["diagnostic_work_policy"], draft.DIAGNOSTIC_WORK_POLICY)
+        with patch.object(draft, "DIAGNOSTIC_WORK_POLICY", "changed-work-policy"):
+            with self.assertRaises(Exception) as work_changed:
+                await self.execute(adapter)
+        self.assertEqual(client_error_code(work_changed.exception), "analysis_execution_settings_changed")
+        self.assertEqual(adapter.calls, 1)
         with patch.object(draft, "MAX_SOURCE_SCAN_WORK", draft.MAX_SOURCE_SCAN_WORK + 1):
             with self.assertRaises(Exception) as limit_changed:
                 await self.execute(adapter)
         self.assertEqual(client_error_code(limit_changed.exception), "analysis_execution_settings_changed")
+        self.assertEqual(adapter.calls, 1)
+        with patch.object(assembly, "DIAGNOSTIC_GUIDANCE", assembly.DIAGNOSTIC_GUIDANCE + " changed"):
+            with self.assertRaises(Exception) as guidance_changed:
+                await self.execute(adapter)
+        self.assertEqual(client_error_code(guidance_changed.exception), "analysis_execution_settings_changed")
         self.assertEqual(adapter.calls, 1)
 
     @isolated_server
@@ -204,6 +249,69 @@ class DraftWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(failure["receipts"][0]["saved"])
         self.assertEqual(failure["usage_observations"]["adapter_call_count"], 3)
         self.assertEqual(len(list((self.root / "work").rglob("draft-validation.json"))), 3)
+
+    async def assert_diagnostic_repair(self, outcome, error_code):
+        adapter = DraftAdapter((outcome, "diagnostic_valid"))
+        result = (await self.execute(adapter))["ai_execution"]
+        self.assertEqual(adapter.calls, 2)
+        self.assertEqual(len(self.graph_writes()), 1)
+        saved = self.graph_writes()[0]
+        self.assertEqual(saved["submission"], adapter.values[-1]["submission"])
+        self.assertEqual(saved["diagnostics"], adapter.values[-1]["diagnostics"])
+        self.assertEqual(saved["execution"]["output_sha256"],
+                         sha256(canonical_json_bytes(adapter.values[-1])).hexdigest())
+        self.assertTrue(result["receipts"][-1]["saved"])
+        reports = [json.loads(path.read_text()) for path in (self.root / "work").rglob("draft-validation.json")]
+        failed = next(report for report in reports if not report["passed"])
+        self.assertEqual(failed["full_validation"]["core_graph"]["status"], "passed")
+        self.assertEqual(failed["full_validation"]["diagnostics"]["code"], error_code)
+        diagnostic_error = next(item for item in failed["errors"] if item["kind"] == "diagnostics")
+        self.assertEqual(diagnostic_error["path"], "/diagnostics/findings/0/source")
+        self.assertTrue(diagnostic_error["message"])
+        repair_data = json.loads(adapter.prompts[1].split("\nDRAFT_REPAIR\n", 1)[1].split("\n", 1)[1])
+        self.assertEqual(repair_data["previous_output"], adapter.values[0])
+        scope = self.policy.authorize(self.user["token"], self.tenant, "read")
+        self.assertEqual(OntologyStore(scope.store).query("pump.md")["status"], "ready")
+
+    @isolated_server
+    async def test_diagnostic_missing_evidence_repairs_whole_output_before_real_store(self):
+        await self.assert_diagnostic_repair("diagnostic_missing_evidence", "diagnostic_evidence_required")
+
+    @isolated_server
+    async def test_diagnostic_wrong_coordinates_repairs_whole_output_before_real_store(self):
+        await self.assert_diagnostic_repair("diagnostic_wrong_line", "invalid_diagnostics")
+
+    @isolated_server
+    async def test_repeated_diagnostic_failure_stops_at_three_calls_without_graph(self):
+        adapter = DraftAdapter(("diagnostic_missing_evidence",))
+        with self.assertRaises(Exception) as stopped:
+            await self.execute(adapter)
+        self.assertEqual(client_error_code(stopped.exception), "analysis_draft_repair_exhausted")
+        self.assertEqual(adapter.calls, 3)
+        self.assertEqual(self.graph_writes(), [])
+        self.assert_no_graph()
+        paths = list((self.root / "work").rglob("draft-validation.json"))
+        self.assertEqual(len(paths), 3)
+        self.assertTrue(all((path.parent / "result.json").exists() for path in paths))
+
+    async def assert_nonrepairable_diagnostic(self, outcome, code):
+        adapter = DraftAdapter((outcome, "valid"))
+        with self.assertRaises(Exception) as stopped:
+            await self.execute(adapter)
+        self.assertEqual(client_error_code(stopped.exception), "analysis_draft_invalid")
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(self.graph_writes(), [])
+        report = json.loads(next((self.root / "work").rglob("draft-validation.json")).read_text())
+        self.assertFalse(report["repairable"])
+        self.assertEqual(report["full_validation"]["diagnostics"]["code"], code)
+
+    @isolated_server
+    async def test_diagnostic_resource_limit_is_not_repaired(self):
+        await self.assert_nonrepairable_diagnostic("diagnostic_limit", "diagnostic_limit")
+
+    @isolated_server
+    async def test_diagnostic_input_binding_mismatch_is_not_repaired(self):
+        await self.assert_nonrepairable_diagnostic("diagnostic_input_mismatch", "diagnostic_check_input_mismatch")
 
     @isolated_server
     async def test_adapter_failure_is_not_a_repair(self):

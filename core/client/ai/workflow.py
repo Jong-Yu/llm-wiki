@@ -91,8 +91,11 @@ async def _store_result(client, tool, arguments, directory):
 async def run_analysis(http, client, *, tenant, job_id, run_id, directory, original, source_ref,
                        job_revision, lease_revision, fixed_input, adapter, profile=None, context_documents=None,
                        completed_stages=None, prior_receipts=None, semantic_check=False, input_view="full",
-                       execution_configuration=None, execution_config_sha256=None, session_registry=None):
+                       rules_view="full", execution_configuration=None, execution_config_sha256=None,
+                       session_registry=None, timings=None):
     """한 문서를 저장한다. 수정 가능한 초안 검사만 두 번까지 고치며 저장은 재시도하지 않는다."""
+    from .rule_selection import rules_view_configuration
+    rules_view_configuration(rules_view)
     common = {"tenant": tenant, "job_id": job_id, "run_id": run_id}
     receipts, executions = list(prior_receipts or []), []
     completed_stages = completed_stages or set()
@@ -102,30 +105,35 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
     session_ref_error = None
     underlying_adapter = adapter
     from .observations import ObservedAdapter
-    adapter = ObservedAdapter(adapter)
+    from .timings import StageTimings, outcome
+    timings = timings or StageTimings()
+    adapter = ObservedAdapter(adapter, timings=timings)
     revision = job_revision
     try:
         async with LeaseKeeper(http, **common, lease_revision=lease_revision) as lease:
-            job = await _current(client, common, revision)
+            job = await timings.wait("currentness", _current(client, common, revision), operation="job")
             if len(job["targets"]) != 1:
                 raise AnalysisClientError("analysis_target_scope_required")
             document = job["targets"][0]["document"]
             rules = fixed_input["ruleset_ref"]
             # 이름만으로 원본을 추정하지 않고 이미 받은 고정 입력의 지문을 다시 확인한다.
-            initial = load_input(fixed_input, directory)
+            with timings.measure("preparation", operation="load_initial_input"):
+                initial = load_input(fixed_input, directory)
             # 기본 관점이 바뀌어도 이번 작업은 처음 관측한 관점과 같은 정의를 사용한다.
             initial_profile = {key: initial["manifest"]["actor"][key] for key in ("profile_id", "domain", "viewpoint")}
             profile = initial_profile["profile_id"]
             selected = {"profile": profile}
             extraction = None
             if not job.get("registration") and "wiki" in job["outputs"] and (document, "prepare_wiki") not in completed_stages:
-                content = _original_text(original, source_ref)
+                with timings.measure("preparation", operation="read_original"):
+                    content = _original_text(original, source_ref)
                 request = {**common, **selected, "expected_job_revision": revision,
                     "bundle_id": fixed_input["bundle_id"], "bundle_revision": fixed_input["bundle_revision"],
                     "request_id": uuid4().hex, "content": content, "method": "verbatim",
                     "warnings": [], "omissions": [], "scope": {"selection": "whole_original", "unread_ranges": []}}
                 _record(directory / "reading-request.json", {"tool": "source_extraction_submit", "arguments": request})
-                extraction = await tool_call(client, "source_extraction_submit", request)
+                extraction = await timings.wait("preparation", tool_call(client, "source_extraction_submit", request),
+                                                operation="source_extraction_submit")
                 _record(directory / "reading-receipt.json", extraction)
                 if extraction.get("state") != "complete" or extraction.get("complete") is not True:
                     raise AnalysisClientError("analysis_reading_unconfirmed")
@@ -135,19 +143,23 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                 ["extract_ontology"] if "ontology" in job["outputs"] else [])
             for stage in stages:
                 if (document, stage) in completed_stages:
+                    with timings.measure("reuse", stage=stage, reused_result=True):
+                        pass
                     continue
                 lease.check()
-                await _current(client, common, revision)
+                await timings.wait("currentness", _current(client, common, revision), operation="job", stage=stage)
                 stage_directory = directory / stage
                 private_directory(stage_directory, exist_ok=False)
-                fixed = await receive_input(client, **common, expected_job_revision=revision,
+                fixed = await timings.wait("preparation", receive_input(client, **common, expected_job_revision=revision,
                     directory=stage_directory, stage=stage, target_document=document,
                     extraction_id=extraction["extraction_id"] if stage == "prepare_wiki" and extraction is not None else None,
-                    context_documents=context_documents, profile=profile, ruleset_ref=rules)
+                    context_documents=context_documents, profile=profile, ruleset_ref=rules),
+                    operation="receive_input", stage=stage)
                 revision = fixed["job_revision"]
                 if stage == "prepare_wiki" and job.get("registration"):
                     # 기본 변환은 고정된 전체 문자를 보존한다. 모델 요약/재작성과 구분한다.
-                    captured = load_input(fixed, stage_directory)
+                    with timings.measure("preparation", operation="load_registration", stage=stage):
+                        captured = load_input(fixed, stage_directory)
                     target = next(item for item in captured["manifest"]["dependency"]["documents"]
                                   if item["document"] == document)
                     arguments = {**common, **selected, "expected_job_revision": revision,
@@ -155,33 +167,42 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                         "request_id": uuid4().hex, "document": document,
                         "expected_revision": target.get("source_revision"),
                         "content": captured["components"]["data/registration.md"]}
-                    await _current(client, common, revision)
+                    await timings.wait("currentness", _current(client, common, revision), operation="job", stage=stage)
                     lease.check()
-                    receipt = await _store_result(client, "analysis_job_wiki_write", arguments, stage_directory)
+                    receipt = await timings.wait("storage", _store_result(client, "analysis_job_wiki_write",
+                        arguments, stage_directory), stage=stage, operation="save_and_confirm_receipt")
                     receipts.append(receipt)
                     revision = receipt["job_revision"]
                     continue
-                assembled = assemble_input(fixed, stage_directory, stage=stage, target_document=document, input_view=input_view)
+                with timings.measure("preparation", operation="assemble_input", stage=stage):
+                    assembled = assemble_input(fixed, stage_directory, stage=stage, target_document=document,
+                                               input_view=input_view, rules_view=rules_view)
                 if any(assembled["manifest"]["actor"][key] != value for key, value in initial_profile.items()):
                     raise AnalysisClientError("analysis_profile_changed")
                 _record(stage_directory / "assembly.json", assembled["assembly"])
                 _record(stage_directory / "pending.json", {"status": "running", "stage": stage,
                                                            "bundle_id": fixed["bundle_id"]})
                 from .draft_validation import MAX_DRAFT_REPAIRS, fixed_basis, inspect, repair_prompt
-                basis = fixed_basis(fixed, stage_directory, document) if stage == "extract_ontology" else None
+                with timings.measure("preparation", operation="validation_basis", stage=stage):
+                    basis = fixed_basis(fixed, stage_directory, document) if stage == "extract_ontology" else None
+                target = next(item for item in assembled["manifest"]["dependency"]["documents"]
+                              if item["document"] == document)
                 prompt = assembled["prompt"]
                 if hasattr(underlying_adapter, "persist_session"):
                     underlying_adapter.persist_session = stage == "extract_ontology"
                 for repair_number in range(MAX_DRAFT_REPAIRS + 1):
                     # 각 수정은 같은 고정 원문·job·lease 아래 새 호출이며 기존 초안을 덮어쓰지 않는다.
-                    await _current(client, common, revision)
-                    await _current_input(client, common, selected, fixed, revision)
+                    await timings.wait("currentness", _current(client, common, revision), operation="job", stage=stage)
+                    await timings.wait("currentness", _current_input(client, common, selected, fixed, revision),
+                                       operation="input", stage=stage)
                     lease.check()
                     attempt_directory = (stage_directory if repair_number == 0 else
                         private_directory(stage_directory / f"repair-{repair_number}", exist_ok=False))
                     invocation = attempt_directory / "invocation"
-                    result = await lease.guard(adapter.run(prompt=prompt, schema=assembled["schema"],
-                        output_schema=assembled["cli_schema"], directory=invocation))
+                    result = await timings.wait("ai_initial" if repair_number == 0 else "ai_repair",
+                        lease.guard(adapter.run(prompt=prompt, schema=assembled["schema"],
+                            output_schema=assembled["cli_schema"], directory=invocation)),
+                        stage=stage, attempt=repair_number)
                     execution = {key: result["execution"].get(key) for key in _EXECUTION_FIELDS}
                     if execution_config_sha256 is not None:
                         execution["execution_config_sha256"] = execution_config_sha256
@@ -189,57 +210,61 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                         execution["published_schema_sha256"] = assembled["assembly"]["published_schema_sha256"]
                     executions.append(execution)
                     # 모델 실행 중 바뀐 작업 버전으로 숫자만 교체해 오래된 결과를 저장하지 않는다.
-                    await _current(client, common, revision)
-                    await _current_input(client, common, selected, fixed, revision)
+                    await timings.wait("currentness", _current(client, common, revision), operation="job", stage=stage)
+                    await timings.wait("currentness", _current_input(client, common, selected, fixed, revision),
+                                       operation="input", stage=stage)
                     lease.check()
                     payload = result["value"]
                     diagnostics = payload["diagnostics"]
                     incomplete = bool(diagnostics["unread_ranges"] or stage == "prepare_wiki" and diagnostics["omissions"])
+                    arguments = {**common, **selected, "expected_job_revision": revision,
+                        "bundle_id": fixed["bundle_id"], "bundle_revision": fixed["bundle_revision"],
+                        "request_id": uuid4().hex, "document": document,
+                        "expected_revision": target.get("source_revision"), "execution": execution,
+                        "diagnostics": diagnostics, "save": not incomplete}
+                    if stage == "prepare_wiki":
+                        arguments["content"] = payload["content"]
+                        tool = "analysis_job_wiki_write"
+                    else:
+                        arguments.update(submission=payload["submission"], expected_state_revision=target["state_revision"])
+                        tool = "analysis_job_ontology_generate"
                     if stage != "extract_ontology" or incomplete:
                         # 미독은 원래 save=false 진단 보존 경로로 보낸다. 재생성으로 숨기지 않는다.
                         break
-                    validation = inspect(payload["submission"], basis)
-                    private_directory(invocation, exist_ok=True)
-                    _record(invocation / "draft-validation.json", validation)
+                    with timings.measure("validation", stage=stage, attempt=repair_number) as observation:
+                        validation = inspect(arguments, basis)
+                        observation["passed"] = validation["passed"]
+                        private_directory(invocation, exist_ok=True)
+                        _record(invocation / "draft-validation.json", validation)
                     if validation["passed"]:
                         break
                     if not validation["repairable"]:
                         raise AnalysisClientError("analysis_draft_invalid")
                     if repair_number == MAX_DRAFT_REPAIRS:
                         raise AnalysisClientError("analysis_draft_repair_exhausted")
-                    prompt = repair_prompt(assembled["prompt"], payload, validation, repair_number + 1)
-                target = next(item for item in assembled["manifest"]["dependency"]["documents"]
-                              if item["document"] == document)
+                    with timings.measure("preparation", operation="repair_prompt", stage=stage):
+                        prompt = repair_prompt(assembled["prompt"], payload, validation, repair_number + 1)
                 stage_session = result["execution"] if stage == "extract_ontology" else None
-                arguments = {**common, **selected, "expected_job_revision": revision,
-                    "bundle_id": fixed["bundle_id"], "bundle_revision": fixed["bundle_revision"],
-                    "request_id": uuid4().hex, "document": document,
-                    "expected_revision": target.get("source_revision"), "execution": execution,
-                    "diagnostics": diagnostics, "save": not incomplete}
-                if stage == "prepare_wiki":
-                    arguments["content"] = payload["content"]
-                    tool = "analysis_job_wiki_write"
-                else:
-                    arguments.update(submission=payload["submission"], expected_state_revision=target["state_revision"])
-                    tool = "analysis_job_ontology_generate"
                 if stage == "extract_ontology" and semantic_check and not incomplete:
                     if hasattr(underlying_adapter, "persist_session"):
                         underlying_adapter.persist_session = False
                     from core.client.semantic_check import run_semantic_check
                     _record(stage_directory / "generation-diagnostics.json", diagnostics)
-                    report = await lease.guard(run_semantic_check(fixed_input=fixed, directory=stage_directory,
+                    report = await timings.wait("semantic_check", lease.guard(run_semantic_check(fixed_input=fixed, directory=stage_directory,
                         target_document=document, submission=payload["submission"], adapter=adapter,
-                        output_directory=stage_directory / "semantic-check"))
-                    await _current(client, common, revision)
+                        output_directory=stage_directory / "semantic-check")), stage=stage)
+                    await timings.wait("currentness", _current(client, common, revision), operation="job", stage=stage)
                     report_dir = private_directory(stage_directory / "semantic-report", exist_ok=False)
                     check_arguments = {**arguments, "request_id": uuid4().hex, "diagnostics": report, "save": False}
-                    report_receipt = await _store_result(client, tool, check_arguments, report_dir)
+                    report_receipt = await timings.wait("storage", _store_result(client, tool, check_arguments, report_dir),
+                        stage=stage, operation="semantic_report_and_confirm_receipt")
                     semantic_reports.append(report_receipt)
                     revision = report_receipt["job_revision"]
                     arguments["expected_job_revision"] = revision
-                    await _current(client, common, revision)
+                    await timings.wait("currentness", _current(client, common, revision), operation="job", stage=stage)
                     lease.check()
-                receipt = await _store_result(client, tool, arguments, stage_directory)
+                receipt = await timings.wait("storage", _store_result(client, tool, arguments, stage_directory),
+                    stage=stage, operation="save_and_confirm_receipt")
                 receipts.append(receipt)
                 revision = receipt["job_revision"]
                 if incomplete:
@@ -258,18 +283,21 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                         # 그래프 저장은 이미 확인됐다. 로컬 세션을 보존하지 못해도 다시 추출하지 않는다.
                         session_ref_error = (error.code if isinstance(error, AnalysisClientError)
                                              else "comparison_session_ref_write_failed")
-            job = await _current(client, common, revision)
+            job = await timings.wait("currentness", _current(client, common, revision), operation="job")
             if job["result_summary"]["status"] != "complete":
                 raise AnalysisClientError("analysis_result_unconfirmed")
             if continuation is not None:
                 from core.client.post_extraction import compare_stored_extraction
-                comparison = await lease.guard(compare_stored_extraction(http, adapter, tenant=tenant,
-                    profile=profile, job_id=job_id, receipt=continuation[0], session=continuation[1], directory=directory))
+                with timings.measure("comparison") as observation:
+                    comparison = await lease.guard(compare_stored_extraction(http, adapter, tenant=tenant,
+                        profile=profile, job_id=job_id, receipt=continuation[0], session=continuation[1], directory=directory))
+                    observation["result_status"] = comparison["status"]
                 if session_ref_error is not None:
                     comparison["session_ref_error"] = session_ref_error
             # CLI 종료 보고와 서버의 저장 증거는 별개다. complete라는 자기보고는 보내지 않는다.
-            stopped = await tool_call(client, "analysis_job_update", {**common, "expected_job_revision": revision,
-                "reported_status": "stopped", "message": "Personal AI adapter finished; inspect the server storage receipts."})
+            stopped = await timings.wait("finalization", tool_call(client, "analysis_job_update", {**common, "expected_job_revision": revision,
+                "reported_status": "stopped", "message": "Personal AI adapter finished; inspect the server storage receipts."}))
+            timings.finish("stored")
             value = {"status": "stored", "job_revision": stopped["job_revision"], "receipts": receipts,
                      "lease_revision": stopped["lease_revision"],
                      "executions": executions, "semantic_validation": "client_reported" if semantic_reports else "not_run",
@@ -280,6 +308,7 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
             _record(directory / "ai-result.json", value)
             return value
     except BaseException as error:
+        timings.finish(outcome(error))
         code = error.code if isinstance(error, AnalysisClientError) else "ai_cancelled" if isinstance(
             error, asyncio.CancelledError) else "analysis_execution_failed"
         _record(directory / "ai-failure.json", {"status": "stopped", "error_code": code,

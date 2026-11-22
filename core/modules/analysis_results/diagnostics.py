@@ -150,9 +150,20 @@ def empty_report():
             "omissions": [], "unread_ranges": [], "reviewed_ranges": [], "findings": []}
 
 
-def _range(value, lines):
+def _diagnostic_error(code, path, reason):
+    # 위치와 고정된 계약 설명만 붙인다. 원문/제출값을 고치거나 정답 인용을 만들지 않는다.
+    return ResultError(code, diagnostic_path=path, reason=reason)
+
+
+def _pointer(parts):
+    return "/diagnostics" + "".join("/" + str(part).replace("~", "~0").replace("/", "~1") for part in parts)
+
+
+def _range(value, lines, path="/diagnostics"):
     if not 1 <= value.start_line <= value.end_line <= len(lines):
-        raise ResultError("invalid_diagnostics")
+        field = "start_line" if not 1 <= value.start_line <= len(lines) or value.start_line > value.end_line else "end_line"
+        raise _diagnostic_error("invalid_diagnostics", path + "/" + field,
+            "The range must start and end within the fixed source, in order.")
 
 
 def source_text(manifest, components, payload):
@@ -163,10 +174,10 @@ def source_text(manifest, components, payload):
     return next(item["source"]["content"] for item in context["documents"] if item["document"] == payload["document"])
 
 
-def _validate_finding(finding, source, lines, payload):
+def _validate_finding(finding, source, lines, payload, path="/diagnostics/findings"):
     if finding.source is not None:
         selected = finding.source
-        _range(selected, lines)
+        _range(selected, lines, path + "/source")
         start = sum(len(line) for line in lines[:selected.start_line - 1])
         end = sum(len(line) for line in lines[:selected.end_line])
         at = source.find(selected.quote, start, end)
@@ -174,14 +185,17 @@ def _validate_finding(finding, source, lines, payload):
         first_end = start + len(lines[selected.start_line - 1])
         last_start = end - len(lines[selected.end_line - 1])
         if at < 0 or not start <= at < first_end or not last_start <= at + len(selected.quote) - 1 < end:
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", path + "/source",
+                "The literal quote must occur in the reported range and begin and end on exactly those source lines.")
     elif finding.verdict not in UNRESOLVED_VERDICTS:
-        raise ResultError("diagnostic_evidence_required")
+        raise _diagnostic_error("diagnostic_evidence_required", path + "/source",
+            "A finding other than ambiguous, not_run, or undetermined requires a source quote and exact line range.")
     if finding.target is not None:
         submission = payload.get("submission", {})
         items = submission.get(finding.target.collection) if type(submission) is dict else None
         if type(items) is not list or finding.target.index >= len(items):
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", path + "/target",
+                "The target collection and index must identify an item in this exact submission.")
 
 
 def validate(value, manifest, components, payload):
@@ -190,65 +204,82 @@ def validate(value, manifest, components, payload):
         return
     try:
         if type(value) is not dict or type(value.get("schema_version")) is not int:
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", "/diagnostics/schema_version",
+                "The diagnostic report must be an object with an integer schema_version.")
         if len(canonical_json_bytes(value)) > MAX_DIAGNOSTIC_BYTES:
             raise ResultError("diagnostic_limit")
         if "rules/diagnostics.schema.json" in components:
             from jsonschema import Draft202012Validator
             published = json.loads(components["rules/diagnostics.schema.json"])
-            if not Draft202012Validator(validation_schema(published)).is_valid(value):
-                raise ResultError("invalid_diagnostics")
+            failure = next(Draft202012Validator(validation_schema(published)).iter_errors(value), None)
+            if failure is not None:
+                raise _diagnostic_error("invalid_diagnostics", _pointer(failure.absolute_path),
+                    "The diagnostic value must satisfy the published diagnostic schema at this path.")
         model = DiagnosticReport if value["schema_version"] == 1 else DiagnosticReportV2
         report = model.model_validate(value)
         source = source_text(manifest, components, payload)
         lines = source.splitlines(keepends=True)
-        for selected in report.reviewed_ranges:
-            _range(selected, lines)
-        for finding in report.findings:
-            _validate_finding(finding, source, lines, payload)
+        for index, selected in enumerate(report.reviewed_ranges):
+            _range(selected, lines, f"/diagnostics/reviewed_ranges/{index}")
+        for index, finding in enumerate(report.findings):
+            _validate_finding(finding, source, lines, payload, f"/diagnostics/findings/{index}")
         if report.reviewer_kind == "not_reported" and (report.findings or report.reviewed_ranges):
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", "/diagnostics/reviewer_kind",
+                "not_reported requires both findings and reviewed_ranges to be empty.")
         if isinstance(report, DiagnosticReportV2):
             _validate_rules(report, manifest, payload)
     except (ValidationError, KeyError, TypeError, StopIteration, ValueError) as error:
         if isinstance(error, ResultError):
             raise
-        raise ResultError("invalid_diagnostics") from error
+        location = error.errors(include_input=False)[0]["loc"] if isinstance(error, ValidationError) else ()
+        raise _diagnostic_error("invalid_diagnostics", _pointer(location),
+            "The diagnostic report must satisfy its schema and fixed-input contract.") from error
 
 
 def _validate_rules(report, manifest, payload):
     """자기보고의 완전한 규칙 목록과 정확 입력만 검사한다. 의미 결론을 서버 결론으로 바꾸지 않는다."""
     if sorted(item.rule_id for item in report.rule_results) != SEMANTIC_RULES:
-        raise ResultError("invalid_diagnostics")
-    for result in report.rule_results:
-        _validate_rule_result(report, result)
+        raise _diagnostic_error("invalid_diagnostics", "/diagnostics/rule_results",
+            "rule_results must contain each semantic rule ID exactly once.")
+    for index, result in enumerate(report.rule_results):
+        _validate_rule_result(report, result, f"/diagnostics/rule_results/{index}")
     _validate_check(report, manifest, payload)
 
 
-def _validate_rule_result(report, result):
+def _validate_rule_result(report, result, path="/diagnostics/rule_results"):
     if not result.reason.strip() or len(set(result.finding_indices)) != len(result.finding_indices):
-        raise ResultError("invalid_diagnostics")
+        field = "reason" if not result.reason.strip() else "finding_indices"
+        raise _diagnostic_error("invalid_diagnostics", path + "/" + field,
+            "A rule result requires a nonblank reason and unique finding indices.")
     linked = []
-    for index in result.finding_indices:
+    for position, index in enumerate(result.finding_indices):
         if index >= len(report.findings) or report.findings[index].rule_id != result.rule_id:
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", path + f"/finding_indices/{position}",
+                "Each finding index must identify an existing finding for this same rule.")
         linked.append(report.findings[index])
     if result.status in {"pass", "fail"} and not report.reviewed_ranges:
-        raise ResultError("diagnostic_evidence_required")
+        raise _diagnostic_error("diagnostic_evidence_required", path + "/status",
+            "A pass or fail rule result requires at least one reviewed source range.")
     if result.status == "fail" and not any(item.verdict in PROBLEM_VERDICTS for item in linked):
-        raise ResultError("diagnostic_evidence_required")
+        raise _diagnostic_error("diagnostic_evidence_required", path + "/finding_indices",
+            "A fail rule result must link a contradicted, unsupported, condition_loss, omission, or schema_limit finding.")
     # schema_limit은 확인한 표현 손실이다. 미판정(not_run)이나 의미 통과로 바꾸지 않는다.
     findings = [item for item in report.findings if item.rule_id == result.rule_id]
     if result.status == "pass" and any(item.verdict != "supported" for item in findings):
-        raise ResultError("invalid_diagnostics")
+        raise _diagnostic_error("invalid_diagnostics", path + "/status",
+            "A pass rule result may only have supported findings for that rule.")
     if result.rule_id == "R-S10" and result.status == "pass" and (report.omissions or report.unread_ranges):
-        raise ResultError("invalid_diagnostics")
+        raise _diagnostic_error("invalid_diagnostics", path + "/status",
+            "R-S10 cannot pass while omissions or unread_ranges are reported.")
     if result.status == "not_applicable" and findings:
-        raise ResultError("invalid_diagnostics")
+        raise _diagnostic_error("invalid_diagnostics", path + "/status",
+            "A not_applicable rule result cannot have findings for that rule.")
     if result.status == "not_run" and any(item.verdict not in UNRESOLVED_VERDICTS for item in findings):
-        raise ResultError("invalid_diagnostics")
+        raise _diagnostic_error("invalid_diagnostics", path + "/status",
+            "A not_run rule result may only have ambiguous, not_run, or undetermined findings.")
     if report.reviewer_kind == "not_reported" and result.status != "not_run":
-        raise ResultError("invalid_diagnostics")
+        raise _diagnostic_error("invalid_diagnostics", path + "/status",
+            "When reviewer_kind is not_reported, every rule result must be not_run.")
 
 
 def _validate_check(report, manifest, payload):
@@ -257,7 +288,8 @@ def _validate_check(report, manifest, payload):
         raise ResultError("diagnostic_check_input_required")
     if check is not None:
         if manifest["stage"] != "extract_ontology" or "submission" not in payload:
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", "/diagnostics/semantic_check",
+                "semantic_check requires an extract_ontology input with a submission.")
         expected = {key: payload[key] for key in ("job_id", "run_id", "bundle_id", "bundle_revision", "document")}
         expected.update(source_revision=payload["expected_revision"],
                         submission_sha256=canonical_json_hash(payload["submission"]),
@@ -266,9 +298,11 @@ def _validate_check(report, manifest, payload):
             raise ResultError("diagnostic_check_input_mismatch")
         from hashlib import sha256
         if (check.source_audit is None) != (check.source_audit_sha256 is None):
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", "/diagnostics/semantic_check/source_audit_sha256",
+                "source_audit and source_audit_sha256 must either both be present or both be null.")
         if check.source_audit is not None and sha256(check.source_audit.encode()).hexdigest() != check.source_audit_sha256:
-            raise ResultError("invalid_diagnostics")
+            raise _diagnostic_error("invalid_diagnostics", "/diagnostics/semantic_check/source_audit_sha256",
+                "source_audit_sha256 must match the exact UTF-8 source_audit text.")
         if report.reviewer_kind == "separate_ai" and any(
                 row.status in {"pass", "fail", "not_applicable"} for row in report.rule_results):
             if check.source_audit_execution is None or check.assessment_execution is None or check.source_audit is None:

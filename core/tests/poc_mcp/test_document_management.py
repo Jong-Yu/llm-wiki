@@ -263,5 +263,6 @@ class DocumentManagementTests(ServerFixture):
         self.assertIn("expected_revision", schema["required"])
         self.assertEqual(schema["properties"]["expected_revision"]["type"], "string")
         legacy = asyncio.run(create_server(self.store).list_tools())
-        self.assertEqual(len(legacy), 8)
+        self.assertEqual(len(legacy), 9)  # Existing eight data tools plus static guidance.
+        self.assertIn("wiki_guidance", {tool.name for tool in legacy})
         self.assertFalse(DOCUMENT_MANAGEMENT_TOOLS & {tool.name for tool in legacy})

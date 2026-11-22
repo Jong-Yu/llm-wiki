@@ -24,6 +24,8 @@ def main():
     parser.add_argument("--lock-timeout", type=float, default=DEFAULT_LOCK_TIMEOUT_SECONDS)
     parser.add_argument("--ruleset-root", type=Path)
     parser.add_argument("--ruleset-policy", type=Path)
+    parser.add_argument("--guidance-mode", choices=("full", "compact"), default="full",
+                        help="MCP startup instructions: full (default) or compact with on-demand workflow guidance.")
     parser.add_argument("--ruleset-config", type=Path,
                         help="Explicit JSON file with absolute ruleset_root and ruleset_policy paths; cannot be combined with individual path options.")
     parser.add_argument("--credential-key-file", type=Path,
@@ -49,7 +51,7 @@ def main():
                               tracked_reads=args.tracked_read_index)
         policy.validate()
         app = create_application(policy, rulesets=configured_rulesets(ruleset_root, ruleset_policy, policy),
-                                 credential_key_path=args.credential_key_file)
+                                 credential_key_path=args.credential_key_file, guidance_mode=args.guidance_mode)
     except (PolicyError, OSError, ValueError, TypeError):
         parser.error("The current tenant policy or data root is unavailable.")
     uvicorn.run(app, host=HTTP_HOST, port=args.port, workers=1,

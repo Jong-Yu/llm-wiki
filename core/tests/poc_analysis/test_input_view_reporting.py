@@ -118,6 +118,11 @@ class InputViewReportingTests(unittest.IsolatedAsyncioTestCase):
         original_context = json.loads(captured['components']['data/context.json'])
         self.assertEqual(json.loads(full_data['components']['data/context.json']), original_context)
         compact_context = json.loads(selected_data['components']['data/context.json'])
+        selected_lines = json.loads(selected['prompt'].split('\nSOURCE_LINE_REFERENCE\n', 1)[1].split('\nPUBLISHED_RULES\n', 1)[0])
+        full_lines = json.loads(full['prompt'].split('\nSOURCE_LINE_REFERENCE\n', 1)[1].split('\nPUBLISHED_RULES\n', 1)[0])
+        self.assertEqual(selected_lines, full_lines)
+        line_source = next(row['source'] for row in compact_context['documents'] if row['document'] == selected_lines['document'])
+        self.assertEqual(''.join(row['text'] for row in selected_lines['lines']), line_source['content'])
         for old, new in zip(original_context['documents'], compact_context['documents']):
             self.assertEqual(old['source'], new['source'])
             self.assertEqual(old['review']['effective_graph'], new['review']['effective_graph'])

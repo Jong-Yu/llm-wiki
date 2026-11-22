@@ -18,6 +18,7 @@ import stat
 import sys
 
 from core.modules.access.policy import AccessDenied, AccessPolicy, MAX_POLICY_BYTES, PolicyError
+from core.mcp.toolsets import TOOLSET_NAMES
 
 
 # 호출한 셸의 작업 경로·PATH 대신 이 프로젝트의 모듈과 가상환경을 실행한다.
@@ -128,7 +129,7 @@ def _protected_bytes(path, limit):
 
 # 토큰을 서버 실행 환경에 넣을 계획을 만든다. 계획만 반환하며 원문이나 클라이언트 설정을 수정하지 않는다.
 def prepare_launch(*, token_file, access_config, tenant_root, lock_timeout=5,
-                   environment=None) -> LaunchSpec:
+                   environment=None, toolset="all") -> LaunchSpec:
     """프로세스를 시작하거나 데이터를 쓰지 않고 stdio 실행 계획을 검증한다.
 
     비밀이 든 environment는 LaunchSpec의 repr에서 제외한다. 이 계획으로 서버의
@@ -136,6 +137,8 @@ def prepare_launch(*, token_file, access_config, tenant_root, lock_timeout=5,
     """
     if os.name != "posix":
         raise LauncherError("unsupported_platform")
+    if toolset not in TOOLSET_NAMES:
+        raise LauncherError("invalid_toolset")
     token_file = _absolute_path(token_file)
     access_config = _absolute_path(access_config)
     tenant_root = _absolute_path(tenant_root)
@@ -175,6 +178,9 @@ def prepare_launch(*, token_file, access_config, tenant_root, lock_timeout=5,
             "--access-config", str(access_config), "--tenant-root", str(tenant_root),
             "--transport", "stdio", "--token-env", PERSONAL_TOKEN_ENV,
             "--lock-timeout", str(lock_timeout))
+    if toolset != "all":
+        # 기본 all의 기존 실행 인자는 그대로 두고, 역할 묶음을 고른 경우만 덧붙인다.
+        argv += ("--toolset", toolset)
     return LaunchSpec(str(PROJECT_PYTHON), argv, str(PROJECT_DIR), child_environment)
 
 
@@ -206,10 +212,12 @@ def main(argv=None):
                         help="Absolute existing tenant root; authentication never falls back to legacy.")
     parser.add_argument("--lock-timeout", type=float, default=5,
                         help="Finite nonnegative writer-lock wait in seconds (default: 5).")
+    parser.add_argument("--toolset", choices=TOOLSET_NAMES, default="all",
+                        help="Role tool bundle exposed to the client (default: all).")
     args = parser.parse_args(argv)
     try:
         launch(token_file=args.token_file, access_config=args.access_config,
-               tenant_root=args.tenant_root, lock_timeout=args.lock_timeout)
+               tenant_root=args.tenant_root, lock_timeout=args.lock_timeout, toolset=args.toolset)
     except LauncherError as error:
         print(f"personal-launcher: {error.code}.", file=sys.stderr)
         return 2

@@ -7,6 +7,8 @@ description: LLM Wiki MCP로 등록 원본의 분석 작업을 조회·준비·�
 
 이 스킬은 기존 분석 도구의 실행 순서를 안내한다. 추출 의미 기준과 제출 스키마는 서버의 발행 규약 또는 프로젝트의 기존 공통 지침을 사용한다.
 
+연결은 `extract` 도구 묶음(stdio `--toolset extract`, HTTP `/mcp?toolset=extract`)을 사용한다. 같은 규약 판본의 `extraction_rules_read`는 한 번 읽어 재사용하고, 관련 위키를 따로 다시 읽기보다 고정된 작업 입력을 사용한다. 여러 업무가 섞인 요청은 [wiki-route](../wiki-route/SKILL.md)로 나눈다.
+
 ## 실행 경로 선택
 
 1. `access_context`로 tenant·권한·허용 profile을 확인하고 실제 노출된 도구를 확인한다. 조회만 가능한 연결에서는 초안·필요 작업을 설명하고 저장이나 권한 설정 변경을 대신 실행하지 않는다.

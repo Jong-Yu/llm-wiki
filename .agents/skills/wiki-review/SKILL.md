@@ -7,6 +7,8 @@ description: LLM Wiki의 원문 주장 검토·전문가 판단·독립 관계 �
 
 사용자가 요청한 판단·관계·표시 정리의 종류를 구분하고 해당 절차만 적용한다. 본문·판본 변경은 [wiki-edit](../wiki-edit/SKILL.md)를 사용한다. [공통 보존 규칙](../../../AGENTS.md#공통-데이터-보존)과 [검토·정책 규칙](../../../docs/domains/reviews/RULES.md)이 계약의 원본이다.
 
+연결은 `review` 도구 묶음(stdio `--toolset review`, HTTP `/mcp?toolset=review`)을 사용한다. 한 번에 한 문서의 검토 스냅샷을 다루고, 저장 응답의 `detail_query`는 전체 스냅샷이 필요할 때만 따른다. 여러 업무가 섞인 요청은 [wiki-route](../wiki-route/SKILL.md)로 나눈다.
+
 ## 대상과 권한
 
 - `access_context`로 실제 tenant·허용 profile·행동 권한을 확인하고 현재 노출 도구의 스키마를 읽는다. 선택한 tenant를 모든 데이터 호출에 전달한다. profile은 권한 부여 수단이 아니다.

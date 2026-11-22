@@ -1,6 +1,7 @@
 """Authenticated MCP adapters: identical preview, explicit selection, receipts and undo."""
 from typing import Annotated
 from mcp.types import CallToolResult, ToolAnnotations
+from core.mcp.presentation import REPLAYABLE_MUTATION
 from pydantic import Field, StrictStr, StrictInt
 from core.common.access import access_dict
 from core.modules.access.policy import AccessDenied, PolicyError
@@ -19,7 +20,6 @@ CLEANUP_TOOLS = {"ontology_cleanup_preview", "ontology_cleanup_apply", "ontology
 
 def _register_cleanup_tools(server, get_store):
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
-    mutation = ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False)
 
     def invoke(name, document, method, **fields):
         scope = _authorized_scope.get()
@@ -68,7 +68,7 @@ def _register_cleanup_tools(server, get_store):
         """
         return invoke("ontology_cleanup_request", document, "request", request_id=request_id)
 
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=REPLAYABLE_MUTATION, structured_output=False)
     def ontology_cleanup_apply(document: StrictStr, request_id: CleanupId, preview_revision: SourceRevisionInput,
                                item_ids: Annotated[list[SourceRevisionInput], Field(min_length=1, max_length=50)], reason: Annotated[StrictStr, Field(min_length=1, max_length=1000)]) -> CallToolResult:
         """Apply only explicitly selected preview item IDs with ontology_review permission.
@@ -82,7 +82,7 @@ def _register_cleanup_tools(server, get_store):
         return invoke("ontology_cleanup_apply", document, "apply", request_id=request_id,
                       preview_revision=preview_revision, item_ids=item_ids, reason=reason)
 
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=REPLAYABLE_MUTATION, structured_output=False)
     def ontology_cleanup_undo(document: StrictStr, request_id: CleanupId, event_id: CleanupId,
                               expected_state_revision: SourceRevisionInput,
                               reason: Annotated[StrictStr, Field(min_length=1, max_length=1000)]) -> CallToolResult:

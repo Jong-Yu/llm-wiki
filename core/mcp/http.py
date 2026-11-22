@@ -24,7 +24,7 @@ def _validate_http_token(token: str) -> None:
         raise ValueError("HTTP token must contain at least 32 URL-safe letters, digits, '-' or '_'.")
 
 
-def create_http_app(store: WikiStore, token: str) -> Starlette:
+def create_http_app(store: WikiStore, token: str, *, guidance_mode: str = "full", toolset: str = "all") -> Starlette:
     """토큰 인증과 SDK Host/Origin 검사를 적용한 POST/JSON MCP 앱을 만든다.
 
     실행 시 loopback에만 바인딩하고 HTTPS 프록시는 loopback Host를 전달해야 한다.
@@ -32,12 +32,14 @@ def create_http_app(store: WikiStore, token: str) -> Starlette:
     여유가 포함되며, WikiStore의 문서당 1 MiB 한도는 별도로 적용된다.
     """
     _validate_http_token(token)
-    return _http_app(create_server(store), token=token)
+    return _http_app(create_server(store, guidance_mode=guidance_mode, toolset=toolset), token=token)
 
 
-def create_tenant_http_app(policy: AccessPolicy, *, rulesets=None) -> Starlette:
+def create_tenant_http_app(policy: AccessPolicy, *, rulesets=None, guidance_mode: str = "full",
+                           toolset: str = "all") -> Starlette:
     # policy가 인증 사용자의 소속·권한을 판단한다. rulesets는 공통 추출 규약이 설정됐을 때 전달한다.
-    return _http_app(create_tenant_server(policy, rulesets=rulesets), policy=policy)
+    return _http_app(create_tenant_server(policy, rulesets=rulesets, guidance_mode=guidance_mode, toolset=toolset),
+                     policy=policy)
 
 
 def _http_app(server: MCPServer, *, token: str | None = None,

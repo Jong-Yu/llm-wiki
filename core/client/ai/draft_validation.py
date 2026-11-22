@@ -6,17 +6,23 @@ from core.client.inputs import MAX_INPUT_BYTES, load_input
 from core.client.transport import AnalysisClientError
 from core.common.json_codec import canonical_json_bytes
 from core.modules.ontology.draft import DRAFT_VALIDATION_VERSION, validate_draft
+from core.modules.analysis_results.contracts import ResultError
+from core.modules.analysis_results.diagnostics import validate as validate_diagnostics
 
 
 MAX_DRAFT_REPAIRS = 2
-DRAFT_REPAIR_POLICY = "whole_submission_on_repairable_validation_v1"
+DRAFT_REPAIR_POLICY = "whole_output_diagnostic_paths_and_source_line_reference_v5"
 
 
 def configuration():
     from inspect import signature
     from core.modules.ontology import draft
+    from .assembly import diagnostic_guidance_configuration, source_line_reference_configuration
     return {"validation_version": DRAFT_VALIDATION_VERSION,
             "repair_policy": DRAFT_REPAIR_POLICY, "max_repairs": MAX_DRAFT_REPAIRS,
+            "diagnostic_work_policy": draft.DIAGNOSTIC_WORK_POLICY,
+            "diagnostic_guidance": diagnostic_guidance_configuration(),
+            "source_line_reference": source_line_reference_configuration(),
             "max_reported_errors": signature(validate_draft).parameters["max_errors"].default,
             "resource_limits": {
                 "submission_bytes": draft.MAX_SUBMISSION_BYTES, "source_bytes": draft.MAX_DOCUMENT_BYTES,
@@ -43,13 +49,38 @@ def fixed_basis(fixed_input, directory, document):
             raise ValueError()
         return {"source": source["content"], "document": document,
                 "expected_revision": targets[0]["source_revision"],
-                "schema": json.loads(components["rules/submission.schema.json"])}
+                "schema": json.loads(components["rules/submission.schema.json"]),
+                "manifest": manifest, "components": components}
     except (KeyError, TypeError, ValueError, RecursionError):
         raise AnalysisClientError("analysis_input_incomplete") from None
 
 
-def inspect(submission, basis):
-    return validate_draft(submission=submission, **basis)
+def inspect(payload, basis):
+    """저장할 정확한 출력에 서버와 같은 진단 검사를 적용하며 값을 고치지 않는다."""
+    report = validate_draft(submission=payload["submission"], **{
+        key: basis[key] for key in ("source", "document", "expected_revision", "schema")})
+    report["full_validation"]["diagnostics"] = {"status": "not_run"}
+    if not report["passed"] and not report["repairable"]:
+        return report
+    try:
+        validate_diagnostics(payload["diagnostics"], basis["manifest"], basis["components"], payload)
+    except ResultError as error:
+        repairable = error.code in {"invalid_diagnostics", "diagnostic_evidence_required"}
+        report["repairable"] = repairable
+        report["passed"] = False
+        report["full_validation"]["status"] = "failed"
+        report["full_validation"]["diagnostics"] = {"status": "failed", "code": error.code}
+        if len(report["errors"]) < report["limits"]["max_errors"]:
+            report["errors"].append({"path": error.details.get("diagnostic_path", "/diagnostics"), "code": error.code,
+                "message": error.details.get("reason",
+                    "Check diagnostic evidence, exact source line coordinates, targets and rule results against the fixed input."),
+                "kind": "diagnostics"})
+        else:
+            report["truncated"] = True
+            report["repairable"] = False
+    else:
+        report["full_validation"]["diagnostics"] = {"status": "passed"}
+    return report
 
 
 def repair_prompt(original_prompt, previous_output, report, repair_number):

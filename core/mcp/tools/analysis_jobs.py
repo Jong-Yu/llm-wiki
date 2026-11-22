@@ -8,6 +8,7 @@ import re
 from typing import Annotated, Literal
 
 from mcp.types import CallToolResult, ToolAnnotations
+from core.mcp.presentation import ADDITIVE, ADDITIVE_REPLAYABLE
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 
 from core.api.dependencies import scope_key
@@ -147,7 +148,7 @@ def _register_analysis_job_tools(server, get_store):
         except PolicyError:
             return _access_error("access_unavailable")
 
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=ADDITIVE_REPLAYABLE, structured_output=False)
     def analysis_registration_create(
         request_id: Identifier, source_ref: RegistrationSourceRef,
         document: Annotated[StrictStr, Field(min_length=1, max_length=4096)],
@@ -169,7 +170,7 @@ def _register_analysis_job_tools(server, get_store):
             authorize=_authorize))
 
     # 현재 작업 버전으로 실행 사용권을 받는다. reclaim=True는 만료/중단된 실행을 명시적으로 다시 맡을 때 사용한다.
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=ADDITIVE, structured_output=False)
     def analysis_job_claim(job_id: Identifier, expected_job_revision: SourceRevisionInput,
                            reclaim: StrictBool = False) -> CallToolResult:
         """Claim your current job for a CLI run using source_write permission.
@@ -218,7 +219,7 @@ def _register_analysis_job_tools(server, get_store):
             tenant=scope.tenant, user_id=scope.user_id, expected_job_revision=expected_job_revision,
             reason=reason, authorize=_authorize))
 
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=ADDITIVE, structured_output=False)
     def analysis_job_heartbeat(job_id: Identifier, run_id: Identifier,
                                expected_lease_revision: SourceRevisionInput) -> CallToolResult:
         """Renew your current live run once using its queried lease revision.

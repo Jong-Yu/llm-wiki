@@ -6,6 +6,7 @@
 from typing import Annotated, Literal
 
 from mcp.types import CallToolResult, ToolAnnotations
+from core.mcp.presentation import ADDITIVE
 from pydantic import Field, StrictInt, StrictStr
 
 from core.modules.access.policy import AccessDenied
@@ -58,7 +59,7 @@ def _register_correspondence_tools(server, get_store):
                       draft=draft, application_context=application_context, as_of=as_of or None)
 
     # 조건/개념과 전체 초안을 명시한 기준 버전에 제출한다. 이름의 일치만으로 대응을 확정하지 않는다.
-    @server.tool(annotations=mutation, structured_output=False)
+    @server.tool(annotations=ADDITIVE, structured_output=False)
     def ontology_correspondence_propose(
         correspondence_id: StrictStr, draft: dict, expected_state_revision: SourceRevisionInput,
         reason: CorrespondenceReasonInput,

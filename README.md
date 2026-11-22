@@ -25,12 +25,19 @@ Python 코드의 위치와 실행 흐름은 [core 길잡이](core/README.md)에�
 
 | 스킬 | 용도 |
 | --- | --- |
+| [wiki-route](.agents/skills/wiki-route/SKILL.md) | 복합 요청을 역할별 도구 묶음과 스킬로 연결 |
 | [wiki-query](.agents/skills/wiki-query/SKILL.md) | 현재 지식·질문 근거·검토함·이력 조회 |
 | [wiki-edit](.agents/skills/wiki-edit/SKILL.md) | 본문 작성·수정과 판본 비교·복원 |
 | [wiki-review](.agents/skills/wiki-review/SKILL.md) | 원문 검토·전문가 판단·관계 추가·Clean Up |
 | [wiki-analyze](.agents/skills/wiki-analyze/SKILL.md) | 분석 작업 조회·준비·실행·취소와 온톨로지 추출 |
 | [wiki-diagnose](.agents/skills/wiki-diagnose/SKILL.md) | API·MCP·개인 실행 환경의 읽기 전용 진단 |
 | [wiki-maintain](.agents/skills/wiki-maintain/SKILL.md) | 기존 호출 호환과 여러 종류 변경의 절차 연결 |
+
+## 기능별 MCP 안내와 도구 묶음
+
+기본 `all` 연결은 전체 도구를 제공합니다. stdio·개인 launcher의 `--toolset ask|write|extract|review|all` 또는 HTTP `/mcp?toolset=ask`로 업무에 필요한 도구만 선택할 수 있습니다. 고정한 묶음은 요청으로 바꿀 수 없으며 실제 인증·tenant·profile 권한 검사는 그대로 적용합니다. 묶음에 없는 업무는 맞는 연결을 사용합니다.
+
+`wiki_guidance(task="catalog")`와 `wiki_<task>` 프롬프트로 업무별 안내를 선택합니다. `--guidance-mode compact`는 초기 안내를 줄이며 기본은 `full`입니다. `wiki_read(view="body")`는 중복된 `content`를 제외하고 본문·판본을 보존합니다. `ask`에서 보기를 생략하면 `body`, 다른 연결에서는 `full`입니다. 실제 토큰 효과는 클라이언트의 도구 로드 방식에 따라 달라집니다.
 
 ## Python 실행 환경
 
@@ -163,6 +170,10 @@ tenant MCP에서는 `wiki_list`로 등록 원본과 Wiki 목록, `wiki_versions`
 ```
 
 제공자 기본값은 기존 Codex이며 필요하면 기존 `--ai-provider`/`--ai-model` 선택을 그대로 사용합니다. `current-review-v1`은 전체 선택 본문·조건·예외·규약·유효 그래프·현재 판단을 보존하면서 중복 값과 적용되지 않는 과거 이벤트의 반복 전송을 줄입니다. 서버의 전체 bundle/원장과 로컬 수신 사본은 유지합니다. 기본 `--input-view full`도 사용할 수 있습니다. 전체 맥락을 자동 발견했다는 뜻은 아닙니다.
+
+분석 CLI의 `--rules-view stage-v1`은 명시적으로 선택한 단계 규약만 모델에 전달합니다. 서버의 전체 입력은 보존하며 기본은 `full`입니다. 추출 의미 보존 기준을 충족하지 못해 기본 적용하지 않았습니다. 철회된 `json-values-v1`은 제공하지 않습니다.
+
+`usage_observations.timings`는 준비·AI·진단·저장·후속 대조의 시간을 구분합니다. 본문 앵커와 진단 위치의 서로 다른 줄 좌표를 모델에 명시해 불필요한 교정을 줄입니다. 기록된 실행기 시간은 화면 관측까지의 전체 시간과 구분합니다.
 
 여러 기존 작업은 `--job-id`와 `--expected-job-revision` 대신 `--batch-jobs /absolute/selected-jobs.json`으로 실행합니다. 파일은 `[{"job_id":"32자리 작업 ID","expected_job_revision":"64자리 관측 revision"}]` 형식이며 최대 8개를 명시합니다. 선택한 순서로 실행하고 실패는 개별 기록하며 자동 재시도하지 않습니다. 일부 실패는 종료 코드 1, 취소는 남은 작업 시작 중단입니다. 이미 저장한 결과/초안은 각 작업 폴더와 서버 영수증에 남습니다.
 

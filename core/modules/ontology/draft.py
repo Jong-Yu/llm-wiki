@@ -17,11 +17,12 @@ from core.modules.documents.metadata import parse_document
 from core.modules.documents.store import MAX_DOCUMENT_BYTES
 from . import constants
 from .errors import OntologyValidationError
-from .validation import _graph, _items
+from .validation import _ExtractionValidation, _attributes, _candidates, _graph, _items, _relations
 from .values import _revision
 
 
-DRAFT_VALIDATION_VERSION = 1
+DRAFT_VALIDATION_VERSION = 2
+DIAGNOSTIC_WORK_POLICY = "accepted_entities_and_fixed_source_context_v1"
 MAX_SUBMISSION_BYTES = 1024 * 1024
 MAX_INPUT_NODES = 20000
 MAX_INPUT_DEPTH = 32
@@ -147,13 +148,13 @@ class _CoreBudget:
     def __init__(self):
         self.items = self.source_work = 0
 
-    def charge(self, source, collections):
+    def charge(self, source, collections, *, index_source=True):
         count = sum(len(values) for values in collections.values())
         self.items += count
         # Each admitted item has bounded identifiers, anchors, qualifiers and
         # provenance. This conservative scan allowance also covers line indexing.
         if source is not None:
-            self.source_work += len(source) * (1 + count * 16)
+            self.source_work += len(source) * (int(index_source) + count * 16)
         if self.items > MAX_CORE_ITEM_VISITS or self.source_work > MAX_SOURCE_SCAN_WORK:
             raise _BudgetExceeded("Core item/source-scan work budget exceeded")
 
@@ -180,6 +181,7 @@ def _dependencies(item, rejected):
 def _diagnose(result, source, submission, document, revision, max_errors, budget):
     accepted = {name: [] for name in COLLECTIONS}
     rejected = {}
+    claim_validation = None
     details = result["item_diagnostics"]
     details.update(status="running", uninspected_items=sum(len(submission[name]) for name in COLLECTIONS))
     for name in COLLECTIONS:
@@ -196,11 +198,29 @@ def _diagnose(result, source, submission, document, revision, max_errors, budget
                 result["errors"].append(_error(path, "dependency_error", "References rejected entity inputs; item was not validated.",
                                                kind="dependent", blocked_by=blocked))
             else:
-                local = {"entities": accepted["entities"] if name != "entities" else [item]}
-                if name != "entities":
-                    local[name] = [item]
                 try:
-                    _core_items(submission, source, document, revision, budget, **local)
+                    if name == "entities":
+                        _core_items(submission, source, document, revision, budget, entities=[item])
+                    else:
+                        if claim_validation is None:
+                            budget.charge(source, {})
+                            claim_validation = _ExtractionValidation(
+                                submission["schema_version"], source, document, revision, body_only=True)
+                            # Only entities that passed both their source check and
+                            # the source-free prefix check enter this invocation's
+                            # fixed reference table. All entities precede claims.
+                            claim_validation.entity_ids = {entity["id"]: entity["type"]
+                                                           for entity in accepted["entities"]}
+                        budget.charge(source, {name: [item]}, index_source=False)
+                        # The authoritative item validators check every new item.
+                        # Fresh claim sets avoid admitting state from a failed item;
+                        # the full source-free prefix still checks cross-item rules.
+                        if name == "relations":
+                            _relations([item], claim_validation, set())
+                        elif name == "relation_candidates":
+                            _candidates([item], claim_validation, set())
+                        else:
+                            _attributes([item], claim_validation)
                     prefix = {key: list(values) for key, values in accepted.items()}
                     prefix[name].append(item)
                     _core_items(submission, None, document, revision, budget, **prefix)

@@ -10,7 +10,7 @@ from unittest.mock import patch
 from core.common.json_codec import canonical_json_bytes
 from core.modules.documents.metadata import parse_document, render_document
 from core.modules.documents.store import WikiStore, RevisionConflictError
-from core.modules.ontology import constants, draft
+from core.modules.ontology import constants, draft, validation
 from core.modules.ontology.store import OntologyStore
 from core.modules.ontology.validation import _graph
 from core.modules.reviews.contracts import ReviewConflictError
@@ -171,6 +171,114 @@ class DraftValidationTests(unittest.TestCase):
             result = self.check()
         self.assertFalse(result["repairable"])
         self.assertEqual(result["errors"][0]["code"], "work_limit")
+
+    def test_large_failed_draft_reuses_checked_entities_without_losing_item_checks(self):
+        entity_quotes = [f"E{i:02d} exists." for i in range(60)]
+        attribute_quotes = [f"E{i % 60:02d} P{i:02d} V{i:02d}." for i in range(93)]
+        source = "\n".join(entity_quotes + attribute_quotes) + "\n" + "padding " * 900
+        value = {"schema_version": 3,
+            "entities": [{"id": f"e{i}", "type": "system", "label": f"E{i:02d}", "evidence": quote}
+                         for i, quote in enumerate(entity_quotes)],
+            "relations": [{"subject": "e0", "predicate": "uses", "object": "e1",
+                           "evidence": "Absent relation.", "qualifiers": dict(constants._QUALIFIER_DEFAULTS)}],
+            "relation_candidates": [],
+            "attributes": [{"id": f"a{i}", "subject": f"e{i % 60}", "property": f"P{i:02d}",
+                            "datatype": "text", "value": f"V{i:02d}", "unit": None, "evidence": quote,
+                            "qualifiers": dict(constants._QUALIFIER_DEFAULTS)}
+                           for i, quote in enumerate(attribute_quotes)]}
+        before = deepcopy(value)
+        scans = []
+        original = validation._ExtractionValidation.evidence
+
+        def evidence(context, quote):
+            if context.source is not None:
+                scans.append(quote)
+            return original(context, quote)
+
+        with patch.object(validation._ExtractionValidation, "evidence", evidence):
+            result = self.check(value, source)
+        self.assertTrue(result["repairable"], result)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["item_diagnostics"]["checked_items"], 154)
+        self.assertEqual(result["item_diagnostics"]["uninspected_items"], 0)
+        self.assertEqual([error["path"] for error in result["errors"]], ["/relations/0"])
+        # Once in the authoritative graph and once in the diagnostic entity
+        # stage, never once again for each subsequent claim.
+        self.assertEqual([scans.count(quote) for quote in entity_quotes], [2] * 60)
+        self.assertEqual([scans.count(quote) for quote in attribute_quotes], [1] * 93)
+        self.assertEqual(value, before)
+
+    def test_diagnostic_source_and_item_budgets_still_stop_new_work(self):
+        value = submission()
+        value["relations"][0]["evidence"] = "Absent relation."
+        # The whole graph fits, but the next source/item checks do not.
+        for name, limit in (("MAX_SOURCE_SCAN_WORK", len(BODY) * (1 + 3 * 16)),
+                            ("MAX_CORE_ITEM_VISITS", 3)):
+            with self.subTest(name=name), patch.object(draft, name, limit):
+                result = self.check(value)
+            self.assertFalse(result["repairable"])
+            self.assertTrue(result["truncated"])
+            self.assertEqual(result["item_diagnostics"]["status"], "work_limit")
+            self.assertGreater(result["item_diagnostics"]["uninspected_items"], 0)
+            self.assertEqual(result["errors"][-1]["code"], "work_limit")
+
+    def test_rejected_entities_cannot_change_shared_reference_types_or_dependencies(self):
+        value = submission()
+        value["entities"].extend([
+            {**deepcopy(value["entities"][0]), "type": "document"},
+            {"id": "c", "type": "document", "label": "C", "evidence": "C is absent."},
+        ])
+        original_relation = deepcopy(value["relations"][0])
+        value["relations"] = [
+            {**deepcopy(original_relation), "provenance": {"source_entity": "a"}},
+            {**deepcopy(original_relation), "provenance": {"source_entity": "c"}},
+            original_relation,
+        ]
+        result = self.check(value)
+        self.assertTrue(result["repairable"], result)
+        by_path = {error["path"]: error for error in result["errors"]}
+        self.assertEqual(set(by_path), {"/entities/2", "/entities/3", "/relations/0", "/relations/1"})
+        self.assertIn("duplicate entity", by_path["/entities/2"]["message"])
+        self.assertIn("documented type", by_path["/relations/0"]["message"])
+        self.assertEqual(by_path["/relations/1"]["blocked_by"], ["/entities/3"])
+        self.assertEqual(result["item_diagnostics"]["uninspected_items"], 0)
+
+    def test_shared_source_context_keeps_body_lines_occurrences_and_revision_binding(self):
+        source = render_document(BODY + "\nSecond " + BODY, title="MetadataOnly")
+        parsed = parse_document(source)
+        value = submission(4)
+        value["relations"].insert(0, {**deepcopy(value["relations"][0]), "object": "missing"})
+        anchor = {"kind": "source_anchor", "document": "a.md", "source_revision": sha256(source.encode()).hexdigest(),
+                  "quote": "B", "start_line": parsed.body_start_line + 2, "end_line": parsed.body_start_line + 2,
+                  "occurrence": 0}
+        value["relations"][1]["object"] = anchor
+        value["relations"][1]["evidence"] = "Second " + BODY.strip()
+        before = deepcopy(value)
+        result = self.check(value, source)
+        self.assertEqual([error["path"] for error in result["errors"]], ["/relations/0"])
+        self.assertEqual(value, before)
+        for updates in ({"occurrence": 1}, {"start_line": 1, "end_line": 1}, {"source_revision": "0" * 64}):
+            changed = deepcopy(value)
+            changed["relations"][1]["object"].update(updates)
+            result = self.check(changed, source)
+            self.assertEqual([error["path"] for error in result["errors"]], ["/relations/0", "/relations/1"])
+        # No context from the preceding call may validate another fixed source.
+        changed_source = render_document(BODY, title="MetadataOnly")
+        changed = deepcopy(value)
+        changed["relations"][1]["object"]["source_revision"] = sha256(changed_source.encode()).hexdigest()
+        result = self.check(changed, changed_source)
+        self.assertEqual([error["path"] for error in result["errors"]], ["/relations/0", "/relations/1"])
+
+    def test_source_free_prefix_still_rejects_duplicate_attributes(self):
+        source = BODY + "A color blue.\n"
+        value = submission()
+        value["attributes"] = [{"id": name, "subject": "a", "property": "color", "datatype": "text",
+                                "value": "blue", "unit": None, "evidence": "A color blue.",
+                                "qualifiers": dict(constants._QUALIFIER_DEFAULTS)} for name in ("first", "second")]
+        result = self.check(value, source)
+        self.assertTrue(result["repairable"], result)
+        self.assertEqual([error["path"] for error in result["errors"]], ["/attributes/1"])
+        self.assertIn("duplicate attribute claim", result["errors"][0]["message"])
 
     def test_collection_resource_limit_is_not_an_automatic_repair(self):
         value = submission()

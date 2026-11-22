@@ -36,9 +36,11 @@ def _call_token_counts(usage):
     return totals or None
 
 
-def execution_configuration(adapter, preflight, *, input_view, semantic_check):
+def execution_configuration(adapter, preflight, *, input_view, semantic_check, rules_view="full"):
     """선택된 제공자/버전/모델/실행 설정을 묶는다. 기본 모델의 실제 해석은 보증하지 않는다."""
     from .draft_validation import configuration
+    from .rule_selection import rules_view_configuration
+    selected_rules = rules_view_configuration(rules_view)
     info = preflight if isinstance(preflight, dict) else {}
     value = {"version": 1, "adapter": type(adapter).__module__ + "." + type(adapter).__qualname__,
              "provider": info.get("provider"), "cli_version": info.get("cli_version"),
@@ -49,13 +51,18 @@ def execution_configuration(adapter, preflight, *, input_view, semantic_check):
     if input_view != "full":
         from .input_view import reporting_configuration
         value["input_view_reporting"] = reporting_configuration(input_view)
+    if selected_rules is not None:
+        value["rule_selection"] = selected_rules
     return value, canonical_json_hash(value)
 
 
 class ObservedAdapter:
     """실제 어댑터 호출마다 한 기록을 추가한다. 실패/취소도 호출 시도로 남긴다."""
-    def __init__(self, adapter):
+    def __init__(self, adapter, *, timings=None):
         self.adapter, self.calls = adapter, []
+        from .timings import perf_counter
+        self.timings = timings
+        self.clock = timings.clock if timings is not None else perf_counter
 
     async def run(self, **kwargs):
         prompt, schema = kwargs["prompt"], kwargs.get("output_schema") or kwargs["schema"]
@@ -65,11 +72,15 @@ class ObservedAdapter:
                        "schema_utf8_bytes": len(canonical_json_bytes(schema)),
                        "result_json_utf8_bytes": None, "token_estimate": None, "token_usage": None}
         self.calls.append(observation)
+        started = self.clock()
         try:
             result = await self.adapter.run(**kwargs)
         except BaseException as error:
-            observation.update(status="interrupted", error_type=type(error).__name__)
+            from .timings import outcome
+            observation.update(status="interrupted", outcome=outcome(error), error_type=type(error).__name__)
             raise
+        finally:
+            observation["duration_seconds"] = self.clock() - started
         observation.update(status="returned", result_json_utf8_bytes=len(canonical_json_bytes(result["value"])),
                            token_usage=result.get("execution", {}).get("token_usage"))
         return result
@@ -86,4 +97,5 @@ class ObservedAdapter:
                     "reported_call_count": len(reported), "unreported_call_count": len(self.calls) - len(reported)}
                     if totals else None,
                 "measurement": "client_observed_bytes_and_provider_reported_tokens",
-                "model_execution_certified": False}
+                "model_execution_certified": False,
+                **({"timings": self.timings.summary()} if self.timings is not None else {})}

@@ -7,6 +7,8 @@ description: LLM Wiki MCP로 현재 지식·질문 근거·검토함·이력·�
 
 연결된 `llm_wiki`의 현재 도구 설명을 확인하고 아래에서 질문에 필요한 경로만 선택한다. 데이터 조회를 위해 프로젝트 PLAN·과거 기록을 통독하지 않는다.
 
+연결은 읽기 전용 `ask` 도구 묶음(stdio `--toolset ask`, HTTP `/mcp?toolset=ask`)을 사용한다. 이 묶음의 `wiki_read`는 전체 파일 사본 없이 본문 보기를 돌려주며 Front Matter 원문이 필요할 때만 `view=full`을 준다. 변경이 섞인 요청은 [wiki-route](../wiki-route/SKILL.md)로 나눈다.
+
 ## 접근과 범위
 
 - 새 조회 세션은 `access_context`로 실제 소속·권한·허용 profile을 확인한다. 확인된 tenant를 모든 데이터 호출에 전달하고, 사용자 지정 또는 해당 소속의 기본 profile을 일관되게 사용한다. 여러 tenant 중 대상이 불명확하면 선택을 묻는다.

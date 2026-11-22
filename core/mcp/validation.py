@@ -252,6 +252,76 @@ def _invalid_argument(message):
     return _result({"ok": False, "error": error})
 
 
+# 호출자가 보낸 필드 이름만 오류에 되돌린다. 형식에 맞지 않는 이름은 '?'로 가린다.
+_SAFE_NAME = re.compile(r"[A-Za-z0-9_$]{1,64}")
+_JSON_TYPES = ((bool, "boolean"), (int, "integer"), (float, "number"), (str, "string"),
+               (list, "array"), (dict, "object"), (type(None), "null"))
+
+
+def _safe_name(value):
+    return str(value) if isinstance(value, int) or _SAFE_NAME.fullmatch(str(value)) else "?"
+
+
+def field_list(names, *, limit=5):
+    """필드 이름 목록을 짧게 보여 준다. 입력 값은 넣지 않는다."""
+    shown = [_safe_name(name) for name in sorted(names, key=str)[:limit]]
+    return ", ".join(shown) + (f" (+{len(names) - limit} more)" if len(names) > limit else "")
+
+
+def validation_error_message(error: ValidationError) -> str:
+    """Pydantic 오류 중 첫 위치와 고정 설명만 남긴다. 입력 값·문서 URL은 넣지 않는다."""
+    details = error.errors(include_url=False, include_context=False, include_input=False)
+    if not details:
+        return "Invalid tool arguments."
+    first = details[0]
+    location = ".".join(_safe_name(part) for part in first.get("loc", ())) or "arguments"
+    extra = f" ({len(details) - 1} more error(s))" if len(details) > 1 else ""
+    return f"{location}: {str(first.get('msg', 'invalid value'))[:200]}{extra}"
+
+
+def _json_type(value):
+    return next(name for kind, name in _JSON_TYPES if type(value) is kind or
+                (kind is int and isinstance(value, int) and not isinstance(value, bool)))
+
+
+def _declared_types(schema):
+    declared = schema.get("type")
+    if isinstance(declared, str):
+        return {declared}
+    if isinstance(declared, list):
+        return set(declared)
+    types = set()
+    for option in schema.get("anyOf", []) + schema.get("oneOf", []):
+        types |= _declared_types(option) if isinstance(option, dict) else set()
+    return types
+
+
+def describe_argument_error(name, arguments, schema, validate=None) -> str:
+    """세부 사유가 없는 검사 실패에 대해, 확인할 수 있는 실제 오류(필수·타입)를 찾아 설명한다.
+
+    validate는 SDK가 쓰는 같은 인자 모델 검사를 실행하는 인자 없는 함수다. 찾지 못하면 일반 안내를 돌려준다.
+    """
+    if validate is not None:
+        try:
+            validate()
+        except ValidationError as error:
+            return validation_error_message(error)
+        except Exception:
+            pass
+    properties = schema.get("properties", {})
+    missing = [field for field in schema.get("required", []) if field not in arguments]
+    if missing:
+        return f"Missing required field(s): {field_list(missing)}."
+    for field, value in arguments.items():
+        declared = _declared_types(properties.get(field, {}))
+        actual = _json_type(value)
+        if declared and actual not in declared and not (actual == "integer" and "number" in declared):
+            return (f"{_safe_name(field)}: expected {' or '.join(sorted(declared))}, got {actual}. "
+                    "Send the JSON value itself, not an encoded string.")
+    return (f"Invalid arguments for {_safe_name(name)}: use the exact JSON types, required fields "
+            "and limits in this tool's input schema.")
+
+
 def validate_raw_arguments(name: str, arguments: dict) -> CallToolResult | None:
     """원시 타입을 순서대로 검사해 SDK의 문자열/nullable 보정 전 첫 오류를 반환한다."""
     from core.mcp.response_views import COMPACT_OPERATIONS

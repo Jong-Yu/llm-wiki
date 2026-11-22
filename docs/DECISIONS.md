@@ -132,3 +132,6 @@
 | D-122 | `knowledge` | [첫 검색어 정밀 안내의 소규모 비교와 기본 도입 보류](domains/knowledge/DECISIONS.md#d-122--첫-검색어-정밀-안내의-소규모-비교와-기본-도입-보류-2026-11-08) |
 | D-123 | `knowledge` | [검색 후보를 보존하는 일치 구절 우선 페이지와 도입 보류](domains/knowledge/DECISIONS.md#d-123--검색-후보를-보존하는-일치-구절-우선-페이지와-도입-보류-2026-11-08) |
 | D-124 | `knowledge` | [기존 관계·판단 색인과 첫 답변 전 고정 근거 제공](domains/knowledge/DECISIONS.md#d-124--기존-관계판단-색인과-첫-답변-전-고정-근거-제공-2026-11-08) |
+| D-133 | `analysis` | [공통·단계별 모델 지침과 출력 스키마 중복 분리](domains/analysis/DECISIONS.md#d-133--공통단계별-모델-지침과-출력-스키마-중복-분리-2026-11-18) |
+| D-134 | `platform` | [기능별 MCP 안내와 사용자 선택 프롬프트](domains/platform/DECISIONS.md#d-134--기능별-mcp-안내와-사용자-선택-프롬프트-2026-11-18) |
+| D-135 | `platform` | [역할별 MCP 도구 묶음과 읽기 본문 보기](domains/platform/DECISIONS.md#d-135--역할별-mcp-도구-묶음과-읽기-본문-보기-2026-11-19) |
