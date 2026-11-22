@@ -167,9 +167,9 @@ npm run package               # 현재 OS: macOS DMG/ZIP, Windows NSIS, Linux ta
 
 설치 프로그램 없이 ZIP 전체를 새 폴더에 풀어 실행할 수 있습니다. 기존 설치 파일·공개 업데이트 경로는 유지합니다.
 
-현재0.1.0 포터블은 [GitHub 포터블 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable)에서 ZIP·SHA256을 내려받습니다. 기존 설치판 Release는 게시 후 파일 추가가 잠겨 있어 별도 포터블 배포를 만들었으며, 설치판의 최신 업데이트 대상은 기존 `app-0.1.0`을 유지합니다. Mac 개인 실행기 ZIP은 기존0.1.0 공개 파일을 재사용하며 내부 파일 내용이 포터블 빌드와 같음을 확인했습니다. GitHub 게시는 OS의 실행 파일 서명·공증을 대신하지 않습니다.
+기존0.1.0 포터블은 [GitHub 포터블 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable)에서 ZIP·SHA256을 내려받습니다. 기존 설치판 Release는 게시 후 파일 추가가 잠겨 있어 별도 포터블 배포를 만들었으며, 현재 설치판의 최신 업데이트 대상은 [0.1.1](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)입니다. Mac 개인 실행기 ZIP은 기존0.1.0 공개 파일을 재사용하며 내부 파일 내용이 포터블 빌드와 같음을 확인했습니다. GitHub 게시는 OS의 실행 파일 서명·공증을 대신하지 않습니다.
 
-Windows 공개 수정본은 [포터블 fix4](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix4)입니다. fix3에서 남은 Claude 첫 안내 메시지 거부를 고치고([D-143](../docs/domains/platform/DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22)), 회사 프록시·인증서·Git Bash 설정을 Claude에 넘기며, 이전 포터블의 실행기 경로를 자동으로 바꿉니다([D-144](../docs/domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)). fix1~3과 달리 현재 작업 트리 전체로 다시 빌드한 사전 릴리스입니다. 실제 Windows 호출 성공 확인은 남아 있습니다. 이전 수정본의 원인은 [실행 기록](../docs/domains/platform/HISTORY.md#2026-11-19--windows-진단의-createjobobject-typeerror와-fix3-준비)을 따릅니다.
+Windows 0.1.0 포터블의 공개 수정본은 [포터블 fix4](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix4)입니다. fix3에서 남은 Claude 첫 안내 메시지 거부를 고치고([D-143](../docs/domains/platform/DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22)), 회사 프록시·인증서·Git Bash 설정을 Claude에 넘기며, 이전 포터블의 실행기 경로를 자동으로 바꿉니다([D-144](../docs/domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)). fix1~3과 달리 현재 작업 트리 전체로 다시 빌드한 사전 릴리스입니다. 실제 Windows 호출 성공 확인은 남아 있습니다. 이전 수정본의 원인은 [실행 기록](../docs/domains/platform/HISTORY.md#2026-11-19--windows-진단의-createjobobject-typeerror와-fix3-준비)을 따릅니다.
 
 새 ZIP을 별도 폴더에 모두 풀어 실행하면, 저장된 실행기 경로가 이전 포터블 폴더의 `resources/personal-runtime`일 때 이 앱의 실행기로 자동으로 바꿔 저장합니다. 직접 고른 외부 실행기(개발 폴더의 `.venv` 등)는 그대로 둡니다. 기존 설정·로그인·사용자 자료를 삭제할 필요는 없습니다.
 
@@ -198,7 +198,7 @@ Windows는 **설치 EXE 하나만 옮깁니다.** 설치 후 서버 주소·인�
 
 `scripts/package-desktop.mjs`는 Windows 빌드마다 새 임시 폴더에서 실행기를 준비하고 asar 밖의 리소스로 포함합니다. `config/windows-runtime.lock.json`의 HTTPS URL·SHA256과 현재 `requirements.lock`을 대조하며 원문·위키·토큰·개인 설정을 포함하지 않습니다. Python·Tesseract·언어 데이터·wheel의 라이선스를 보존합니다. 최초 빌드는 해당 배포 서버에 접근해야 합니다. 일반 패키징의 재사용 캐시는 프로젝트 `.local/build-cache/windows-runtime/`에 보관하며, 릴리스 명령은 별도 임시 캐시를 사용한 뒤 정리합니다. 빌드용 Python은 프로젝트 `.venv`, 시스템 Python 순서로 찾고 `WIKI_BUILD_PYTHON`으로 실행 파일을 지정할 수 있습니다. NSIS 추출을 지원하는 7-Zip은 electron-builder 도구를 사용하며 필요한 경우 `WIKI_BUILD_7ZIP`으로 지정합니다. 대상 PC에서 pip나 별도 설치 프로그램을 실행하지 않습니다. Python 배포 방식은 [공식 embeddable 안내](https://docs.python.org/3/using/windows.html#the-embeddable-package)를 따릅니다.
 
-`llm-wiki-personal-runtime-0.1.0.zip`은 core/tools Python 소스, 규약 조립에 필요한 의미 지침 한 파일과 고정 requirements를 포함합니다. 압축을 풀고 `python3 -m tools.setup_runtime --role personal`을 실행한 뒤 앱에서 폴더와 `.venv` Python을 선택합니다. Windows는 `py -3.12 -m tools.setup_runtime --role personal`을 사용합니다. 원문·위키·히스토리·토큰·개인 설정·테스트·`.venv`는 포함하지 않습니다. 이 ZIP은 Python/OCR/계정의 설치 완료를 뜻하지 않습니다.
+현재 `llm-wiki-personal-runtime-0.1.1.zip`은 core/tools Python 소스, 규약 조립에 필요한 의미 지침 한 파일과 고정 requirements를 포함합니다. 압축을 풀고 `python3 -m tools.setup_runtime --role personal`을 실행한 뒤 앱에서 폴더와 `.venv` Python을 선택합니다. Windows는 `py -3.12 -m tools.setup_runtime --role personal`을 사용합니다. 원문·위키·히스토리·토큰·개인 설정·테스트·`.venv`는 포함하지 않습니다. 이 ZIP은 Python/OCR/계정의 설치 완료를 뜻하지 않습니다.
 
 ### 문서 내보내기
 
@@ -212,12 +212,14 @@ Word·PDF·Excel·PowerPoint 내보내기는 앱에 포함된 라이브러리(`m
 
 ### 자동 업데이트와 릴리스
 
-앱 배포 전용 저장소는 [Jong-Yu/llm-wiki-releases](https://github.com/Jong-Yu/llm-wiki-releases/releases)입니다. `config/electron-builder.json`의 `publish` 설정을 릴리스 사전 확인·게시와 설치 앱의 `app-update.yml`에서 함께 사용합니다. `tagNamePrefix: app-`를 사용하므로 앱0.1.0의 게시 태그는 `app-0.1.0`, 다음0.1.1은 `app-0.1.1`입니다. 소스 저장소의 릴리스를 앱 다운로드 채널로 사용하지 않습니다.
+현재 정식 배포는 [LLM Wiki 0.1.1](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)입니다. Windows 트레이에서 앱 열기·종료를 제공하며, 창 닫기는 작업을 유지한 채 숨깁니다. macOS는 기존 Dock 동작입니다. 같은 태그로 재게시하지 않습니다.
+
+앱 배포 전용 저장소는 [Jong-Yu/llm-wiki-releases](https://github.com/Jong-Yu/llm-wiki-releases/releases)입니다. `config/electron-builder.json`의 `publish` 설정을 릴리스 사전 확인·게시와 설치 앱의 `app-update.yml`에서 함께 사용합니다. `tagNamePrefix: app-`를 사용하므로 현재0.1.1의 게시 태그는 `app-0.1.1`, 다음0.1.2는 `app-0.1.2`입니다. 소스 저장소의 릴리스를 앱 다운로드 채널로 사용하지 않습니다.
 
 변경을 커밋한 뒤 `app/`에서 실행합니다. 현재 버전으로 게시할 때는 버전 인자를 생략합니다. 플랫폼을 지정하지 않으면 현재 OS만 빌드합니다.
 
 ```sh
-npm run release -- --mac --win        # 현재 0.1.0: 양 플랫폼 빌드·게시
+npm run release -- --mac --win        # 커밋한 새 버전: 양 플랫폼 빌드·게시
 npm run release -- patch --mac --win  # 다음 패치 버전으로 올려 빌드·게시
 ```
 

@@ -2,6 +2,10 @@
 
 ## 현재 상태
 
+### 2026-11-22 — 0.1.1 정식 앱 배포 완료
+
+원격 main에 통합 개선과 버전 커밋 `eeb36ed`을 반영하고 [0.1.1 정식 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)를 공개했습니다. Windows 트레이·최신 실행기를 포함하며 Mac/Windows 설치 파일과 공개 자산 10개, 양 OS 업데이트 정보, Windows 런타임 2,961개 파일·소스 325개 파일의 일치를 확인했습니다. 실제 Windows 설치·트레이·업데이트는 별도 실기기 확인이 남습니다. 실패 복구와 기존 자료 보존은 [실행 기록](HISTORY.md#2026-11-22--011-정식-배포와-windows-트레이-포함-확인)을 따릅니다.
+
 ### 2026-11-22 — Windows 포터블 fix4 공개
 
 fix3 뒤에도 Claude 첫 안내 메시지 거부로 멈추던 Windows 호출 확인을 [D-143](DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22)·[D-144](DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)로 보완하고 [fix4 사전 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix4)로 공개했습니다. Mac 검사·실제 Claude 1회 호출·ZIP/공개 다운로드 검증을 마쳤고, Windows 실기기의 호출 성공 확인이 남았습니다. 실패하면 앱의 진단 보고서로 원인을 확인합니다. [기록](HISTORY.md#2026-11-22--windows-포터블-fix4-사전-릴리스-공개)

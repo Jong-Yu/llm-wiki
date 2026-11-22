@@ -19,7 +19,7 @@ Python 코드의 위치와 실행 흐름은 [core 길잡이](core/README.md)에�
 
 비밀 값과 개인 자료는 Git에 포함하지 않습니다. 새 컴퓨터의 실행 환경은 아래 설치 명령으로 준비하며 기존 자료·정책·토큰은 자동으로 대체하지 않습니다.
 
-macOS 외부 Python 실행기용 [토큰·속도 개선 보완판](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/runtime-0.1.0-token-latency-20261122)을 별도로 제공합니다. MCP 업무별 도구 선택·줄 좌표 안내·단계별 시간 기록을 포함하며 `full` 기본 규약을 유지합니다. 이 ZIP은 앱 설치 파일이나 자동 업데이트가 아닙니다. 설치와 검증 범위는 릴리스 설명을 따르며 Windows 사용자는 기존 fix3를 유지합니다.
+현재 정식 앱은 [LLM Wiki 0.1.1](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)입니다. Windows 트레이·템플릿·채팅·실행 환경 개선과 토큰·속도 보완을 포함합니다. Windows 설치 파일에는 Python/OCR 실행기가 들어 있고, macOS는 같은 배포의 개인 실행기 ZIP을 별도로 준비합니다. 설치 방법과 실제 검증 범위는 릴리스 설명을 따릅니다.
 
 ## 프로젝트 스킬
 
