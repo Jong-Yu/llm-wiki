@@ -324,10 +324,20 @@ function ConnectedKnowledgeChat({
     model.run?.status !== 'complete' &&
     model.run?.status !== 'cancelled';
   const lastTurn = turns.at(-1)?.id;
+  // 폴링이 같은 배열을 새로 만들어도 설명 본문이 바뀔 때만 읽던 위치를 따라갑니다.
+  const commentaryContent = JSON.stringify(model.run?.local.commentaries ?? []);
   useEffect((): void => {
     if (active && followAnswer.current)
       messages.current?.scrollTo({ top: messages.current.scrollHeight });
-  }, [lastTurn, model.run?.local.preview, model.submittedQuestion?.id, active]);
+  }, [
+    lastTurn,
+    model.phase,
+    model.run?.local.phase,
+    model.run?.local.preview,
+    commentaryContent,
+    model.submittedQuestion?.id,
+    active,
+  ]);
 
   /**
    * 내 폴더에 저장된 결과물을 원하는 위치에 Markdown 파일로 저장합니다.
@@ -646,7 +656,6 @@ function ConnectedKnowledgeChat({
                 preview={livePreview}
                 problem={problem}
                 disabled={disabled}
-                provider={provider}
                 showRetry={showRetry}
               />
             </div>

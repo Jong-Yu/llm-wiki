@@ -36,6 +36,8 @@ export function AnswerActions({
   const menu = useRef<HTMLDivElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const supported = availableExportFormats();
+  const canDownload =
+    fileFormat !== null && !failed && !!body.trim() && supported.length > 0;
   const formats = supported.includes(recommended)
     ? [
         recommended,
@@ -48,7 +50,7 @@ export function AnswerActions({
   useLayoutEffect((): (() => void) | undefined => {
     const anchor = menu.current;
     const panel = popup.current;
-    if (!open || !anchor || !panel) return;
+    if (!open || !canDownload || !anchor || !panel) return;
     panel.showPopover();
     const place = (): void => {
       const trigger = anchor.getBoundingClientRect();
@@ -84,7 +86,7 @@ export function AnswerActions({
       document.removeEventListener('scroll', closeOnScroll, true);
       if (panel.matches(':popover-open')) panel.hidePopover();
     };
-  }, [open]);
+  }, [open, canDownload]);
   useEffect((): (() => void) | undefined => {
     if (!open) return;
     const close = (event: Event): void => {
@@ -140,50 +142,52 @@ export function AnswerActions({
       >
         <Icon name="rotate-ccw" size={14} /> 다시 묻기
       </button>
-      <div className={styles.downloadMenu} ref={menu}>
-        <button
-          type="button"
-          className={`${styles.action} ${styles.actionBox}`}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          disabled={downloading || failed || !body.trim()}
-          onClick={(): void => setOpen(!open)}
-        >
-          <Icon name="download" size={14} />{' '}
-          {downloading
-            ? '내려받는 중…'
-            : fileFormat
-              ? '다른 형식으로'
-              : '내려받기'}
-          <Icon name="chevron-down" size={14} />
-        </button>
-        {open && (
-          <div
-            ref={popup}
-            popover="manual"
-            className={styles.formatMenu}
-            role="menu"
-            aria-label="내려받을 형식"
+      {canDownload && (
+        <div className={styles.downloadMenu} ref={menu}>
+          <button
+            type="button"
+            className={`${styles.action} ${styles.actionBox}`}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            disabled={downloading}
+            onClick={(): void => setOpen(!open)}
           >
-            {formats.map((format: ExportFormat): JSX.Element => (
-              <button
-                key={format}
-                type="button"
-                role="menuitem"
-                className={styles.formatItem}
-                onClick={(): void => {
-                  setOpen(false);
+            <Icon name="download" size={14} />{' '}
+            {downloading
+              ? '내려받는 중…'
+              : fileFormat
+                ? '다른 형식으로'
+                : '내려받기'}
+            <Icon name="chevron-down" size={14} />
+          </button>
+          {open && (
+            <div
+              ref={popup}
+              popover="manual"
+              className={styles.formatMenu}
+              role="menu"
+              aria-label="내려받을 형식"
+            >
+              {formats.map((format: ExportFormat): JSX.Element => (
+                <button
+                  key={format}
+                  type="button"
+                  role="menuitem"
+                  className={styles.formatItem}
+                  onClick={(): void => {
+                    setOpen(false);
 
-                  onDownload(format);
-                }}
-              >
-                {EXPORT_FORMAT_NAMES[format]}
-                {format === recommended && !fileFormat ? ' · 추천' : ''}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+                    onDownload(format);
+                  }}
+                >
+                  {EXPORT_FORMAT_NAMES[format]}
+                  {format === recommended && !fileFormat ? ' · 추천' : ''}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

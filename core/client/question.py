@@ -17,6 +17,7 @@ from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.client.analysis import _identifier, _private_directory, server_url
 from core.client.transport import AnalysisClientError
 from core.client.question_ai import AnswerPreview, assemble_question, answer_payload, question_answer_schema
+from core.client.question_commentary import QuestionCommentary
 from core.client.question_sessions import QuestionSessions
 from core.client.supervision import supervise
 from core.client.ai.contracts import AIAdapterError
@@ -225,6 +226,7 @@ class _QuestionExecution:
     async def guarded_model(self, adapter, prompt, schema, *, directory=None, session_id=None, allow_preview=True):
         """취소/원격 취소/사용권 실패가 먼저 오면 어댑터가 자기 자식만 종료할 때까지 기다린다."""
         # 단계별 초안/내부ID는 표시하지 않고 검사·렌더가 끝난 v5 답변만 전달한다.
+        # 공개 작업 설명은 최종 답변과 분리해 전달한다.
         preview = AnswerPreview(self.emit) if allow_preview else None
         options = {"prompt": prompt, "schema": schema, "directory": directory or self.directory / "invocation"}
         if session_id is not None:
@@ -234,25 +236,32 @@ class _QuestionExecution:
         state = self.state if isinstance(self.state, dict) else {}
         data = state.get("record", {}).get("data", {})
         contract = data.get("input_contract_version")
-        if (self.provider == "codex" and contract in {"personal-question-v5", "personal-question-v6"}
+        commentary = QuestionCommentary(self.emit) if contract in {"personal-question-v5", "personal-question-v6"} else None
+        callback = preview
+        if commentary is not None:
+            def callback(event):
+                commentary(event)
+                if preview is not None:
+                    preview(event)
+        if (self.provider in {"codex", "claude"} and contract in {"personal-question-v5", "personal-question-v6"}
                 and ("question_profile" in parameters or any(
                     value.kind == inspect.Parameter.VAR_KEYWORD for value in parameters.values()))):
-            # 검증한 Codex 선택 조회 질문에만 호출별 안내를 적용한다.
+            # 선택 조회 질문에만 호출별 안내를 적용한다.
             # 어댑터 모드나 전역 설정을 바꾸지 않는다.
             options["question_profile"] = True
             ref = data.get("template_ref")
-            if (isinstance(ref, dict) and set(ref) == {"id", "revision"}
+            if (self.provider == "codex" and isinstance(ref, dict) and set(ref) == {"id", "revision"}
                     and isinstance(ref["id"], str) and re.fullmatch(r"[0-9a-f]{32}", ref["id"])
                     and isinstance(ref["revision"], str) and re.fullmatch(r"[0-9a-f]{64}", ref["revision"])
                     and ("template_profile" in parameters or any(
                         parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()))):
                 options["template_profile"] = True
         if "on_event" in parameters:
-            options["on_event"] = preview
-            if not allow_preview and hasattr(adapter, "on_event"):
+            options["on_event"] = callback
+            if callback is None and hasattr(adapter, "on_event"):
                 adapter.on_event = None
         elif hasattr(adapter, "on_event"):
-            adapter.on_event = preview
+            adapter.on_event = callback
         try:
             return await supervise(adapter.run(**options), self.monitor(), self.cancel_event.wait(),
                                    check=self.check_cancel)

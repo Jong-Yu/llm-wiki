@@ -150,6 +150,8 @@ export type QuestionLocal = {
   status: 'idle' | 'running' | 'stopping' | 'exited' | 'failed';
   phase: string;
   preview: string;
+  /** AI가 공개용으로 작성한 이번 실행의 임시 작업 설명입니다. */
+  commentaries?: QuestionCommentary[];
   requestId: string | null;
   errorCode: string | null;
   cleanupWarning: boolean;
@@ -158,6 +160,19 @@ export type QuestionLocal = {
   /** 새 세션에 앞선 대화를 전달하기 시작한 실행에서만 참이다. */
   historyReplayed?: boolean;
 };
+export const questionCommentarySchema = z.object({
+  id: z
+    .string()
+    .min(1)
+    .max(100)
+    .refine((value: string): boolean => !!value.trim()),
+  content: z
+    .string()
+    .min(1)
+    .max(2000)
+    .refine((value: string): boolean => !!value.trim()),
+});
+export type QuestionCommentary = z.infer<typeof questionCommentarySchema>;
 export type QuestionAnswer = {
   turnId: string;
   content: string;
@@ -242,6 +257,7 @@ const questionDetailSchema = z.object({
     status: z.enum(['idle', 'running', 'stopping', 'exited', 'failed']),
     phase: z.string(),
     preview: z.string(),
+    commentaries: z.array(questionCommentarySchema).max(20).optional(),
     requestId: id.nullable(),
     errorCode: z.string().nullable(),
     cleanupWarning: z.boolean(),

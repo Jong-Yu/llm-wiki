@@ -414,6 +414,7 @@ export function useKnowledgeChat(
       const web = thread.webEnabled
         ? (await chatRunsApi.webSearch({ ...session, question })).web
         : null;
+      setPhase('관련 문서와 연결된 근거를 찾고 있어요');
       // 별도 AI 검색어 확장 없이 서버의 질문 색인이 관련 문서와 예외를 함께 찾는다.
       patchThread({
         noEvidenceQuestion: null,
@@ -710,17 +711,20 @@ export function useKnowledgeChat(
   /** 실행 중단은 현재 상태 판본과 명시 사용자 동작에 연결합니다. */
   async function cancel(): Promise<void> {
     await perform(async (): Promise<void> => {
-      if (run)
-        acceptRun(
-          await runChat((): ReturnType<typeof chatRunsApi.cancel> =>
-            chatRunsApi.cancel({
-              ...session,
-              questionRunId: run.id,
-              expectedStateRevision: run.stateRevision,
-              requestId: chatId(),
-            }),
-          ),
-        );
+      if (!run) return;
+      // 취소 전 시작한 폴링이 늦게 도착해 실행 중 상태를 되살리지 않게 합니다.
+      readSerial.current += 1;
+      const detail = await runChat((): ReturnType<typeof chatRunsApi.cancel> =>
+        chatRunsApi.cancel({
+          ...session,
+          questionRunId: run.id,
+          expectedStateRevision: run.stateRevision,
+          requestId: chatId(),
+        }),
+      );
+      // 취소 응답을 기다리는 동안 시작된 읽기도 확정된 취소 응답보다 앞선 조회입니다.
+      readSerial.current += 1;
+      acceptRun(detail);
     });
   }
   /** 진단은 모델 호출 없이 현재 적용된 개인 CLI의 준비 상태를 확인합니다. */

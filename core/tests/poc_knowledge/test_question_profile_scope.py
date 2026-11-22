@@ -1,4 +1,4 @@
-"""검증한 질문 전용 CLI 옵션이 Codex v5 경계 안에서만 활성화되는지 확인한다."""
+"""질문 전용 CLI 옵션이 지원 제공자의 v5/v6 경계 안에서만 활성화되는지 확인한다."""
 
 import asyncio
 from hashlib import sha256
@@ -104,15 +104,18 @@ class ScopeTests(unittest.IsolatedAsyncioTestCase):
         await self.call(self.owner(), adapter)
         self.assertEqual(adapter.flags, [True])
 
-    async def test_claude_is_unchanged_even_though_its_class_inherits_codex(self):
+    async def test_claude_receives_the_public_work_update_profile(self):
         adapter = KeywordAdapter()
         await self.call(self.owner(provider="claude"), adapter)
-        self.assertNotIn("question_profile", adapter.calls[0])
+        self.assertIs(adapter.calls[0]["question_profile"], True)
+        self.assertNotIn("template_profile", adapter.calls[0])
 
     async def test_legacy_contract_has_no_new_option(self):
-        adapter = KeywordAdapter()
-        await self.call(self.owner(contract="personal-question-v3"), adapter)
-        self.assertNotIn("question_profile", adapter.calls[0])
+        for provider in ("codex", "claude"):
+            for version in range(1, 5):
+                adapter = KeywordAdapter()
+                await self.call(self.owner(provider=provider, contract=f"personal-question-v{version}"), adapter)
+                self.assertNotIn("question_profile", adapter.calls[0])
 
     async def test_unverified_provider_has_no_profile(self):
         adapter = KeywordAdapter()

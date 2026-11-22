@@ -2,7 +2,6 @@
 
 import asyncio
 from hashlib import sha256
-import inspect
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,7 +9,7 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from core.client.ai.codex import CodexAdapter
+from core.client.ai.codex import CodexAdapter, _preview_event
 from core.client.ai.claude import ClaudeAdapter
 from core.client.ai.contracts import AIAdapterError
 from core.client.ai.question_profile import FEATURE, FILENAME, INSTRUCTIONS, SETTINGS, VERSION
@@ -42,6 +41,25 @@ def mock_execute(calls, *, features=FEATURES, failure=None):
             raise failure
         Path(kwargs["result_path"]).write_bytes(canonical_json_bytes(VALUE))
         return 0, EVENTS, b""
+    return execute
+
+
+def claude(**kwargs):
+    adapter = ClaudeAdapter(**kwargs)
+    adapter._capabilities = (["claude-fixture"], "isolated-fixture")
+    return adapter
+
+
+def mock_claude_execute(calls, *, help_output=b"--append-system-prompt <prompt>", failure=None):
+    async def execute(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        if arguments[1:] == ["--help"]:
+            return 0, help_output, b""
+        if failure is not None:
+            raise failure
+        kwargs["event_parser"](json.dumps({"type": "result", "subtype": "success", "is_error": False,
+            "structured_output": VALUE}), kwargs["on_event"])
+        return 0, b"", b""
     return execute
 
 
@@ -263,26 +281,122 @@ class QuestionCliProfileTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(caught.exception.code, code)
                 self.assertEqual(len(calls), 2)
 
-    async def test_claude_contract_and_default_execution_do_not_gain_profile(self):
-        self.assertNotIn("question_profile", inspect.signature(ClaudeAdapter.run).parameters)
-        calls = []
-        async def execute(arguments, **kwargs):
-            calls.append(arguments)
-            kwargs["event_parser"](json.dumps({"type": "result", "subtype": "success", "is_error": False,
-                "structured_output": VALUE}), kwargs["on_event"])
-            return 0, b"", b""
-        adapter = ClaudeAdapter(model="chosen-model")
-        adapter._capabilities = (["claude-fixture"], "isolated-fixture")
-        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", execute), \
+    async def test_claude_default_and_false_keep_existing_arguments_files_and_metadata(self):
+        calls, results = [], []
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", mock_claude_execute(calls)), \
+                patch("core.client.ai.claude.time.monotonic", return_value=10), \
                 patch("core.client.ai.codex._execute", side_effect=AssertionError("Codex must not execute")):
+            for index, options in enumerate(({}, {"question_profile": False})):
+                directory = Path(root).resolve() / str(index)
+                result = await claude(model="chosen-model").run(prompt="frozen", schema=SCHEMA,
+                    directory=directory, **options)
+                results.append(result)
+                self.assertNotIn("question_profile", result["execution"])
+                self.assertEqual({path.name for path in directory.iterdir()}, FILES)
+                arguments = calls[-1][0]
+                self.assertIn("--safe-mode", arguments)
+                self.assertEqual(arguments[-2:], ["--model", "chosen-model"])
+                self.assertNotIn("--append-system-prompt", arguments)
+                self.assertNotIn(FEATURE, arguments)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0][0], calls[1][0])
+            self.assertEqual(results[0], results[1])
+
+    async def test_claude_profile_preserves_input_and_isolation_and_records_exact_instructions(self):
+        calls = []
+        callback = lambda _: None
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", mock_claude_execute(calls)):
             directory = Path(root).resolve() / "invocation"
-            result = await adapter.run(prompt="frozen", schema=SCHEMA, directory=directory)
-            self.assertNotIn("question_profile", result["execution"])
-            self.assertFalse((directory / FILENAME).exists())
-            self.assertEqual(len(calls), 1)
-            self.assertIn("--safe-mode", calls[0])
-            self.assertEqual(calls[0][-2:], ["--model", "chosen-model"])
-            self.assertNotIn(FEATURE, calls[0])
+            result = await claude(model="chosen-model").run(prompt="frozen", schema=SCHEMA,
+                directory=directory, question_profile=True, on_event=callback)
+            self.assertEqual(calls[0][0], ["claude-fixture", "--help"])
+            arguments, options = calls[1]
+            self.assertEqual(arguments[arguments.index("--append-system-prompt") + 1], INSTRUCTIONS)
+            for flag in ("--safe-mode", "--disable-slash-commands", "--no-chrome", "--strict-mcp-config",
+                         "--disallowedTools", "--no-session-persistence"):
+                self.assertIn(flag, arguments)
+            self.assertEqual(arguments[arguments.index("--tools") + 1], "")
+            self.assertEqual(arguments[arguments.index("--permission-mode") + 1], "dontAsk")
+            self.assertIs(options["on_event"], callback)
+            self.assertEqual(options["prompt"], b"frozen")
+            self.assertEqual((directory / "prompt.txt").read_bytes(), b"frozen")
+            self.assertEqual((directory / "source-schema.json").read_bytes(), canonical_json_bytes(SCHEMA))
+            self.assertEqual(json.loads(arguments[arguments.index("--json-schema") + 1]), SCHEMA)
+            self.assertEqual((directory / FILENAME).read_bytes(), INSTRUCTIONS.encode())
+            self.assertEqual(result["value"], VALUE)
+            self.assertEqual({path.name for path in directory.iterdir()}, FILES | {FILENAME})
+            profile = result["execution"]["question_profile"]
+            self.assertEqual(profile, {"version": VERSION, "instructions_file": FILENAME,
+                "instructions_sha256": sha256(INSTRUCTIONS.encode()).hexdigest(),
+                "instructions_argument": "--append-system-prompt", "feature_support_checked": True})
+            self.assertEqual(result["execution"]["prompt_sha256"], sha256(b"frozen").hexdigest())
+            self.assertEqual(json.loads((directory / "execution.json").read_bytes())["question_profile"], profile)
+
+    async def test_claude_profile_requires_boolean_and_refuses_sessions_and_web_before_execution(self):
+        calls = []
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", mock_claude_execute(calls)):
+            for flag in (None, 0, 1, "true", [], {}):
+                with self.subTest(flag=flag), self.assertRaises(AIAdapterError) as caught:
+                    await claude().run(prompt="frozen", schema=SCHEMA, directory=Path(root) / "invalid",
+                                       question_profile=flag)
+                self.assertEqual(caught.exception.code, "ai_invalid_input")
+            for options in ({"session_id": str(uuid4())}, {"web_search": True}, {"persist_session": True}):
+                adapter = claude()
+                if options.get("persist_session"):
+                    adapter.persist_session, options = True, {}
+                with self.subTest(options=options), self.assertRaises(AIAdapterError) as caught:
+                    await adapter.run(prompt="frozen", schema=SCHEMA, directory=Path(root) / "invalid",
+                                      question_profile=True, **options)
+                self.assertEqual(caught.exception.code, "ai_invalid_input")
+            self.assertEqual(calls, [])
+            self.assertEqual(list(Path(root).iterdir()), [])
+
+    async def test_claude_profile_capability_failure_stops_before_model_and_records_failure(self):
+        for help_output in (b"--system-prompt", b"--append-system-prompt-file", b"\xff"):
+            calls = []
+            with self.subTest(help_output=help_output), TemporaryDirectory() as root, \
+                    patch("core.client.ai.claude._execute", mock_claude_execute(calls, help_output=help_output)):
+                directory = Path(root).resolve() / "invocation"
+                with self.assertRaises(AIAdapterError) as caught:
+                    await claude().run(prompt="frozen", schema=SCHEMA, directory=directory, question_profile=True)
+                self.assertEqual(caught.exception.code, "ai_cli_incompatible")
+                self.assertEqual(len(calls), 1)
+                metadata = json.loads((directory / "execution.json").read_bytes())
+                self.assertEqual(metadata["error_code"], "ai_cli_incompatible")
+                self.assertFalse(metadata["question_profile"]["feature_support_checked"])
+
+    async def test_claude_profile_is_not_leaked_and_capability_success_is_cached(self):
+        calls = []
+        adapter = claude()
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", mock_claude_execute(calls)):
+            for index, enabled in enumerate((True, False, True)):
+                result = await adapter.run(prompt="frozen", schema=SCHEMA,
+                    directory=Path(root).resolve() / str(index), question_profile=enabled)
+                self.assertEqual("question_profile" in result["execution"], enabled)
+                self.assertEqual("--append-system-prompt" in calls[-1][0], enabled)
+            self.assertEqual(sum(args[1:] == ["--help"] for args, _ in calls), 1)
+
+    async def test_claude_profile_execution_failure_retains_instructions_without_retry(self):
+        calls = []
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute",
+                mock_claude_execute(calls, failure=AIAdapterError("ai_execution_failed"))):
+            directory = Path(root).resolve() / "invocation"
+            with self.assertRaises(AIAdapterError):
+                await claude().run(prompt="frozen", schema=SCHEMA, directory=directory, question_profile=True)
+            self.assertEqual(len(calls), 2)
+            metadata = json.loads((directory / "execution.json").read_bytes())
+            self.assertEqual(metadata["error_code"], "ai_execution_failed")
+            self.assertEqual(metadata["question_profile"]["instructions_sha256"], sha256(INSTRUCTIONS.encode()).hexdigest())
+
+    def test_codex_only_normalizes_public_agent_messages(self):
+        received = []
+        _preview_event(json.dumps({"type": "item.completed", "item": {"type": "reasoning", "text": "private"}}), received.append)
+        _preview_event(json.dumps({"type": "item.completed", "item": {"id": "i1", "type": "agent_message",
+            "text": "[[wiki-work-update]]두 규칙의 예외를 확인하겠습니다.[[/wiki-work-update]]"}}), received.append)
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0]["kind"], "public_text")
+        self.assertEqual(received[0]["item_id"], "i1")
+        self.assertNotIn("private", json.dumps(received))
 
 
 if __name__ == "__main__":

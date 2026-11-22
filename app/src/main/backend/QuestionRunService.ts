@@ -38,6 +38,7 @@ import type {
   QuestionDetailResult,
   QuestionPageResult,
   QuestionLocal,
+  QuestionCommentary,
   QuestionResumableRequest,
   QuestionResumableResult,
   QuestionSearchTermsRequest,
@@ -839,6 +840,15 @@ export class QuestionRunService {
         this.#local.set(key, {
           ...next,
           preview: next.preview.replaceAll(context.token, '[인증정보 비공개]'),
+          commentaries: next.commentaries?.map(
+            (item: QuestionCommentary): QuestionCommentary => ({
+              ...item,
+              content: item.content.replaceAll(
+                context.token,
+                '[인증정보 비공개]',
+              ),
+            }),
+          ),
         });
       },
       onError: (): void => {

@@ -301,6 +301,17 @@
   color: var(--wiki-color-text-secondary);
   font-size: var(--wiki-font-size-12);
 }
+.commentaries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-12);
+  margin-bottom: var(--wiki-space-12);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  p {
+    margin: 0;
+  }
+}
 .answer {
   min-width: 0;
 }

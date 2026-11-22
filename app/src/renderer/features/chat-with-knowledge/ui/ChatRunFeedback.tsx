@@ -1,11 +1,14 @@
-import type { QuestionEvidence } from '@contracts/questionRuns.contract';
+import type { QuestionCommentary } from '@contracts/questionRuns.contract';
 import type { JSX } from 'react';
 import { Link } from 'react-router';
-import { Icon } from '@renderer/shared/ui/Icon';
 import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
 import type { KnowledgeChatModel } from '../model/useKnowledgeChat';
 import type { ChatRunNotice as ChatRunNoticeValue } from '../model/chatState';
-import { chatRunFailure } from '../model/chatRunFeedback';
+import {
+  chatRunCommentaries,
+  chatRunFailure,
+  chatRunProgress,
+} from '../model/chatRunFeedback';
 import { AssistantMessage } from './AssistantMessage';
 import { ChatAnswer } from './ChatAnswer';
 import styles from './KnowledgeChat.module.scss';
@@ -52,7 +55,6 @@ type FeedbackProps = {
   preview: string;
   problem: Problem | null;
   disabled: boolean;
-  provider: string;
   showRetry: boolean;
 };
 const titles: Record<Problem, string> = {
@@ -169,34 +171,14 @@ export function ChatRunNotice({ notice }: ChatRunNoticeProps): JSX.Element {
     </StatusNotice>
   );
 }
-type ProgressProps = { count: number | null; phase: string; provider: string };
-/** 검색 완료와 생성 진행을 나누며 찾은 문서가 없으면 일반 답변 작성으로 표시한다. */
-function AnswerProgress({
-  count,
-  phase,
-  provider,
-}: ProgressProps): JSX.Element {
-  const current =
-    count === null
-      ? phase || `${provider}에서 답변을 준비하는 중…`
-      : count > 0
-        ? '근거를 읽고 답변 쓰는 중…'
-        : '답변을 쓰는 중…';
+type ProgressProps = { message: string };
+/** 공개 작업 설명을 기다리는 동안의 상태만 표시합니다. */
+function AnswerProgress({ message }: ProgressProps): JSX.Element {
   return (
-    <ul className={styles.steps} role="status">
-      {count !== null && (
-        <li>
-          <span className={styles.stepMark}>
-            <Icon name="check" size={10} />
-          </span>
-          {count > 0
-            ? `관련 문서 찾기 · 문서 ${count}개`
-            : '관련 문서를 찾지 못했어요 · 위키 근거 없이 답해요'}
-        </li>
-      )}
+    <ul className={styles.steps} role="status" data-chat-progress>
       <li className={styles.stepActive}>
         <span className={styles.stepSpinner} />
-        {current}
+        {message}
       </li>
     </ul>
   );
@@ -209,27 +191,42 @@ export function ChatRunFeedback({
   preview,
   problem,
   disabled,
-  provider,
   showRetry,
 }: FeedbackProps): JSX.Element {
   const run = model.run;
-  const count =
-    running && run
-      ? run.evidence.filter(
-          (item: QuestionEvidence): boolean => item.kind === 'document',
-        ).length
-      : model.foundCount;
+  // 새 질문 준비 중에는 이전 완료 실행이 남아 있을 수 있으므로 현재 요청 안내를 우선합니다.
+  const preparing = model.busy && !running && Boolean(model.phase);
+  const answerSaved =
+    run !== null &&
+    (run.answers.length > 0 ||
+      run.receipts.some(
+        (receipt: NonNullable<typeof run>['receipts'][number]): boolean =>
+          receipt.saved === true,
+      ));
+  const showProgress = working && (preparing || !answerSaved);
+  const message = preparing ? model.phase : chatRunProgress(run);
+  const commentaries = chatRunCommentaries(run, preparing);
   return (
     <>
-      {(working || preview) && (
+      {(showProgress || preview) && (
         <AssistantMessage>
-          {working && (
-            <AnswerProgress
-              count={count}
-              phase={model.phase}
-              provider={provider}
-            />
-          )}
+          {showProgress &&
+            (commentaries.length > 0 ? (
+              <div className={styles.commentaries} data-chat-commentaries>
+                {commentaries.map((item: QuestionCommentary): JSX.Element => (
+                  <p key={item.id} data-chat-commentary>
+                    {item.content}
+                  </p>
+                ))}
+                {run?.local.status === 'stopping' && (
+                  <span role="status" className={styles.previewStatus}>
+                    {message}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <AnswerProgress message={message} />
+            ))}
           {preview && (
             <>
               {!working && (

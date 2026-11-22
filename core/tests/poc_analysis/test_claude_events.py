@@ -66,6 +66,20 @@ class ClaudeSystemEventTests(unittest.TestCase):
             events(json.dumps(tool), None)
         self.assertEqual(caught.exception.code, "ai_unexpected_tool_activity")
 
+    def test_public_text_and_structured_output_are_distinct_and_thinking_is_not_forwarded(self):
+        received = []
+        update = "[[wiki-work-update]]두 규칙의 예외를 확인하겠습니다.[[/wiki-work-update]]"
+        event = {"type": "assistant", "session_id": SESSION, "message": {"content": [
+            {"type": "thinking", "thinking": "private reasoning"},
+            {"type": "redacted_thinking", "data": "private data"},
+            {"type": "text", "text": update},
+            {"type": "tool_use", "id": "output-1", "name": "StructuredOutput", "input": {"content": "최종 답변"}}]}}
+        _Events()(json.dumps(event), received.append)
+        self.assertEqual([item["kind"] for item in received], ["public_text", "structured_output"])
+        self.assertEqual(received[0]["text"], update)
+        self.assertEqual(json.loads(received[1]["text"]), {"content": "최종 답변"})
+        self.assertNotIn("private", json.dumps(received))
+
 
 class ClaudeEnvironmentTests(unittest.TestCase):
     def test_network_settings_are_forwarded_but_api_keys_are_not(self):

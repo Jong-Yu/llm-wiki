@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 from core.client.ai.contracts import AIAdapterError
 from core.client.question import _QuestionExecution, QuestionClientError
 from core.client.question_ai import assemble_question, answer_payload, question_answer_schema
-from core.client.question_grounding import grounding_prompt, initial_grounding_prompt, run_grounded_model, _draft_max_characters, MAX_CONTEXT_BYTES, MAX_READS
+from core.client.question_grounding import grounding_prompt, initial_grounding_prompt, run_grounded_model, _draft_max_characters, MAX_CONTEXT_BYTES, MAX_READS, STEP_SCHEMA
 from core.client.transport import AnalysisClientError
 from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.modules.personal.question_grounding import INSTRUCTIONS
@@ -281,6 +281,58 @@ class GroundedQuestionClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [])
         self.assertEqual(callbacks, [])
         self.assertIs(adapter.on_event, old)
+
+    async def test_public_work_updates_arrive_before_model_returns_without_changing_the_answer(self):
+        for provider in ("codex", "claude"):
+            for version in ("personal-question-v5", "personal-question-v6"):
+                with self.subTest(provider=provider, version=version):
+                    events, callbacks = [], []
+                    owner = _QuestionExecution(None, base="http://127.0.0.1:8766", tenant="team", directory=self.root,
+                        profile="default", on_event=events.append, cancel_event=asyncio.Event(),
+                        poll_seconds=1, heartbeat_seconds=60)
+                    owner.provider = provider
+                    owner.question_run_id, owner.run_id = "1" * 32, "2" * 32
+                    owner.state = {"record": {"data": {"input_contract_version": version}}}
+                    async def monitor():
+                        await asyncio.Event().wait()
+                    owner.monitor = monitor
+                    observed, finish = asyncio.Event(), asyncio.Event()
+                    old = callbacks.append
+                    result = {"value": step("answer", content="조건을 정리한 최종 답변입니다."),
+                              "execution": {"prompt_sha256": sha256(b"frozen prompt").hexdigest()}}
+                    class StreamingAdapter:
+                        on_event = old
+                        async def run(self, *, prompt, schema, directory, on_event=None, question_profile=False):
+                            self.options = prompt, schema, question_profile
+                            on_event({"type": "agent_message", "kind": "public_text", "item_id": "update-1",
+                                "text": "[[wiki-work-update]]서명 검증 조건과 예외 조항을 확인하겠습니다.[[/wiki-work-update]]"})
+                            on_event({"type": "reasoning", "text": "private reasoning"})
+                            on_event({"type": "agent_message", "kind": "structured_output",
+                                "text": '{"content":"Unvalidated [[s1:2:2]]"}'})
+                            observed.set()
+                            await finish.wait()
+                            return result
+                    adapter = StreamingAdapter()
+                    schema = deepcopy(STEP_SCHEMA)
+                    running = asyncio.create_task(owner.guarded_model(adapter, "frozen prompt", schema,
+                                                                      allow_preview=False))
+                    try:
+                        await asyncio.wait_for(observed.wait(), 2)
+                        self.assertFalse(running.done())
+                        self.assertEqual(len(events), 1)
+                        self.assertEqual(events[0]["type"], "commentary")
+                        self.assertEqual(events[0]["content"], "서명 검증 조건과 예외 조항을 확인하겠습니다.")
+                        self.assertEqual(events[0]["question_run_id"], owner.question_run_id)
+                        self.assertEqual(events[0]["run_id"], owner.run_id)
+                        self.assertFalse(events[0]["saved"])
+                        self.assertEqual(events[0]["origin"], "client_reported")
+                    finally:
+                        finish.set()
+                        returned = await running
+                    self.assertIs(returned, result)
+                    self.assertEqual(adapter.options, ("frozen prompt", STEP_SCHEMA, True))
+                    self.assertIs(adapter.on_event, old)
+                    self.assertEqual(callbacks, [])
 
     async def test_missing_usage_is_kept_unknown_in_individual_invocation(self):
         owner = FakeOwner(self.root / "run", [evidence()])

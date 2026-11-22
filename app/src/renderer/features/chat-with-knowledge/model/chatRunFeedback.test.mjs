@@ -26,8 +26,16 @@ async function load(file) {
     `data:text/javascript;base64,${Buffer.from(chunk.code).toString('base64')}`
   );
 }
-const { chatRunFailure, rememberChatRunNotice, canAdvanceChatDraft } =
-  await load('./chatRunFeedback.ts');
+const {
+  chatRunFailure,
+  chatRunProgress,
+  chatRunCommentaries,
+  rememberChatRunNotice,
+  canAdvanceChatDraft,
+} = await load('./chatRunFeedback.ts');
+const { applyQuestionCliEvent, idleQuestionLocal } = await load(
+  '../../../../main/backend/questionRunProjection.ts',
+);
 const { chatRecoverySchema, emptyChat } = await load('./chatState.ts');
 const { visibleSubmittedQuestion } = await load('./chatTranscript.ts');
 const conversationId = 'c'.repeat(32);
@@ -43,6 +51,213 @@ const answer = {
   content: '답변',
   reply_to: questionId,
 };
+
+await test('생존 확인과 다른 실행의 이벤트는 마지막 실제 진행 단계를 덮어쓰지 않는다', () => {
+  const event = (phase, id = runId) => ({
+    protocol: 'question-cli-v1',
+    type: 'phase',
+    question_run_id: id,
+    phase,
+    saved: false,
+  });
+  const reading = applyQuestionCliEvent(
+    idleQuestionLocal(),
+    event('evidence_read'),
+    runId,
+  );
+  assert.equal(reading.phase, 'evidence_read');
+  assert.equal(
+    applyQuestionCliEvent(reading, event('heartbeat'), runId),
+    reading,
+  );
+  assert.equal(
+    applyQuestionCliEvent(reading, event('submitting', 'f'.repeat(32)), runId),
+    reading,
+  );
+  const saving = applyQuestionCliEvent(reading, event('submitting'), runId);
+  assert.equal(saving.phase, 'submitting');
+  assert.equal(
+    applyQuestionCliEvent(saving, event('heartbeat'), runId),
+    saving,
+  );
+});
+
+await test('AI 설명 전에는 단계 라벨 대신 대기만 표시하고 중단 요청은 알린다', () => {
+  const detail = run({
+    status: 'running',
+    progress: 'answering',
+    local: {
+      ...idleQuestionLocal(),
+      status: 'running',
+      phase: 'raw /private/path or model text',
+    },
+  });
+  assert.equal(chatRunProgress(detail), '답변을 준비하고 있어요');
+  detail.local.phase = '';
+  detail.progress = 'submitting';
+  assert.equal(chatRunProgress(detail), '답변을 준비하고 있어요');
+  detail.local.status = 'stopping';
+  assert.equal(chatRunProgress(detail), '답변 생성을 멈추고 있어요');
+});
+
+function commentaryEvent(messageId, content, patch = {}) {
+  return {
+    protocol: 'question-cli-v1',
+    type: 'commentary',
+    question_run_id: runId,
+    run_id: '3'.repeat(32),
+    message_id: messageId,
+    content,
+    saved: false,
+    origin: 'client_reported',
+    ...patch,
+  };
+}
+
+await test('AI 작업 설명은 메시지 ID별로 갱신하고 같은 이벤트를 중복하지 않는다', () => {
+  const first = applyQuestionCliEvent(
+    idleQuestionLocal(),
+    commentaryEvent('read', '센서의 경고 조건을 읽겠습니다.'),
+    runId,
+  );
+  assert.deepEqual(first.commentaries, [
+    { id: 'read', content: '센서의 경고 조건을 읽겠습니다.' },
+  ]);
+  assert.equal(
+    applyQuestionCliEvent(
+      first,
+      commentaryEvent('read', first.commentaries[0].content),
+      runId,
+    ),
+    first,
+  );
+  const second = applyQuestionCliEvent(
+    first,
+    commentaryEvent('compare', '운전 모드별 예외도 비교하겠습니다.'),
+    runId,
+  );
+  const updated = applyQuestionCliEvent(
+    second,
+    commentaryEvent('read', '센서의 경고 조건을 확인했습니다.'),
+    runId,
+  );
+  assert.deepEqual(updated.commentaries, [
+    { id: 'read', content: '센서의 경고 조건을 확인했습니다.' },
+    { id: 'compare', content: '운전 모드별 예외도 비교하겠습니다.' },
+  ]);
+  assert.equal(updated.preview, '');
+  assert.equal(updated.phase, '');
+});
+
+await test('다른 실행·미확인 출처·잘못된 내용의 작업 설명은 표시하지 않는다', () => {
+  const local = idleQuestionLocal();
+  for (const patch of [
+    { question_run_id: 'f'.repeat(32) },
+    { question_run_id: undefined },
+    { saved: true },
+    { saved: null },
+    { saved: undefined },
+    { origin: 'server' },
+    { origin: undefined },
+    { message_id: '' },
+    { message_id: '  ' },
+    { message_id: 'x'.repeat(101) },
+    { content: '' },
+    { content: '\n  ' },
+    { content: 'x'.repeat(2001) },
+    { type: 'reasoning' },
+  ])
+    assert.equal(
+      applyQuestionCliEvent(
+        local,
+        commentaryEvent('note', '공개 설명', patch),
+        runId,
+      ),
+      local,
+    );
+});
+
+await test('설명은 최근 20개까지만 남기고 새 실행의 로컬 상태에는 남지 않는다', () => {
+  let local = idleQuestionLocal();
+  for (let i = 0; i < 22; i += 1)
+    local = applyQuestionCliEvent(
+      local,
+      commentaryEvent(`note-${i}`, `설명 ${i}`),
+      runId,
+    );
+  assert.equal(local.commentaries.length, 20);
+  assert.equal(local.commentaries[0].id, 'note-2');
+  assert.equal(local.commentaries.at(-1).id, 'note-21');
+  assert.deepEqual(idleQuestionLocal().commentaries, []);
+});
+
+await test('진행 중 설명은 확정 답변·영수증·종료·다음 질문에서 숨긴다', () => {
+  const comments = [
+    { id: 'read', content: '문서의 경고 조건을 비교하고 있습니다.' },
+  ];
+  const detail = run({
+    status: 'running',
+    leaseStatus: 'active',
+    answers: [],
+    receipts: [],
+    local: {
+      ...idleQuestionLocal(),
+      status: 'running',
+      commentaries: comments,
+    },
+  });
+  assert.deepEqual(chatRunCommentaries(detail, false), comments);
+  assert.deepEqual(chatRunCommentaries(detail, true), []);
+  assert.deepEqual(
+    chatRunCommentaries(
+      {
+        ...detail,
+        answers: [{ turnId: answerId, content: '정리된 답변', citations: [] }],
+      },
+      false,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    chatRunCommentaries({ ...detail, receipts: [{ saved: true }] }, false),
+    [],
+  );
+  assert.deepEqual(
+    chatRunCommentaries({ ...detail, receipts: [{ saved: null }] }, false),
+    comments,
+  );
+  assert.deepEqual(
+    chatRunCommentaries(
+      {
+        ...detail,
+        status: 'failed',
+        leaseStatus: 'none',
+        local: { ...detail.local, status: 'failed' },
+      },
+      false,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    chatRunCommentaries(
+      {
+        ...detail,
+        status: 'cancelled',
+        leaseStatus: 'none',
+        local: { ...detail.local, status: 'exited' },
+      },
+      false,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    chatRunCommentaries(
+      { ...detail, local: { ...detail.local, commentaries: undefined } },
+      false,
+    ),
+    [],
+  );
+});
 function envelope(events, revision = beforeRevision) {
   return {
     revision,

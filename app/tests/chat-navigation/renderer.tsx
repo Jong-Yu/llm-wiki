@@ -1,9 +1,15 @@
 import { StrictMode, useState, useEffect } from 'react';
 import type { JSX } from 'react';
 import { WorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
+import { ReadQueriesProvider } from '@renderer/shared/lib/readQueries';
 import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router';
 import type { WorkspaceRequest } from '@contracts/workspace.contract';
+import type {
+  QuestionDetail,
+  QuestionCommentary,
+  QuestionLocal,
+} from '@contracts/questionRuns.contract';
 import type {
   RecoveryRequest,
   RecoveryEntry,
@@ -79,14 +85,40 @@ const connection = {
 };
 // 내 폴더 결과물 저장소 모의: 요청 ID별 기록이며 failSave가 켜지면 새 저장만 실패합니다.
 const savedResults = new Map<string, Record<string, unknown>>();
+// 같은 실행의 중간 단계와 확정 답변을 별도로 바꿔 폴링·종료 화면을 검증합니다.
+const run: {
+  phase: string;
+  preview: string;
+  commentaries: QuestionCommentary[];
+  status: QuestionDetail['status'];
+  localStatus: QuestionLocal['status'];
+  savedAnswer: boolean;
+  errorCode: string | null;
+} = {
+  phase: 'starting',
+  preview: '',
+  commentaries: [],
+  status: 'running',
+  localStatus: 'running',
+  savedAnswer: false,
+  errorCode: null,
+};
 const checks = {
   failSave: false,
+  answerMode: 'ordinary' as 'ordinary' | 'file' | 'empty' | 'failed',
   forgetSaved: (): void => savedResults.clear(),
   calls,
   activeRun: !visual,
+  run,
   cancels: 0,
+  cancelEnabled: false,
+  delayConversation: false,
+  conversationDelayed: false,
+  releaseConversation: (): void => {},
   delayExport: false,
   releaseExport: (): void => {},
+  delayContext: false,
+  releaseContext: (): void => {},
   exports: [] as { title: string; content: string }[],
   setReadOnly: (): void => {
     connection.data.workspaces[0].permissions = ['read'];
@@ -142,8 +174,13 @@ Object.defineProperty(window, 'wiki', {
       }),
     },
     questionRuns: {
-      cancel: async (): Promise<unknown> => {
+      async cancel(request: { questionRunId: string }): Promise<unknown> {
         checks.cancels += 1;
+        if (checks.cancelEnabled) {
+          checks.run.status = 'cancelled';
+          checks.run.localStatus = 'exited';
+          return this.read(request);
+        }
         return {
           ok: false,
           error: { code: 'unexpected', message: '이동 중 중단됨' },
@@ -162,11 +199,13 @@ Object.defineProperty(window, 'wiki', {
           stateRevision: rev,
           status:
             checks.activeRun && request.questionRunId === '7'.repeat(32)
-              ? 'running'
+              ? checks.run.status
               : 'complete',
           progress: '',
           leaseStatus:
-            checks.activeRun && request.questionRunId === '7'.repeat(32)
+            checks.activeRun &&
+            checks.run.status === 'running' &&
+            request.questionRunId === '7'.repeat(32)
               ? 'active'
               : 'none',
           receipts: [],
@@ -194,17 +233,37 @@ Object.defineProperty(window, 'wiki', {
                     ],
                   },
                 ]
-              : [],
+              : request.questionRunId === '7'.repeat(32) &&
+                  checks.run.savedAnswer
+                ? [
+                    {
+                      turnId: 'e'.repeat(32),
+                      content: '완성된 최종 답변입니다.',
+                      citations: [],
+                    },
+                  ]
+                : [],
           answerReadError: null,
           local: {
             status:
               checks.activeRun && request.questionRunId === '7'.repeat(32)
-                ? 'running'
+                ? checks.run.localStatus
                 : 'idle',
-            phase: '',
-            preview: '',
+            phase:
+              request.questionRunId === '7'.repeat(32) ? checks.run.phase : '',
+            preview:
+              request.questionRunId === '7'.repeat(32)
+                ? checks.run.preview
+                : '',
+            commentaries:
+              request.questionRunId === '7'.repeat(32)
+                ? checks.run.commentaries
+                : [],
             requestId: null,
-            errorCode: null,
+            errorCode:
+              request.questionRunId === '7'.repeat(32)
+                ? checks.run.errorCode
+                : null,
             cleanupWarning: false,
           },
         },
@@ -213,7 +272,11 @@ Object.defineProperty(window, 'wiki', {
     workspace: {
       execute: async (request: WorkspaceRequest): Promise<unknown> => {
         calls.push(request);
-        if (request.operation === 'questionContext')
+        if (request.operation === 'questionContext') {
+          if (checks.delayContext)
+            await new Promise<void>((done: () => void): void => {
+              checks.releaseContext = done;
+            });
           return {
             ok: false,
             error: {
@@ -222,6 +285,7 @@ Object.defineProperty(window, 'wiki', {
               message: '범위 확인 후 AI 실행 전 중단',
             },
           };
+        }
         if (request.operation === 'personalReceipt') {
           const found = savedResults.get(request.input.request_id);
           if (!found)
@@ -274,6 +338,16 @@ Object.defineProperty(window, 'wiki', {
               ok: false,
               error: { code: 'not_found', status: 404, message: '없는 대화' },
             };
+          // refresh가 실행 상세를 이미 받은 뒤 대화 본문만 늦게 도착하는 경합입니다.
+          if (id === a && checks.delayConversation) {
+            checks.conversationDelayed = true;
+            await new Promise<void>((done: () => void): void => {
+              checks.releaseConversation = (): void => {
+                checks.delayConversation = false;
+                done();
+              };
+            });
+          }
           return {
             ok: true,
             data: {
@@ -308,11 +382,22 @@ Object.defineProperty(window, 'wiki', {
                       role: 'assistant',
                       content: visual
                         ? '## 경고가 발생하는 조건\n\n센서는 온도가 설정 범위를 벗어나면 경고 신호를 보냅니다. 문서에 명시된 조건과 운전 모드 전환 시의 처리를 나누어 확인했습니다.\n\n- **온도 범위 이탈:** 설정된 상한 또는 하한을 벗어났는지 확인합니다.\n- **운전 모드 전환:** 전환 중에는 기존 경고 상태를 유지합니다.\n\n## 추가로 확인할 점\n\n경고를 해제하는 임계값과 복귀 지연 시간은 이 두 문서에서 확인되지 않았습니다. 적용 전에 해당 조건의 근거를 추가로 확인해야 합니다.'
-                        : Array.from(
-                            { length: 40 },
-                            (_: unknown, i: number): string =>
-                              `문단 ${i + 1}. 보존된 답변의 본문입니다.`,
-                          ).join('\n\n'),
+                        : id === a && checks.run.savedAnswer
+                          ? '완성된 최종 답변입니다.'
+                          : checks.answerMode === 'empty'
+                            ? '[[파일: md]]\n   '
+                            : (checks.answerMode === 'ordinary'
+                                ? ''
+                                : '[[파일: md]]\n') +
+                              Array.from(
+                                { length: 40 },
+                                (_: unknown, i: number): string =>
+                                  `문단 ${i + 1}. 보존된 답변의 본문입니다.`,
+                              ).join('\n\n'),
+                      status:
+                        !visual && checks.answerMode === 'failed'
+                          ? 'failed'
+                          : 'complete',
                       citations: [
                         {
                           kind: 'document',
@@ -379,14 +464,16 @@ function TestActivity(): JSX.Element {
 }
 createRoot(root).render(
   <StrictMode>
-    <HashRouter>
-      {visual ? (
-        <AppShell>
+    <ReadQueriesProvider identity="chat-navigation-fixture">
+      <HashRouter>
+        {visual ? (
+          <AppShell>
+            <TestActivity />
+          </AppShell>
+        ) : (
           <TestActivity />
-        </AppShell>
-      ) : (
-        <TestActivity />
-      )}
-    </HashRouter>
+        )}
+      </HashRouter>
+    </ReadQueriesProvider>
   </StrictMode>,
 );

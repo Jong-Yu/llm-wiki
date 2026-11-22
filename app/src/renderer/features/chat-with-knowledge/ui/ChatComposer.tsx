@@ -334,7 +334,7 @@ export function ChatComposer({
               : attachments.length > 0
                 ? attachmentHint
                 : fileHint
-                  ? '형식을 말하지 않으면 글로 답하고, 내려받기에서 어울리는 형식을 추천해요'
+                  ? '파일이 필요하면 원하는 형식을 말해 주세요'
                   : `Enter 전송 · Shift+Enter 줄바꿈 · ${providerName}${modelLabel}`)}
       </p>
     </div>

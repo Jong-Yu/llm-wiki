@@ -130,14 +130,14 @@ class _Events:
                     if block["type"] == "text":
                         if not isinstance(block.get("text"), str):
                             raise AIAdapterError("ai_invalid_events")
-                        callback({"type": "agent_message", "text": block["text"],
+                        callback({"type": "agent_message", "kind": "public_text", "text": block["text"],
                                   "event": "item.completed", "item_id": None})
                     elif block["type"] == "tool_use" and block.get("name") == "StructuredOutput":
                         # This provider-internal tool only carries the JSON reply, not a host tool call.
                         if not isinstance(block.get("id"), str) or not isinstance(block.get("input"), dict):
                             raise AIAdapterError("ai_invalid_events")
                         self.structured_ids.add(block["id"])
-                        callback({"type": "agent_message", "text": canonical_json_bytes(block["input"]).decode(),
+                        callback({"type": "agent_message", "kind": "structured_output", "text": canonical_json_bytes(block["input"]).decode(),
                                   "event": "item.completed", "item_id": block["id"]})
                     elif block["type"] == "tool_use" and block.get("name") == "WebSearch" and self.web_search:
                         if not isinstance(block.get("id"), str) or not isinstance(block.get("input"), dict):
@@ -207,10 +207,29 @@ class ClaudeAdapter(CodexAdapter):
         return {"provider": "claude", "cli_version": version, "requested_model": self.model,
                 "capabilities_checked": True, "login_checked": False}
 
-    async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None, web_search=False):
+    async def _check_question_profile(self, executable, env):
+        """공개 작업 안내를 덧붙일 수 있는지 확인하며 기존 일반 호출은 바꾸지 않는다."""
+        if self._question_profile_checked:
+            return
+        try:
+            code, output, _ = await _execute([*executable, "--help"], directory=None, environment=env)
+        except (OSError, TimeoutError) as error:
+            raise AIAdapterError(platform_error_code(error) or "ai_cli_unavailable") from error
+        try:
+            supported = "--append-system-prompt" in output.decode("utf-8").split()
+        except UnicodeError as error:
+            raise AIAdapterError("ai_cli_incompatible") from error
+        if code != 0 or not supported:
+            raise AIAdapterError("ai_cli_incompatible")
+        self._question_profile_checked = True
+
+    async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None, web_search=False,
+                  question_profile=False):
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
                 or output_schema is not None and not isinstance(output_schema, dict)
-                or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)):
+                or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)
+                or type(question_profile) is not bool
+                or question_profile and (session_id is not None or self.persist_session or web_search)):
             raise AIAdapterError("ai_invalid_input")
         prompt_bytes, original_schema = prompt.encode("utf-8"), canonical_json_bytes(schema)
         effective_schema = schema if output_schema is None else output_schema
@@ -236,6 +255,11 @@ class ClaudeAdapter(CodexAdapter):
             arguments.append("--no-session-persistence")
         if self.model is not None:
             arguments.extend(["--model", self.model])
+        instructions = None
+        if question_profile:
+            from .question_profile import VERSION, FILENAME, INSTRUCTIONS
+            instructions = INSTRUCTIONS.encode("utf-8")
+            arguments.extend(["--append-system-prompt", INSTRUCTIONS])
         # Unlike Codex's schema file, Claude accepts this schema in argv. Reject OS limits explicitly.
         _check_argument_size(arguments, env)
         directory = Path(directory).absolute()
@@ -249,14 +273,23 @@ class ClaudeAdapter(CodexAdapter):
         _write_new(directory / "prompt.txt", prompt_bytes)
         _write_new(directory / "source-schema.json", original_schema)
         _write_new(directory / "schema.json", schema_bytes)
+        if instructions is not None:
+            _write_new(directory / FILENAME, instructions)
         metadata = {"provider": "claude", "cli_version": version, "requested_model": self.model,
             "model_selection": "explicit" if self.model is not None else "provider_default",
             "reported_model": None, "evidence_kind": "client_observed", "semantic_validation": "not_run",
             "prompt_sha256": sha256(prompt_bytes).hexdigest(), "schema_sha256": sha256(schema_bytes).hexdigest(),
             "input_schema_sha256": sha256(original_schema).hexdigest(), "status": "failed"}
+        if instructions is not None:
+            metadata["question_profile"] = {"version": VERSION, "instructions_file": FILENAME,
+                "instructions_sha256": sha256(instructions).hexdigest(),
+                "instructions_argument": "--append-system-prompt", "feature_support_checked": False}
         events, started = _Events(web_search=web_search), time.monotonic()
         callback = on_event if on_event is not None else self.on_event
         try:
+            if question_profile:
+                await self._check_question_profile(executable, env)
+                metadata["question_profile"]["feature_support_checked"] = True
             code, output, stderr = await _execute(arguments, directory=execution_directory, environment=env,
                 prompt=prompt_bytes, timeout=self.timeout_seconds, on_event=callback or (lambda _: None), event_parser=events)
             metadata.update(returncode=code, stdout_sha256=sha256(output).hexdigest(), stderr_sha256=sha256(stderr).hexdigest(),

@@ -9,6 +9,48 @@ import {
 } from './chat';
 
 test.describe('진행 중 상태·취소·복원', () => {
+  test('AI 작업 설명을 순서대로 보여주고 최종 답변으로 전환한다', async ({
+    launch,
+    openChat,
+    shot,
+    aiCalls,
+  }) => {
+    const page = await launch();
+    await openChat(page);
+    await ask(page, '센서 경고 조건을 정리해 줘 #작업설명');
+    const chat = conversation(page);
+    const first = chat.getByText(
+      '센서 경고가 발생하는 조건과 해제 조건을 확인하겠습니다.',
+      {
+        exact: true,
+      },
+    );
+    const second = chat.getByText(
+      '상한 초과와 하한 미달을 구분해 답변을 정리하겠습니다.',
+      {
+        exact: true,
+      },
+    );
+    await expect(first).toBeVisible();
+    await expect(first).toHaveCount(1);
+    await expect(second).toBeVisible();
+    await expect(second).toHaveCount(1);
+    await expect(chat).not.toContainText(
+      '내부 추론은 화면에 표시하지 않습니다.',
+    );
+    await expect(chat).not.toContainText('[[wiki-work-update]]');
+    await shot(page, '작업별-중간-설명');
+    await answered(page);
+    await expect(first).toHaveCount(0);
+    await expect(second).toHaveCount(0);
+    await expect(chat.locator('[data-chat-progress]')).toHaveCount(0);
+    await expect(chat).toContainText('문서에 따르면 센서는');
+    await shot(page, '작업설명-최종답변');
+    expect(
+      (await aiCalls()).filter((call) => call.scenario === '작업설명'),
+    ).toHaveLength(1);
+  });
+
   test('응답 대기 중 상태 표시와 중복 전송 방지', async ({
     launch,
     openChat,
@@ -18,11 +60,9 @@ test.describe('진행 중 상태·취소·복원', () => {
     const page = await launch();
     await openChat(page);
     await ask(page, '지연 확인 #지연');
-    await expect(
-      page
-        .getByRole('status')
-        .filter({ hasText: /답변을 준비하는 중|찾고 있어요|쓰는 중/ }),
-    ).toBeVisible();
+    const progress = conversation(page).locator('[data-chat-progress]');
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText('답변을 준비하고 있어요');
     await expect(page.getByRole('button', { name: '응답 중단' })).toBeVisible();
     await expect(conversation(page)).toContainText('지연 확인 #지연');
     await shot(page, '응답-대기중');
@@ -30,6 +70,7 @@ test.describe('진행 중 상태·취소·복원', () => {
     await composer(page).fill('또 보냄 #정상');
     await composer(page).press('Enter');
     await answered(page);
+    await expect(progress).toHaveCount(0);
     await expect(composer(page)).toHaveValue('또 보냄 #정상');
     await expect(
       page.getByText(
@@ -53,14 +94,23 @@ test.describe('진행 중 상태·취소·복원', () => {
   }) => {
     const page = await launch();
     await openChat(page);
-    await ask(page, '오래 걸리는 질문 #느림');
+    await ask(page, '오래 걸리는 질문 #설명중단');
     const stop = page.getByRole('button', { name: '응답 중단' });
     await expect(stop).toBeVisible();
     await expect.poll(lingeringFakeAi).toBeGreaterThan(0);
+    await expect(conversation(page)).toContainText(
+      '센서 경고가 발생하는 조건과 해제 조건을 확인하겠습니다.',
+    );
     await shot(page, '중단-전');
     await stop.click();
     await expect(stop).toBeHidden({ timeout: 20_000 });
+    await expect(
+      conversation(page).locator('[data-chat-progress]'),
+    ).toHaveCount(0);
     await expect(conversation(page)).toContainText('응답을 중단했습니다');
+    await expect(conversation(page)).not.toContainText(
+      '센서 경고가 발생하는 조건과 해제 조건을 확인하겠습니다.',
+    );
     await expect(
       page.getByRole('button', { name: '답변 요청', exact: true }),
     ).toHaveCount(0);
@@ -132,12 +182,10 @@ test.describe('진행 중 상태·취소·복원', () => {
     const calls = await aiCalls();
     expect(calls).toHaveLength(2);
     // 두 번째 호출이 세션을 이어 갔는지는 관찰만 한다(앱 정책에 따라 다름).
-    test
-      .info()
-      .annotations.push({
-        type: 'resume',
-        description: `두 번째 호출 resume=${String(calls[1]?.resumed)}`,
-      });
+    test.info().annotations.push({
+      type: 'resume',
+      description: `두 번째 호출 resume=${String(calls[1]?.resumed)}`,
+    });
   });
 
   test('앱을 다시 시작해도 연결과 대화 목록이 복원된다', async ({

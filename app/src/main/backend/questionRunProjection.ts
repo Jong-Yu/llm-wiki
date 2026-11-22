@@ -7,6 +7,7 @@ import type {
   QuestionSession,
   QuestionAnswer,
   QuestionEvidence,
+  QuestionCommentary,
 } from '@contracts/questionRuns.contract';
 
 const id = z.string().regex(/^[a-f0-9]{32}$/);
@@ -121,6 +122,7 @@ export function idleQuestionLocal(): QuestionLocal {
     status: 'idle',
     phase: '',
     preview: '',
+    commentaries: [],
     requestId: null,
     errorCode: null,
     cleanupWarning: false,
@@ -236,10 +238,17 @@ export function projectQuestionAnswers(
 }
 const cliEventSchema = z.object({
   protocol: z.literal('question-cli-v1'),
-  type: z.enum(['phase', 'answer_preview', 'answer_request', 'result']),
+  type: z.enum([
+    'phase',
+    'commentary',
+    'answer_preview',
+    'answer_request',
+    'result',
+  ]),
   question_run_id: id.nullish(),
   phase: z.string().max(100).optional(),
   content: z.string().max(65536).optional(),
+  message_id: z.string().min(1).max(100).optional(),
   saved: z.boolean().nullable().optional(),
   request_id: id.nullish(),
   error: z
@@ -261,6 +270,33 @@ export function applyQuestionCliEvent(
   const event = parsed.data;
   if (event.question_run_id && event.question_run_id !== questionRunId)
     return local;
+  if (event.type === 'commentary') {
+    if (
+      event.question_run_id !== questionRunId ||
+      event.saved !== false ||
+      event.origin !== 'client_reported' ||
+      !event.message_id?.trim() ||
+      !event.content?.trim() ||
+      event.content.length > 2000
+    )
+      return local;
+    const previous = local.commentaries ?? [];
+    const existing = previous.findIndex(
+      (item: QuestionCommentary): boolean => item.id === event.message_id,
+    );
+    if (existing >= 0 && previous[existing]?.content === event.content)
+      return local;
+    const commentary = { id: event.message_id, content: event.content };
+    // 같은 메시지의 갱신은 원래 위치를 유지하고 새 메시지만 최근 20개 안에 추가합니다.
+    const commentaries =
+      existing < 0
+        ? [...previous, commentary].slice(-20)
+        : previous.map(
+            (item: QuestionCommentary, index: number): QuestionCommentary =>
+              index === existing ? commentary : item,
+          );
+    return { ...local, commentaries };
+  }
   if (event.type === 'answer_preview') {
     if (
       event.saved !== false ||
@@ -270,6 +306,8 @@ export function applyQuestionCliEvent(
       return local;
     return { ...local, preview: event.content };
   }
+  // 생존 확인은 작업 단계가 아니므로 마지막 실제 진행 상태를 유지합니다.
+  if (event.type === 'phase' && event.phase === 'heartbeat') return local;
   if (event.type === 'phase')
     return {
       ...local,

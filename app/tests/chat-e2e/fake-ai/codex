@@ -186,6 +186,19 @@ def main():
     thread_id = arguments[arguments.index("resume") + 1] if resumed else str(uuid.uuid4())
     emit({"type": "thread.started", "thread_id": thread_id})
     emit({"type": "turn.started"})
+    if scenario in {"작업설명", "설명중단"} and not searching:
+        # 공개 설명 두 문장과 최종 JSON 사이를 벌려 실제 CLI→IPC→화면 전달을 확인한다.
+        emit({"type": "item.completed", "item": {"id": "private", "type": "reasoning",
+              "text": "내부 추론은 화면에 표시하지 않습니다."}})
+        for index, content in enumerate(("센서 경고가 발생하는 조건과 해제 조건을 확인하겠습니다.",
+                                         "상한 초과와 하한 미달을 구분해 답변을 정리하겠습니다.")):
+            event = {"type": "item.completed", "item": {"id": f"work-{index}", "type": "agent_message",
+                     "text": f"[[wiki-work-update]]{content}[[/wiki-work-update]]"}}
+            emit(event)
+            emit(event)  # 같은 공개 메시지가 재전달돼도 한 번만 표시한다.
+            time.sleep(1.5)
+        if scenario == "설명중단":
+            time.sleep(float(config().get("slow_seconds", 20)))
     if scenario == "이벤트오류" and not searching:
         emit({"type": "error", "message": "boom"})
         emit({"type": "turn.failed", "error": {"message": "boom"}})

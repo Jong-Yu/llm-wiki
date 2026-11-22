@@ -1,4 +1,7 @@
-import type { QuestionDetail } from '@contracts/questionRuns.contract';
+import type {
+  QuestionCommentary,
+  QuestionDetail,
+} from '@contracts/questionRuns.contract';
 import { isAiRuntimePreparationFailure } from '@contracts/runtime.contract';
 import { chatRunActive, chatRunUncertain, chatTurns } from './chatState';
 import type { ChatEnvelope, ChatRunNotice, ChatTurn } from './chatState';
@@ -8,6 +11,31 @@ export type ChatRunFailure = {
   message: string;
   connection: boolean;
 };
+
+/** AI 설명을 아직 받지 못했을 때의 대기와 사용자가 요청한 중지만 알립니다. */
+export function chatRunProgress(run: QuestionDetail | null): string {
+  if (run?.local.status === 'stopping') return '답변 생성을 멈추고 있어요';
+  return '답변을 준비하고 있어요';
+}
+
+/** 현재 실행의 공개 작업 설명만 보여 주며 완료·중단과 다음 질문에는 남기지 않습니다. */
+export function chatRunCommentaries(
+  run: QuestionDetail | null,
+  preparing: boolean,
+): readonly QuestionCommentary[] {
+  if (
+    !run ||
+    preparing ||
+    !chatRunActive(run) ||
+    run.answers.length > 0 ||
+    run.receipts.some(
+      (receipt: QuestionDetail['receipts'][number]): boolean =>
+        receipt.saved === true,
+    )
+  )
+    return [];
+  return run.local.commentaries ?? [];
+}
 
 /** 안전한 오류 코드로만 사용자 안내를 고르며 원시 실행 출력은 표시하지 않습니다. */
 export function chatRunFailure(code: string | null): ChatRunFailure {

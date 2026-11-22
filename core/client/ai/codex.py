@@ -197,7 +197,7 @@ def _preview_event(line, callback):
         item = event.get("item")
         if (event.get("type") in {"item.updated", "item.completed"} and isinstance(item, dict)
                 and item.get("type") == "agent_message" and isinstance(item.get("text"), str)):
-            callback({"type": "agent_message", "text": item["text"], "event": event["type"],
+            callback({"type": "agent_message", "kind": "public_text", "text": item["text"], "event": event["type"],
                       "item_id": item.get("id") if isinstance(item.get("id"), str) else None})
     except (ValueError, UnicodeError, AttributeError):
         raise AIAdapterError("ai_invalid_events") from None
