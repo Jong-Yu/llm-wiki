@@ -2,6 +2,37 @@ import {
   UPDATE_CHANNELS,
   updateResultSchema,
 } from '@contracts/update.contract';
+import {
+  TEMPLATES_CHANNELS,
+  templateSessionSchema,
+  templateChooseFileSchema,
+  templateReadRequestSchema,
+  templateSaveRequestSchema,
+  templateArchiveRequestSchema,
+  templateOriginalRequestSchema,
+  templatePrepareResultRequestSchema,
+  templateDownloadResultRequestSchema,
+  templateListResultSchema,
+  templateDetailResultSchema,
+  templateFileResultSchema,
+  templatePreparedResultResultSchema,
+  templateDownloadResultSchema,
+} from '@contracts/templates.contract';
+import type {
+  TemplateSession,
+  TemplateChooseFileRequest,
+  TemplateReadRequest,
+  TemplateSaveRequest,
+  TemplateArchiveRequest,
+  TemplateOriginalRequest,
+  TemplatePrepareResultRequest,
+  TemplateDownloadResultRequest,
+  TemplateListResult,
+  TemplateDetailResult,
+  TemplateFileResult,
+  TemplatePreparedResultResult,
+  TemplateDownloadResult,
+} from '@contracts/templates.contract';
 import type { UpdateResult } from '@contracts/update.contract';
 import {
   FILE_EXPORT_CHANNELS,
@@ -216,6 +247,78 @@ export function createWikiBridge(
   drop?: AttachmentBridge['drop'],
 ): WikiBridge {
   return {
+    templates: {
+      list: async (request: TemplateSession): Promise<TemplateListResult> =>
+        templateListResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.list,
+            templateSessionSchema.parse(request),
+          ),
+        ),
+      read: async (
+        request: TemplateReadRequest,
+      ): Promise<TemplateDetailResult> =>
+        templateDetailResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.read,
+            templateReadRequestSchema.parse(request),
+          ),
+        ),
+      chooseFile: async (
+        request: TemplateChooseFileRequest,
+      ): Promise<TemplateFileResult> =>
+        templateFileResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.chooseFile,
+            templateChooseFileSchema.parse(request),
+          ),
+        ),
+      save: async (
+        request: TemplateSaveRequest,
+      ): Promise<TemplateDetailResult> =>
+        templateDetailResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.save,
+            templateSaveRequestSchema.parse(request),
+          ),
+        ),
+      archive: async (
+        request: TemplateArchiveRequest,
+      ): Promise<TemplateDetailResult> =>
+        templateDetailResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.archive,
+            templateArchiveRequestSchema.parse(request),
+          ),
+        ),
+      downloadOriginal: async (
+        request: TemplateOriginalRequest,
+      ): Promise<TemplateDownloadResult> =>
+        templateDownloadResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.downloadOriginal,
+            templateOriginalRequestSchema.parse(request),
+          ),
+        ),
+      prepareResult: async (
+        request: TemplatePrepareResultRequest,
+      ): Promise<TemplatePreparedResultResult> =>
+        templatePreparedResultResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.prepareResult,
+            templatePrepareResultRequestSchema.parse(request),
+          ),
+        ),
+      downloadResult: async (
+        request: TemplateDownloadResultRequest,
+      ): Promise<TemplateDownloadResult> =>
+        templateDownloadResultSchema.parse(
+          await invoke(
+            TEMPLATES_CHANNELS.downloadResult,
+            templateDownloadResultRequestSchema.parse(request),
+          ),
+        ),
+    },
     update: {
       /** 업데이트 진행 상태를 조회하며 설치를 시작하지 않습니다. */
       getStatus: async (): Promise<UpdateResult> =>
@@ -572,6 +675,9 @@ export function createWikiBridge(
       /** main에 보관된 현재 연결의 공개 상태를 조회합니다. */
       getState: async (): Promise<ConnectionResult> =>
         parseConnectionResult(await invoke(CONNECTION_CHANNELS.getState)),
+      /** 현재 토큰으로 소속을 다시 확인하고 비밀 없는 연결 상태만 전달합니다. */
+      refreshAccess: async (): Promise<ConnectionResult> =>
+        parseConnectionResult(await invoke(CONNECTION_CHANNELS.refreshAccess)),
       /** 선택한 공간·관점의 서버 재확인 결과를 전달합니다. */
       selectWorkspace: async (
         request: SelectWorkspaceRequest,

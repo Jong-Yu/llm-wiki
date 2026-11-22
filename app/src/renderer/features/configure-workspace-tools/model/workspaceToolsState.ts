@@ -29,6 +29,24 @@ export function describeToolsConnectionFailure(
       title: '연결 입력을 확인해 주세요',
       detail: '이름과 서버 주소를 다시 확인해 주세요.',
     };
+  if (
+    error.code === 'workspace_default_invalid' ||
+    error.code === 'read_required'
+  )
+    return {
+      title: '워크스페이스 배정을 확인해 주세요',
+      detail: error.message,
+    };
+  if (
+    error.code === 'network_error' ||
+    error.code === 'timeout' ||
+    (error.status !== undefined && error.status >= 500)
+  )
+    return {
+      title: '서버에 연결하지 못했습니다',
+      detail:
+        '로그인 상태는 유지됩니다. 서버와 인터넷 연결을 확인한 뒤 다시 확인해 주세요.',
+    };
   if (error.code === 'protection_delete_failed')
     return {
       title: '저장된 인증정보를 삭제하지 못했습니다',

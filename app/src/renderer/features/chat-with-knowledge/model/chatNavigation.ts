@@ -1,6 +1,7 @@
 import type { ChatThread } from './chatState';
 
 export type ChatLocation = {
+  templateId?: string;
   conversationId?: string;
   questionRunId?: string;
   threadId?: string;
@@ -13,6 +14,7 @@ export type ChatLocation = {
 /** 주소의 대화·근거 선택만 읽고 문서 본문이나 인증정보는 이동 상태에 넣지 않습니다. */
 export function readChatLocation(params: URLSearchParams): ChatLocation {
   return {
+    templateId: params.get('templateId') ?? undefined,
     conversationId: params.get('conversationId') ?? undefined,
     questionRunId: params.get('questionRunId') ?? undefined,
     threadId: params.get('threadId') ?? undefined,

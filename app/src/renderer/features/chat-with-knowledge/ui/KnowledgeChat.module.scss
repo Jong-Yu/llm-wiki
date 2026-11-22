@@ -24,10 +24,7 @@
     opacity: var(--wiki-opacity-disabled);
     cursor: not-allowed;
   }
-  h1,
-  h2,
-  h3,
-  p {
+  :where(h1, h2, h3, p) {
     margin: 0;
   }
   :where(a) {
@@ -89,8 +86,31 @@
   width: 100%;
   border: 1px solid var(--wiki-color-border-default);
   border-radius: 10px;
-  // 패널은 가득 채우되 읽는 글줄은 1100px 안에 가운데로 모읍니다.
-  padding: 0 max(16px, calc((100% - 1100px) / 2)) 12px;
+  padding: 0 var(--wiki-space-16) var(--wiki-space-12);
+  // 질문·답변·입력과 안내를 같은 읽기 열에 모으고 헤더만 패널 폭을 채웁니다.
+  > :not(.header) {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 960px;
+    margin-inline: auto;
+  }
+  // 첫 질문을 쓰는 동안에도 안내와 입력이 하나의 중앙 묶음으로 유지됩니다.
+  &[data-start='true'] {
+    overflow-y: auto;
+    .messages {
+      flex: none;
+      overflow: visible;
+      margin-top: auto;
+      padding-block: var(--wiki-space-24);
+    }
+    .empty {
+      min-height: 0;
+      padding: 0;
+    }
+    > :last-child {
+      margin-bottom: auto;
+    }
+  }
 }
 .header {
   display: flex;
@@ -187,11 +207,12 @@
   color: var(--wiki-color-text-secondary);
 }
 .messages {
+  box-sizing: border-box;
   flex: 1;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 16px 4px;
+  padding: var(--wiki-space-24) var(--wiki-space-4);
 }
 .chatSkeleton {
   display: block;
@@ -214,15 +235,43 @@
   margin-top: var(--wiki-space-24);
 }
 .user {
-  margin: 0 0 14px auto;
+  margin: 0 0 var(--wiki-space-24) auto;
   width: fit-content;
-  max-width: 74%;
-  p {
-    background-color: var(--wiki-color-surface-hover);
-    padding: 8px 13px;
-    border-radius: 14px 14px 4px 14px;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
+  max-width: 78%;
+  font-size: var(--wiki-font-size-14);
+  line-height: var(--wiki-font-line-height-body);
+}
+.questionBubble {
+  background-color: var(--wiki-color-surface-hover);
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+  border-radius: 14px 14px 4px 14px;
+}
+.questionText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  &[data-collapsed='true'] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+    overflow: hidden;
+  }
+}
+.root .questionToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wiki-space-4);
+  min-height: var(--wiki-space-32);
+  margin-top: var(--wiki-space-6);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  &[aria-expanded='true'] svg {
+    transform: rotate(180deg);
+  }
+  &:hover {
+    color: var(--wiki-color-text-primary);
   }
 }
 .assistant {
@@ -230,9 +279,9 @@
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  margin-bottom: 14px;
-  font-size: 13px;
-  line-height: 20px;
+  margin-bottom: var(--wiki-space-32);
+  font-size: var(--wiki-font-size-14);
+  line-height: var(--wiki-font-line-height-body);
 }
 .avatar {
   display: grid;
@@ -254,6 +303,36 @@
 }
 .answer {
   min-width: 0;
+}
+article.assistant > .answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-12);
+  > :not(.srOnly) {
+    margin-block: 0;
+  }
+}
+.root .jumpToLatest {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  align-self: center;
+  width: var(--wiki-space-36);
+  min-width: var(--wiki-space-36);
+  height: var(--wiki-space-36);
+  min-height: var(--wiki-space-36);
+  margin-block: calc(-1 * var(--wiki-space-12)) var(--wiki-space-8);
+  padding: 0;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: 50%;
+  background-color: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  box-shadow: var(--wiki-shadow-overlay);
+  position: relative;
+  z-index: 1;
+  &:hover {
+    background-color: var(--wiki-color-surface-hover);
+  }
 }
 .evidenceActions {
   display: flex;
@@ -334,10 +413,16 @@
   text-decoration: none;
 }
 .scopeNote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--wiki-space-8);
   margin: 0 0 var(--wiki-space-12);
-  padding-left: 32px;
   color: var(--wiki-color-text-secondary);
   font-size: var(--wiki-font-size-12);
+  svg {
+    flex-shrink: 0;
+    margin-top: var(--wiki-space-2);
+  }
 }
 .footerNotice {
   flex-shrink: 0;
@@ -583,6 +668,9 @@
   .answer {
     padding-left: 0;
   }
+  .user {
+    max-width: 90%;
+  }
 
   .evidencePanel {
     border-left: 0;
@@ -712,11 +800,14 @@
   position: relative;
 }
 .formatMenu {
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  box-sizing: border-box;
   min-width: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: min(320px, calc(100dvh - 16px));
+  overflow: auto;
   padding: 4px;
   border: 1px solid var(--wiki-color-border-control);
   border-radius: 10px;
@@ -751,6 +842,18 @@
   }
 }
 
+@media (pointer: coarse) {
+  .root .jumpToLatest {
+    width: var(--wiki-component-control-height-touch);
+    min-width: var(--wiki-component-control-height-touch);
+    height: var(--wiki-component-control-height-touch);
+    min-height: var(--wiki-component-control-height-touch);
+  }
+  .root .questionToggle {
+    min-height: var(--wiki-component-control-height-touch);
+  }
+}
+
 .fileText .previewTrigger {
   padding: 0;
   min-height: 0;
@@ -762,4 +865,17 @@
   &:hover {
     text-decoration: underline;
   }
+}
+
+.templateRequest {
+  margin-inline-start: 32px;
+  overflow-wrap: anywhere;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-13);
+  summary {
+    cursor: pointer;
+  }
+}
+.templateInstructions {
+  white-space: pre-wrap;
 }

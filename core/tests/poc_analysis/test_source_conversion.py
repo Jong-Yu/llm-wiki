@@ -13,6 +13,7 @@ from zipfile import ZipFile
 from core.client import source_conversion_formats as formats
 from core.client.source_conversion import convert_source, report_body, run_worker
 from core.client import source_conversion_xlsx as xlsx_view
+from core.tests.poc_access.fixtures import grant_test_membership
 
 
 def docx_bytes(*, extras=False, image=False, header=False):
@@ -323,7 +324,8 @@ class RegistrationFlowTest(unittest.IsolatedAsyncioTestCase):
             root = Path(temporary).resolve(); (root / 'data').mkdir(); (root / 'tenancy').mkdir()
             config = root / 'tenancy/policy.json'; config.write_text(json.dumps(dict(version=1, tenants={}, users={})))
             policy = AccessPolicy(config, root / 'data'); auth = initialize_auth(policy)
-            user = auth.signup('문서 등록 시험'); tenant = user['default_tenant']
+            user = grant_test_membership(policy, auth.signup('문서 등록 시험'))
+            tenant = user['default_tenant']
             schema = build_submission_schema()
             publish(root / 'rules', tenant_root=root / 'data', ruleset_id='common', ruleset_version='v1',
                     reason='isolated conversion registration test', schema=schema, expected_schema=schema)

@@ -7,10 +7,12 @@
 import argparse
 import asyncio
 import json
+import re
 from pathlib import Path
 
 from core.client.ai import create_adapter
 from core.client.transport import client_error_code
+from core.runtime.client_platform import platform_error_code
 from tools.cli_io import add_ai_arguments
 
 PROTOCOL = "search-terms-cli-v1"
@@ -57,6 +59,29 @@ async def execute(args, question):
     return clean_terms(result["value"])
 
 
+def _failure_code(error):
+    """고정된 개인 실행 경계 오류만 보존하며 원시 예외의 경로·인증은 공개하지 않는다."""
+    return client_error_code(error) or platform_error_code(error) or "search_terms_failed"
+
+
+def _failure(error):
+    """오류 코드와, AI CLI 메시지를 거부했으면 그 이름표(예: system:hook_started)만 돌려준다(D-143)."""
+    value = {"code": _failure_code(error)}
+    pending = [error]
+    for _ in range(32):
+        if not pending:
+            break
+        current = pending.pop()
+        event = getattr(current, "event", None)
+        if isinstance(event, str) and re.fullmatch(r"(system|type):[a-z][a-z0-9_]{0,63}", event):
+            value["event"] = event
+            break
+        children = getattr(current, "exceptions", None)
+        if isinstance(children, (tuple, list)):
+            pending.extend(children)
+    return value
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Expand one question into wiki search terms with the selected personal AI.")
     parser.add_argument("--work-dir", required=True, type=Path)
@@ -75,7 +100,7 @@ def main(argv=None):
         try:
             value = {"ok": True, "terms": asyncio.run(execute(args, question))}
         except Exception as error:
-            value = {"ok": False, "error": {"code": client_error_code(error) or "search_terms_failed"}}
+            value = {"ok": False, "error": _failure(error)}
     print(json.dumps({"protocol": PROTOCOL, **value}, ensure_ascii=False, allow_nan=False), flush=True)
     return 0 if value["ok"] else 1
 

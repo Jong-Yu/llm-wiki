@@ -31,10 +31,22 @@ def cli_command(cli):
     raise ClientPlatformError("ai_cli_native_executable_required")
 
 
+def no_window_options():
+    """Windows 콘솔 프로그램이 새 콘솔 창을 만들지 않게 한다.
+
+    앱이 띄운 Python은 콘솔이 없어서, 플래그 없이 만든 콘솔 자식은 새 창을 띄운다.
+    stdin/stdout은 파이프로 그대로 이어지며 POSIX에는 아무 옵션도 더하지 않는다.
+    """
+    if is_windows():
+        import subprocess
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
 def spawn_options():
     if is_windows():
         import subprocess
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
     return {"start_new_session": True}
 
 
@@ -42,7 +54,8 @@ class WindowsJob:
     """CLI 자신의 job을 닫으면 그 안에서 생성한 자식도 회수한다."""
     def __init__(self):
         import win32job
-        self.job = win32job.CreateJobObject(None, None)
+        # pywin32 311은 이름에 None을 허용하지 않는다. 빈 문자열로 실행마다 익명 Job을 만든다.
+        self.job = win32job.CreateJobObject(None, "")
         try:
             info = win32job.QueryInformationJobObject(self.job, win32job.JobObjectExtendedLimitInformation)
             info["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -53,8 +66,12 @@ class WindowsJob:
 
     def assign(self, pid):
         import win32api, win32con, win32job
-        with win32api.OpenProcess(win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE, False, pid) as handle:
+        # pywin32의 PyHANDLE은 with 문(context manager)을 지원하지 않으므로 직접 닫는다.
+        handle = win32api.OpenProcess(win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE, False, pid)
+        try:
             win32job.AssignProcessToJobObject(self.job, handle)
+        finally:
+            handle.Close()
 
     def close(self):
         if self.job is not None:

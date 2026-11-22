@@ -16,6 +16,9 @@ import {
 import type { ChatAttachment } from './attachments';
 import { useSessionAvailability } from './useSessionAvailability';
 import { templateById } from './answerTemplates';
+import { templatesGateway } from '@renderer/platform/templates';
+import { freezeTemplate, registeredTemplateId } from './templateSnapshot';
+import { splitQuestion } from './externalMaterial';
 import {
   ChatRequestError,
   chatRunsApi,
@@ -30,7 +33,6 @@ import {
   chatEnvelopeSchema,
   chatId,
   chatQuestionSchema,
-  chatWebQuerySchema,
   chatRunActive,
   chatRunStartable,
   chatRunUncertain,
@@ -44,12 +46,20 @@ import type {
   ChatThread,
   ChatTurn,
 } from './chatState';
+import { canAdvanceChatDraft, rememberChatRunNotice } from './chatRunFeedback';
+import { visibleSubmittedQuestion } from './chatTranscript';
+import type {
+  SubmittedChatDraft,
+  SubmittedChatQuestion,
+} from './chatTranscript';
 
 export type KnowledgeChatModel = {
   thread: ChatThread;
   threads: ChatThread[];
   conversation: ChatEnvelope | null;
   run: QuestionDetail | null;
+  /** 서버 저장 전에도 방금 보낸 질문을 보여 주는 표시 전용 상태입니다. */
+  submittedQuestion: SubmittedChatQuestion | null;
   busy: boolean;
   loading: boolean;
   ready: boolean;
@@ -112,7 +122,9 @@ export function useKnowledgeChat(
   });
   const stateRef = useRef(state);
   const [conversation, setConversation] = useState<ChatEnvelope | null>(null);
+  const conversationRef = useRef<ChatEnvelope | null>(null);
   const [run, setRun] = useState<QuestionDetail | null>(null);
+  const [submitted, setSubmitted] = useState<SubmittedChatDraft | null>(null);
   const runtime = useAiConnection.useSnapshot();
   const [ready, setReady] = useState(false);
   const [recoveryAttempt, setRecoveryAttempt] = useState(0);
@@ -154,6 +166,29 @@ export function useKnowledgeChat(
       ),
     });
   }
+  /** 실제 대화 조회의 이전 판본을 초안 기준 검증에만 보관합니다. */
+  function acceptConversation(value: ChatEnvelope | null): void {
+    conversationRef.current = value;
+    setConversation(value);
+  }
+  /** 같은 질문의 종료 상태를 보호 저장에 남겨 다음 질문 뒤에도 확인할 수 있게 합니다. */
+  function acceptRun(detail: QuestionDetail | null): void {
+    setRun(detail);
+    if (!detail) return;
+    const current = stateRef.current.threads.find(
+      (item: ChatThread): boolean => item.id === stateRef.current.activeId,
+    );
+    if (
+      !current ||
+      current.conversationId !== detail.conversationId ||
+      current.runId !== detail.id ||
+      current.questionTurnId !== detail.questionTurnId
+    )
+      return;
+    const runNotices = rememberChatRunNotice(current.runNotices, detail);
+    if (JSON.stringify(runNotices) !== JSON.stringify(current.runNotices))
+      patchThread({ runNotices });
+  }
   /** 종료 전에 요청 ID를 먼저 보존하며 복구 저장 실패 시 쓰기를 시작하지 않습니다. */
   async function preservePending(pending: ChatPending | null): Promise<void> {
     const previous = stateRef.current.pending;
@@ -184,8 +219,9 @@ export function useKnowledgeChat(
       ].includes(code)
     ) {
       setInvalidScope(true);
-      setConversation(null);
-      setRun(null);
+      acceptConversation(null);
+      acceptRun(null);
+      setSubmitted(null);
     }
     setError(
       reason instanceof Error ? reason.message : '응답을 확인하지 못했습니다.',
@@ -309,7 +345,7 @@ export function useKnowledgeChat(
       },
     );
     patchThread({ runId: detail.id });
-    if (alive.current) setRun(detail);
+    if (alive.current) acceptRun(detail);
     await preservePending(null);
     await startRun(detail);
   }
@@ -327,7 +363,7 @@ export function useKnowledgeChat(
           detail.status === 'running' && detail.leaseStatus === 'expired',
       }),
     );
-    if (alive.current) setRun(started);
+    if (alive.current) acceptRun(started);
     patchThread({ startUnconfirmed: false });
   }
 
@@ -347,26 +383,38 @@ export function useKnowledgeChat(
         question: thread.draft,
       }).question;
       const attachments = thread.attachments;
-      // 웹 조사에는 별도 입력한 검색어만 보냅니다. 질문·문서·첨부·이전 대화는 포함하지 않습니다.
-      const webQuery = thread.webEnabled
-        ? chatWebQuerySchema.parse(thread.webQuery)
-        : null;
       // 저장·전송하는 질문은 붙여넣은 자료를 구분 표지와 함께 포함하고, 제목과 검색에는 질문 문장을 씁니다.
       const template = templateById(thread.template);
-      setFoundCount(null);
-      setPhase('관련 문서와 연결된 근거를 찾고 있어요');
-      if (webQuery) setPhase('외부 웹 자료와 출처를 확인하고 있어요');
-      const web = webQuery
-        ? (await chatRunsApi.webSearch({ ...session, query: webQuery })).web
+      const registeredId = registeredTemplateId(thread.template);
+      const selected = registeredId
+        ? await templatesGateway.read({ ...session, templateId: registeredId })
         : null;
-      // 별도 AI 검색어 확장 없이 서버의 질문 색인이 관련 문서와 예외를 함께 찾는다.
+      if (selected && !selected.ok) throw new Error(selected.error.message);
+      const snapshot = selected?.ok ? freezeTemplate(selected.data) : null;
       const content = composeQuestion(
         question,
         attachments,
         template,
         false,
         thread.webEnabled,
+        snapshot,
       );
+      if (content.length > 65536)
+        throw new Error(
+          '템플릿과 첨부를 합친 내용이 질문 한도를 넘습니다. 지침이나 첨부를 줄여 주세요.',
+        );
+      const questionTurnId = chatId();
+      // 전송 전 시작한 읽기가 이후의 낙관적 질문이나 실제 저장 결과를 덮지 못하게 합니다.
+      readSerial.current += 1;
+      setSubmitted({ id: questionTurnId, content, threadId: thread.id });
+      setFoundCount(null);
+      setPhase('관련 문서와 연결된 근거를 찾고 있어요');
+      if (thread.webEnabled) setPhase('외부 웹 자료와 출처를 확인하고 있어요');
+      // 토글이 켜진 질문 문장만 조사하며 첨부·위키·이전 대화는 외부 입력에 포함하지 않습니다.
+      const web = thread.webEnabled
+        ? (await chatRunsApi.webSearch({ ...session, question })).web
+        : null;
+      // 별도 AI 검색어 확장 없이 서버의 질문 색인이 관련 문서와 예외를 함께 찾는다.
       patchThread({
         noEvidenceQuestion: null,
         searchNotice: '관련 문서와 검토 근거를 준비하고 있어요.',
@@ -433,16 +481,15 @@ export function useKnowledgeChat(
           conversationId: current.record.id,
           title: question.slice(0, 60),
         });
-        if (alive.current) setConversation(current);
+        if (alive.current) acceptConversation(current);
         await preservePending(null);
       }
       if (thread.draftRevision && thread.draftRevision !== current.revision) {
-        setConversation(current);
+        acceptConversation(current);
         throw new Error(
           '질문 작성 중 대화가 변경되었습니다. 갱신된 대화를 확인한 뒤 질문을 다시 보내 주세요.',
         );
       }
-      const questionTurnId = chatId();
       current = await write(
         {
           ...session,
@@ -455,6 +502,14 @@ export function useKnowledgeChat(
             content,
             status: 'complete',
             context_request: context,
+            ...(snapshot
+              ? {
+                  template_ref: {
+                    id: snapshot.template.id,
+                    revision: snapshot.template.revision,
+                  },
+                }
+              : {}),
           },
         },
         {
@@ -468,16 +523,15 @@ export function useKnowledgeChat(
       patchThread({
         draft: '',
         attachments: [],
-        template: '',
-        webEnabled: false,
-        webQuery: '',
+        template: registeredId ? thread.template : '',
         draftRevision: null,
         questionTurnId,
         runId: null,
       });
       if (alive.current) {
-        setConversation(current);
-        setRun(null);
+        acceptConversation(current);
+        acceptRun(null);
+        setSubmitted(null);
       }
       await preservePending(null);
       await createRun(current, questionTurnId);
@@ -508,10 +562,23 @@ export function useKnowledgeChat(
         current.id !== stateRef.current.activeId
       )
         return;
-      setRun(detail);
+      const latest = stateRef.current.threads.find(
+        (item: ChatThread): boolean => item.id === current.id,
+      );
+      if (
+        latest &&
+        canAdvanceChatDraft(
+          conversationRef.current,
+          saved,
+          detail,
+          latest.draftRevision,
+        )
+      )
+        patchThread({ draftRevision: saved?.revision ?? null });
+      acceptRun(detail);
       if (detail && current.startUnconfirmed)
         patchThread({ startUnconfirmed: false });
-      setConversation(saved);
+      acceptConversation(saved);
       setError('');
     } catch (reason: unknown) {
       if (serial === readSerial.current) fail(reason);
@@ -531,7 +598,7 @@ export function useKnowledgeChat(
             }),
         );
         patchThread({ runId: detail.id });
-        setRun(detail);
+        acceptRun(detail);
         await preservePending(null);
         return;
       }
@@ -564,7 +631,14 @@ export function useKnowledgeChat(
         ...(pending.step === 'question'
           ? {
               questionTurnId: pending.requestId,
-              ...([false, true].some(
+              ...((registeredTemplateId(thread.template) &&
+                pending.sentQuestion &&
+                splitQuestion(pending.sentQuestion).question ===
+                  thread.draft.trim() &&
+                JSON.stringify(
+                  splitQuestion(pending.sentQuestion).attachments,
+                ) === JSON.stringify(thread.attachments)) ||
+              [false, true].some(
                 (noEvidence: boolean): boolean =>
                   composeQuestion(
                     thread.draft.trim(),
@@ -578,8 +652,6 @@ export function useKnowledgeChat(
                     draft: '',
                     attachments: [],
                     template: '',
-                    webEnabled: false,
-                    webQuery: '',
                     draftRevision: null,
                   }
                 : {}),
@@ -587,7 +659,8 @@ export function useKnowledgeChat(
             }
           : {}),
       });
-      setConversation(saved);
+      acceptConversation(saved);
+      if (pending.step === 'question') setSubmitted(null);
       await preservePending(null);
     });
   }
@@ -604,8 +677,8 @@ export function useKnowledgeChat(
             chatRunsApi.read({ ...session, questionRunId: thread.runId ?? '' }),
           )
         : null;
-      setConversation(current);
-      setRun(detail);
+      acceptConversation(current);
+      acceptRun(detail);
       if (
         detail &&
         (chatRunActive(detail) ||
@@ -638,7 +711,7 @@ export function useKnowledgeChat(
   async function cancel(): Promise<void> {
     await perform(async (): Promise<void> => {
       if (run)
-        setRun(
+        acceptRun(
           await runChat((): ReturnType<typeof chatRunsApi.cancel> =>
             chatRunsApi.cancel({
               ...session,
@@ -674,8 +747,9 @@ export function useKnowledgeChat(
       activeId: next.id,
       threads: [...stateRef.current.threads, next],
     });
-    setConversation(null);
-    setRun(null);
+    acceptConversation(null);
+    acceptRun(null);
+    setSubmitted(null);
     setError('');
     return next;
   }
@@ -687,8 +761,9 @@ export function useKnowledgeChat(
     if (target && stateRef.current.activeId === id) return target;
     if (locked.current || stateRef.current.pending || !target) return null;
     update({ ...stateRef.current, activeId: id });
-    setConversation(null);
-    setRun(null);
+    acceptConversation(null);
+    acceptRun(null);
+    setSubmitted(null);
     setError('');
     return target;
   }
@@ -749,8 +824,9 @@ export function useKnowledgeChat(
             )
           : [...stateRef.current.threads, restored],
       });
-      setConversation(current);
-      setRun(detail);
+      acceptConversation(current);
+      acceptRun(detail);
+      setSubmitted(null);
     });
     return restored;
   }
@@ -883,6 +959,14 @@ export function useKnowledgeChat(
     threads: state.threads,
     conversation,
     run,
+    submittedQuestion: invalidScope
+      ? null
+      : visibleSubmittedQuestion(
+          submitted,
+          state.pending,
+          thread.id,
+          chatTurns(conversation),
+        ),
     busy,
     loading,
     ready,

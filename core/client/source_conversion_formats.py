@@ -18,6 +18,8 @@ import time
 from zipfile import ZipFile
 from xml.etree import ElementTree
 
+from core.runtime.client_process import no_window_options
+
 from . import source_conversion_xlsx as xlsx_view
 from .source_conversion_report import Conversion, OutputLimit, MAX_TEXT, MAX_UNITS
 
@@ -45,14 +47,16 @@ def ocr_diagnostics(language="eng"):
         return value
     try:
         version = subprocess.run([executable, "--version"], stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, timeout=5, check=False, encoding="utf-8", errors="replace")
+            stderr=subprocess.DEVNULL, timeout=5, check=False, encoding="utf-8", errors="replace",
+            **no_window_options())
         match = re.search(r"^tesseract ([A-Za-z0-9.+_-]{1,80})", version.stdout)
         if version.returncode or not match:
             value["status"] = "probe_failed"
             return value
         value["version"] = match.group(1)
         languages = subprocess.run([executable, "--list-langs"], stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, timeout=5, check=False, encoding="utf-8", errors="replace")
+            stderr=subprocess.DEVNULL, timeout=5, check=False, encoding="utf-8", errors="replace",
+            **no_window_options())
         if languages.returncode:
             value["status"] = "probe_failed"
             return value
@@ -119,7 +123,8 @@ def _ocr_attempt(image, engine, language, directory, deadline, *, psm=3):
     try:
         run = subprocess.run([engine["executable"], str(input_path), str(output), "-l", language,
                               "--psm", str(psm), "txt", "tsv"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=remaining, check=False)
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=remaining, check=False,
+            **no_window_options())
     except subprocess.TimeoutExpired:
         raise OcrFailure("ocr_timeout") from None
     if run.returncode:
@@ -184,7 +189,7 @@ def _ocr_orientation(image, engine, directory, deadline):
     try:
         run = subprocess.run([engine["executable"], str(path), "stdout", "--psm", "0"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=remaining, check=False,
-            encoding="utf-8", errors="replace")
+            encoding="utf-8", errors="replace", **no_window_options())
         rotation = re.search(r"^Rotate: (0|90|180|270)$", run.stdout, re.M)
         confidence = re.search(r"^Orientation confidence: ([0-9]+(?:\.[0-9]+)?)$", run.stdout, re.M)
         if run.returncode == 0 and rotation and confidence:

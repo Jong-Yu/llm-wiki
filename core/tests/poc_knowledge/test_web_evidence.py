@@ -17,6 +17,7 @@ from core.api.v1.knowledge.schemas import QuestionContextRequest
 from core.api.v1.personal.workflows_schemas import AnswerCitation, RunAnswer
 from core.client.question_ai import assemble_question, question_answer_schema
 from core.modules.access.auth import initialize_auth
+from core.tests.poc_access.fixtures import grant_test_membership
 from core.modules.access.policy import AccessPolicy
 from core.modules.knowledge.aggregation import prepare_question
 from core.modules.personal.question_runs import QuestionRunStore
@@ -204,6 +205,7 @@ class WebEvidenceHttpTests(unittest.IsolatedAsyncioTestCase):
         policy = AccessPolicy(config, root / "data")
         auth = initialize_auth(policy)
         self.user = auth.signup("web evidence test")
+        self.user = grant_test_membership(policy, self.user)
         self.tenant = self.user["default_tenant"]
         self.app = create_application(policy, auth=auth)
 

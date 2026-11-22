@@ -1,7 +1,7 @@
 """개인 기록의 입력 계약이다. 인증 사용자와 승인 여부를 입력으로 받지 않는다."""
 
 from typing import Literal
-from pydantic import Field, model_validator, field_validator
+from pydantic import Field, model_validator, field_validator, model_serializer
 from core.api.schemas import Model
 from core.api.v1.knowledge.schemas import QuestionContextRequest, ClaimSelection, SearchQuery
 
@@ -25,6 +25,11 @@ class CreateConversation(PersonalProfile):
     title: str = Field(min_length=1, max_length=200)
 
 
+class TemplateReference(Model):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class AppendTurn(PersonalProfile):
     request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -33,6 +38,15 @@ class AppendTurn(PersonalProfile):
     status: Literal["complete", "failed"] = "complete"
     context_request: QuestionContextRequest | None = None
     reply_to: str | None = Field(None, pattern=r"^[0-9a-f]{32}$")
+    template_ref: TemplateReference | None = None
+
+    @model_serializer(mode="wrap")
+    def compatible_payload(self, handler):
+        """선택하지 않은 템플릿은 과거 요청 지문과 같은 직렬화를 유지한다."""
+        value = handler(self)
+        if self.template_ref is None:
+            value.pop("template_ref", None)
+        return value
 
     @model_validator(mode="after")
     def role_basis(self):
@@ -40,7 +54,8 @@ class AppendTurn(PersonalProfile):
         if self.role == "user":
             if self.context_request is None or self.reply_to is not None or self.status != "complete" or not self.content:
                 raise ValueError("A question needs explicit context")
-        elif self.reply_to is None or self.context_request is not None or (not self.content and self.status != "failed"):
+        elif (self.reply_to is None or self.context_request is not None or self.template_ref is not None
+              or (not self.content and self.status != "failed")):
             raise ValueError("An answer needs a stored question reference")
         return self
 

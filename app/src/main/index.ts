@@ -1,11 +1,13 @@
 import { app, BrowserWindow, dialog, session } from 'electron';
-import { installAppLifetime } from './windows/appLifetime';
+import { installAppLifetime, showAppWindow } from './windows/appLifetime';
 import type { Event, WebContents } from 'electron';
 import appIcon from '../../design/brand/llm-wiki-icon.png?asset';
+import windowsIcon from '../../design/brand/llm-wiki-icon.ico?asset';
 import { registerRuntimeHandlers } from './ipc/registerRuntimeHandlers';
 import { registerAppHandlers } from './ipc/registerAppHandlers';
 import { registerConnectionHandlers } from './ipc/registerConnectionHandlers';
 import { createAppWindow } from './windows/createAppWindow';
+import { createAppTray } from './windows/createAppTray';
 import { getRendererLocation } from './windows/rendererLocation';
 import { createAppUpdater } from './updates/AppUpdater';
 import { registerUpdateHandlers } from './ipc/registerUpdateHandlers';
@@ -66,7 +68,7 @@ async function startApp(): Promise<void> {
     activeCount: clearConnection.activeCount,
     confirmQuit: async (count: number): Promise<boolean> => {
       // 숨긴 창에서 종료를 요청해도 확인 창을 바로 볼 수 있게 합니다.
-      if (window && !window.isVisible()) window.show();
+      if (window) showAppWindow(window);
       const options = {
         type: 'question' as const,
         title: '진행 중인 AI 작업',
@@ -98,15 +100,17 @@ async function startApp(): Promise<void> {
       app.quit();
     });
   };
-  openWindow();
-  updater.start();
-  app.on('activate', (): void => {
+  /** 트레이와 OS의 재열기는 같은 창과 진행 중인 작업을 유지합니다. */
+  const showWindow = (): void => {
     if (!window || window.isDestroyed()) openWindow();
-    else {
-      window.show();
-      window.focus();
-    }
-  });
+    else showAppWindow(window);
+  };
+  openWindow();
+  if (process.platform === 'win32') {
+    createAppTray(app, { iconPath: windowsIcon, showWindow });
+  }
+  updater.start();
+  app.on('activate', showWindow);
 }
 
 app.on('window-all-closed', (): void => {
@@ -117,9 +121,7 @@ app.on('window-all-closed', (): void => {
 if (app.requestSingleInstanceLock()) {
   app.on('second-instance', (): void => {
     const existing = BrowserWindow.getAllWindows()[0];
-    if (existing?.isMinimized()) existing.restore();
-    existing?.show();
-    existing?.focus();
+    if (existing) showAppWindow(existing);
   });
   void startApp().catch((error: unknown): void => {
     console.error('앱을 시작할 수 없습니다.', error);

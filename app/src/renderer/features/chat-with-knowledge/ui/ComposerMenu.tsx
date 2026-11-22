@@ -3,11 +3,14 @@ import type { ChangeEvent, JSX, KeyboardEvent } from 'react';
 import { Icon } from '@renderer/shared/ui/Icon';
 import type { AiModelOption } from '../model/aiModelOptions';
 import { ANSWER_TEMPLATES, templateById } from '../model/answerTemplates';
+import type { TemplateSummary } from '@contracts/templates.contract';
 import styles from './ComposerMenu.module.scss';
 
 type ComposerMenuProps = {
   disabled: boolean;
   template: string;
+  registeredTemplates?: readonly TemplateSummary[];
+  templateNotice?: string;
   onTemplate: (id: string) => void;
   models: readonly AiModelOption[];
   currentModel: string;
@@ -18,7 +21,7 @@ type ComposerMenuProps = {
 };
 type Panel = 'main' | 'template' | 'model' | 'paste';
 type Choice = { id: string; name: string; description?: string };
-const templates: readonly Choice[] = [
+const builtinTemplates: readonly Choice[] = [
   { id: '', name: '기본 답변', description: 'AI가 알아서 씁니다' },
   ...ANSWER_TEMPLATES,
 ];
@@ -27,6 +30,8 @@ const templates: readonly Choice[] = [
 export function ComposerMenu({
   disabled,
   template,
+  registeredTemplates = [],
+  templateNotice,
   onTemplate,
   models,
   currentModel,
@@ -41,7 +46,19 @@ export function ComposerMenu({
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const popupId = useId();
-  const selectedTemplate = templateById(template);
+  const templates: readonly Choice[] = [
+    builtinTemplates[0] ?? { id: '', name: '기본 답변' },
+    ...registeredTemplates.map((item: TemplateSummary): Choice => ({
+      id: `tpl-${item.id}`,
+      name: item.name,
+      description: item.filename,
+    })),
+    ...builtinTemplates.slice(1),
+  ];
+  const selectedTemplate =
+    templates.find(
+      (item: Choice): boolean => item.id === template && item.id !== '',
+    ) ?? templateById(template);
   const selectedModel =
     currentModel === 'default'
       ? '기본 설정'
@@ -195,7 +212,7 @@ export function ComposerMenu({
                 className={`${styles.menuRow} ${selectedTemplate ? styles.picked : ''}`}
                 onClick={(): void => setPanel('template')}
               >
-                <span>답변 양식</span>
+                <span>템플릿</span>
                 <small>
                   {selectedTemplate?.name ?? '기본 답변'}
                   <Icon name="chevron-right" size={12} />
@@ -247,8 +264,12 @@ export function ComposerMenu({
               )}
             </>
           )}
-          {panel === 'template' &&
-            choices('답변 양식', templates, template, onTemplate)}
+          {panel === 'template' && (
+            <>
+              {choices('템플릿', templates, template, onTemplate)}
+              {templateNotice && <p role="status">{templateNotice}</p>}
+            </>
+          )}
           {panel === 'model' &&
             choices(
               '모델',

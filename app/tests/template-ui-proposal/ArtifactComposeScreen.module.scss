@@ -1,0 +1,249 @@
+.root {
+  container-type: inline-size;
+  min-width: 0;
+  color: var(--wiki-color-text-primary);
+  font-size: 13px;
+  line-height: 20px;
+  :where(h2, h3, p) {
+    margin: 0;
+  }
+  h2 {
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+  }
+  h3 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  svg {
+    flex-shrink: 0;
+    stroke-width: 1.75;
+  }
+  button {
+    max-width: 100%;
+    white-space: normal;
+    height: auto;
+    min-height: 36px;
+  }
+  :where(button, textarea, select, summary):focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+  }
+  summary {
+    padding-block: 6px;
+    cursor: pointer;
+  }
+}
+.content {
+  width: 100%;
+  max-width: 720px;
+  min-width: 0;
+  margin-inline: auto;
+}
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+  p {
+    margin-top: 6px;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.project {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 32px;
+    span {
+      color: var(--wiki-color-text-secondary);
+    }
+    &::after {
+      content: '+';
+      margin-left: auto;
+    }
+  }
+  &[open] summary::after {
+    content: '−';
+  }
+  ul {
+    margin: 12px 0 8px;
+    padding-left: 24px;
+  }
+  p {
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.form {
+  display: grid;
+  gap: 24px;
+}
+.templateSection {
+  min-width: 0;
+}
+.templateChoice {
+  min-width: 0;
+}
+.selectedTemplate {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 6px;
+  background: var(--wiki-color-surface-subtle);
+  p {
+    margin-top: 8px;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  strong {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-weight: 500;
+  }
+  span {
+    font-size: 12px;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.rules {
+  margin-top: 8px;
+  ol {
+    padding-left: 20px;
+    margin: 8px 0 0;
+  }
+  li + li {
+    margin-top: 6px;
+  }
+}
+.submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  p {
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.muted {
+  color: var(--wiki-color-text-secondary);
+}
+.result {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  overflow-wrap: anywhere;
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px;
+    span {
+      color: var(--wiki-color-text-secondary);
+    }
+  }
+  .request {
+    white-space: pre-wrap;
+    margin-top: 12px;
+  }
+  dl {
+    display: grid;
+    grid-template-columns: 80px minmax(0, 1fr);
+    gap: 8px 16px;
+    margin: 16px 0;
+  }
+  dt {
+    color: var(--wiki-color-text-secondary);
+  }
+  dd {
+    margin: 0;
+  }
+  > p:last-child {
+    margin-top: 16px;
+  }
+}
+.preservedRules {
+  margin-top: 8px !important;
+  white-space: pre-wrap;
+}
+.chat .content {
+  display: flex;
+  flex-direction: column;
+  min-height: 650px;
+}
+.chat .project {
+  margin-bottom: 24px;
+}
+.chat .chatForm {
+  order: 2;
+  margin-top: auto;
+  gap: 16px;
+  padding: 16px;
+  .requestField {
+    order: 0;
+  }
+  .templateSection {
+    order: 1;
+  }
+  .submit {
+    order: 2;
+  }
+  .selectedTemplate {
+    margin-top: 8px;
+    padding: 0;
+    background: transparent;
+  }
+  .file svg {
+    width: 16px;
+    height: 16px;
+  }
+  .selectedTemplate > p {
+    margin-top: 4px;
+  }
+}
+.chat .result {
+  order: 1;
+  margin: 0 0 24px;
+}
+@container (max-width: 440px) {
+  .selectedTemplate {
+    padding: 12px;
+  }
+  .file {
+    flex-wrap: wrap;
+    strong {
+      flex-basis: calc(100% - 28px);
+    }
+    span {
+      margin-left: 28px;
+    }
+  }
+  .submit {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .result dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    dd + dt {
+      margin-top: 8px;
+    }
+  }
+  .chatForm {
+    padding: 12px;
+  }
+}

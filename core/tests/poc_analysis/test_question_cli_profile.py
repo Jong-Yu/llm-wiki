@@ -46,6 +46,44 @@ def mock_execute(calls, *, features=FEATURES, failure=None):
 
 
 class QuestionCliProfileTests(unittest.IsolatedAsyncioTestCase):
+    async def test_template_profile_sets_requested_low_effort_without_changing_input_or_model(self):
+        calls = []
+        with TemporaryDirectory() as root, patch("core.client.ai.codex._execute", mock_execute(calls)):
+            directory = Path(root).resolve() / "template"
+            result = await codex(model="chosen-model").run(prompt="frozen", schema=SCHEMA,
+                directory=directory, question_profile=True, template_profile=True)
+            arguments, options = calls[-1]
+            self.assertIn('model_reasoning_effort="low"', arguments)
+            self.assertEqual(arguments[arguments.index("--model") + 1], "chosen-model")
+            self.assertEqual(options["prompt"], b"frozen")
+            self.assertEqual((directory / "source-schema.json").read_bytes(), canonical_json_bytes(SCHEMA))
+            self.assertEqual(result["value"], VALUE)
+            self.assertEqual(result["execution"]["template_profile"], {
+                "version": "template-writing-v1", "settings": {"model_reasoning_effort": "low"},
+                "provider_effective_settings": "not_reported"})
+
+    async def test_template_profile_requires_question_profile_and_exact_boolean(self):
+        calls = []
+        with TemporaryDirectory() as root, patch("core.client.ai.codex._execute", mock_execute(calls)):
+            for flag, question in [(True, False), (None, True), (1, True), ("true", True)]:
+                with self.subTest(flag=flag, question=question), self.assertRaises(AIAdapterError) as caught:
+                    await codex().run(prompt="frozen", schema=SCHEMA, directory=Path(root) / "invalid",
+                                      question_profile=question, template_profile=flag)
+                self.assertEqual(caught.exception.code, "ai_invalid_input")
+            self.assertEqual(calls, [])
+            self.assertEqual(list(Path(root).iterdir()), [])
+
+    async def test_template_effort_does_not_leak_to_normal_question_or_extraction(self):
+        calls = []
+        adapter = codex()
+        with TemporaryDirectory() as root, patch("core.client.ai.codex._execute", mock_execute(calls)):
+            for index, options in enumerate(({"question_profile": True, "template_profile": True},
+                                            {"question_profile": True}, {})):
+                result = await adapter.run(prompt="frozen", schema=SCHEMA,
+                                           directory=Path(root).resolve() / str(index), **options)
+                self.assertEqual('model_reasoning_effort="low"' in calls[-1][0], index == 0)
+                self.assertEqual("template_profile" in result["execution"], index == 0)
+
     async def test_default_and_explicit_false_keep_existing_arguments_files_and_metadata(self):
         calls, results = [], []
         with TemporaryDirectory() as root, patch("core.client.ai.codex._execute", mock_execute(calls)), \

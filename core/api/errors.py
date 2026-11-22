@@ -16,6 +16,7 @@ from core.modules.documents.changes import AuthorshipCorruptError
 from core.api.ingress import RequestInputError
 from core.modules.correspondences.contracts import CorrespondenceCorruptError, CorrespondenceLimitError
 from core.modules.personal.store import PersonalConflictError, PersonalCorruptError, PersonalLimitError
+from core.modules.templates.store import TemplateError
 from core.modules.ontology.errors import OntologyCorruptError
 from core.modules.reviews.contracts import ReviewCorruptError, ReviewLimitError
 from core.modules.sources.contracts import (
@@ -59,7 +60,9 @@ async def domain_error(request, error):
     from core.modules.documents.listing import CatalogChangedError, InvalidCursorError
     status, code, message, retry = 500, "internal_error", "The request could not be completed.", "none"
     details = {}
-    if isinstance(error, RequestInputError):
+    if isinstance(error, TemplateError):
+        status, code, message, retry = error.status, error.code, error.message, error.retry
+    elif isinstance(error, RequestInputError):
         status, code, message = error.status, error.code, error.message
     elif isinstance(error, (RevisionConflictError, PersonalConflictError)):
         status, code, message, retry = 409, "conflict", "The editing basis changed; read and reconcile the current record.", "reconcile"

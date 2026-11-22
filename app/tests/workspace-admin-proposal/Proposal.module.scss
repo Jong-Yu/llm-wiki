@@ -1,0 +1,716 @@
+.previewBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 100px 8px 16px;
+  min-height: 44px;
+  color: var(--wiki-color-text-secondary);
+  background: var(--wiki-color-surface-panel);
+  font: 12px/18px var(--wiki-font-family-ui);
+  > div {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  select {
+    font: inherit;
+    color: var(--wiki-color-text-primary);
+    background: var(--wiki-color-surface-canvas);
+    border: 1px solid var(--wiki-color-border-control);
+    border-radius: 6px;
+    padding: 4px;
+  }
+}
+// Inline preview only: preserve product column/header dimensions while allowing content height.
+.previewShell {
+  position: relative !important;
+  inset: auto !important;
+  min-height: 720px;
+  grid-template-rows: auto var(--wiki-layout-workbench-status-height) !important;
+  overflow: visible !important;
+  [data-workspace-container] {
+    overflow: visible;
+  }
+}
+.headerActions {
+  min-width: 0 !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  margin-left: auto;
+  display: flex !important;
+  position: static !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+.page {
+  min-width: 0;
+  > section {
+    min-width: 0;
+  }
+  [hidden] {
+    display: none !important;
+  }
+}
+.iconWrap {
+  display: inline-flex;
+  position: relative;
+  flex-shrink: 0;
+}
+.previewShell .iconOnly {
+  width: var(--wiki-component-control-height-small);
+  min-width: var(--wiki-component-control-height-small);
+  height: var(--wiki-component-control-height-small);
+  min-height: var(--wiki-component-control-height-small);
+  padding: 0 !important;
+  border-color: transparent;
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  &:hover:not(:disabled) {
+    background: var(--wiki-color-surface-hover);
+    color: var(--wiki-color-text-primary);
+  }
+}
+@media (pointer: coarse) {
+  .previewShell .iconOnly {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+}
+.tooltip {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  white-space: nowrap;
+  max-width: 220px;
+  padding: 6px 8px;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 6px;
+  background: var(--wiki-color-surface-panel);
+  color: var(--wiki-color-text-primary);
+  font-size: 12px;
+  line-height: 18px;
+  box-shadow: 0 3px 10px #0002;
+  pointer-events: none;
+}
+.browser {
+  min-width: 0;
+}
+.note {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px;
+  background: var(--wiki-color-surface-subtle);
+  border-radius: var(--wiki-radius-10);
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+    margin: -2px -4px -2px 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+}
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  > div {
+    min-width: 0;
+  }
+}
+.entityIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--wiki-color-surface-subtle);
+  color: var(--wiki-color-text-secondary);
+  font-weight: 600;
+}
+.entityList {
+  li {
+    grid-template-columns: minmax(180px, 1fr) minmax(100px, auto) auto;
+  }
+  li > .chips {
+    max-width: 320px;
+  }
+}
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--wiki-color-action-primary);
+  }
+}
+.loading {
+  padding: 32px 0;
+  color: var(--wiki-color-text-secondary);
+}
+.empty {
+  display: flex;
+  min-height: 220px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  color: var(--wiki-color-text-secondary);
+  h2 {
+    font-size: 14px;
+    color: var(--wiki-color-text-primary);
+  }
+}
+.entitySummary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 24px 0;
+  h2 {
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+  p {
+    margin: 0 0 8px;
+  }
+}
+.largeIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--wiki-color-surface-subtle);
+  color: var(--wiki-color-text-secondary);
+}
+.sectionTitle {
+  margin: 16px 0 12px !important;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  > button {
+    align-self: flex-start;
+  }
+  h2 {
+    font-size: 20px;
+    line-height: 28px;
+  }
+}
+.formActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.permissionGroup {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+  legend {
+    margin-bottom: 12px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  label {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-height: 32px;
+  }
+  input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--wiki-color-action-primary);
+  }
+}
+.editContext {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto 24px;
+  > div {
+    display: grid;
+    gap: 4px;
+  }
+}
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 12px 0;
+  > div {
+    display: grid;
+    gap: 4px;
+  }
+  strong {
+    overflow-wrap: anywhere;
+  }
+}
+.filterToolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.events {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  li {
+    display: flex;
+    gap: 8px;
+    min-height: 56px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--wiki-color-border-default);
+  }
+}
+.eventIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 20px;
+  color: var(--wiki-color-text-secondary);
+}
+.eventBody {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+.eventHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+}
+.eventMeta {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.eventTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  button {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    min-height: 20px;
+    line-height: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  :is(button):hover {
+    color: var(--wiki-color-action-primary);
+  }
+}
+.delta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  span {
+    overflow-wrap: anywhere;
+  }
+}
+.before {
+  background: var(--wiki-color-surface-subtle);
+  color: var(--wiki-color-text-secondary);
+}
+.after {
+  background: var(--wiki-color-action-surface);
+  color: var(--wiki-color-text-primary);
+}
+.notice {
+  padding: 0 0 16px;
+  font-size: 13px;
+  color: var(--wiki-color-status-success);
+}
+@media (max-width: 900px) {
+  .previewBar {
+    padding-right: 16px;
+  }
+  .page {
+    padding: 16px !important;
+  }
+}
+@media (max-width: 600px) {
+  .entityList {
+    li {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+    .identity {
+      grid-column: 1;
+    }
+    .chips {
+      grid-column: 1;
+      grid-row: 2;
+      padding-left: 44px;
+    }
+    li > :last-child {
+      grid-column: 2;
+      grid-row: 1/3;
+    }
+  }
+  .permissionGroup,
+  .compare {
+    grid-template-columns: 1fr;
+  }
+  .entitySummary {
+    align-items: flex-start;
+  }
+  .tooltip {
+    max-width: 180px;
+    white-space: normal;
+  }
+  .formActions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .previewBar > div {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  .previewShell nav[aria-label='현재 위치'] li:not(:last-child),
+  .previewShell nav[aria-label='현재 위치'] li:last-child > span {
+    display: none;
+  }
+}
+// 관리 목록은 제품 목록의 행 높이와 검색을 유지하면서 열의 역할을 드러냅니다.
+.listColumns,
+.columnList > li {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(100px, 0.7fr) minmax(
+      110px,
+      0.65fr
+    ) 112px;
+  gap: var(--wiki-space-16);
+  align-items: center;
+}
+.listColumns {
+  padding: 8px 0;
+  color: var(--wiki-color-text-secondary);
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  font-size: 12px;
+}
+.listColumns > :last-child {
+  text-align: right;
+}
+.columnList > li {
+  min-height: 64px;
+}
+// 사용자 목록은 소속 열에 폭을 우선 배분하고 칩을 한 줄로 유지합니다.
+.singleLineChips {
+  .listColumns,
+  .columnList > li {
+    grid-template-columns: minmax(130px, 0.8fr) minmax(180px, 1.4fr) minmax(
+        85px,
+        0.55fr
+      ) 40px;
+  }
+  .listColumns > span {
+    white-space: nowrap;
+  }
+  .columnList > li > .chips {
+    max-width: none;
+    flex-wrap: nowrap;
+    .chip {
+      display: block;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chip[data-count] {
+      flex-shrink: 0;
+    }
+  }
+}
+.entityName {
+  min-height: 20px !important;
+  line-height: 20px;
+}
+.rowActions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.rowMeta {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.membershipFilters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.membershipFilters [aria-pressed='true'] {
+  background: var(--wiki-color-action-surface);
+  color: var(--wiki-color-action-primary);
+  border-color: var(--wiki-color-action-primary);
+}
+.taskContext {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 24px;
+}
+.taskContext > span,
+.taskContext > small {
+  color: var(--wiki-color-text-secondary);
+}
+.selectionSummary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.selectionSummary > span {
+  color: var(--wiki-color-text-secondary);
+}
+.permissionChanges {
+  border-top: 1px solid var(--wiki-color-border-default);
+  padding-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+.permissionChanges strong {
+  margin-right: 8px;
+}
+.resultHeading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 16px 0;
+}
+.resultHeading h2 {
+  font-size: 16px;
+  line-height: 24px;
+}
+.assignmentResults {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+}
+.assignmentResults li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--wiki-color-border-default);
+}
+.assignmentResults p {
+  grid-column: 1/-1;
+  color: var(--wiki-color-text-secondary);
+}
+.assignmentResults [data-status='success'] {
+  color: var(--wiki-color-text-secondary);
+}
+.assignmentResults [data-status='unknown'],
+.assignmentResults [data-status='failed'] {
+  font-weight: 600;
+}
+.filterControl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.filterControl > button {
+  white-space: normal;
+}
+.auditDiff {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.auditDiff b {
+  margin-right: 4px;
+}
+.savedNotice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.previewSettings {
+  padding: 8px 16px;
+  color: var(--wiki-color-text-secondary);
+  background: var(--wiki-color-surface-panel);
+  font: 12px/18px var(--wiki-font-family-ui);
+}
+.previewSettings summary {
+  width: fit-content;
+}
+.previewSettings > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 12px;
+}
+.previewSettings label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.previewSettings select {
+  color: var(--wiki-color-text-primary);
+  background: var(--wiki-color-surface-canvas);
+}
+@media (max-width: 900px) {
+  .listColumns,
+  .columnList > li {
+    grid-template-columns: minmax(120px, 1fr) minmax(80px, 0.6fr) minmax(
+        80px,
+        0.6fr
+      ) 112px;
+    gap: 8px;
+  }
+}
+@media (max-width: 600px) {
+  .listColumns {
+    display: none;
+  }
+  .columnList > li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 12px 0;
+  }
+  .singleLineChips .columnList > li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .columnList > li > .identity {
+    grid-column: 1/-1;
+  }
+  .columnList > li > .chips {
+    grid-column: 1/-1;
+    padding-left: 44px;
+  }
+  .columnList > li > .rowMeta {
+    grid-column: 1;
+    padding-left: 44px;
+  }
+  .columnList > li > .rowActions {
+    grid-column: 2;
+    grid-row: auto;
+  }
+  .filterToolbar {
+    align-items: stretch;
+  }
+  .filterControl {
+    width: 100%;
+  }
+  .filterControl > button {
+    flex: 1;
+    justify-content: flex-start;
+  }
+}
+.assignmentForm {
+  width: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+}
+.assignmentForm > .form {
+  max-width: none;
+  margin: 0;
+}
+.assignmentResults [data-status] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.assignmentResults [data-status='success'] {
+  color: var(--wiki-color-status-success);
+}
+.assignmentResults [data-status='failed'] {
+  color: var(--wiki-color-status-danger);
+}
+.assignmentResults [data-status='unknown'] {
+  color: var(--wiki-color-status-warning);
+}
+.assignmentResults [data-status='unattempted'] {
+  color: var(--wiki-color-text-secondary);
+}

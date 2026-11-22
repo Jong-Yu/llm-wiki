@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from hashlib import sha256
 from fastapi import APIRouter, Depends, Path, Query, Request
 from core.api.dependencies import authorized, credential, access_value, envelope, scope_key
-from core.api.operations import json_operation, body_schema, commit_guard as _guard
+from core.api.operations import json_operation, body_schema, reauthorize, commit_guard as _guard
 from core.api.schemas import Envelope
 from core.common.json_codec import canonical_json_hash
 from pydantic import JsonValue
@@ -111,10 +111,15 @@ async def append_turn(request: Request, tenant: str, record_id: RecordId, token:
     """사용자 질문 또는 그 질문에 대한 클라이언트 보고 답변을 추가한다."""
     def operation(scope, body):
         store = PersonalStore(scope)
+        template_scope = (reauthorize(request, tenant, token, "read", body.profile)
+                          if body.template_ref is not None else None)
         replay = _replayed(store, "conversations", body, record_id)
         if replay is not None:
             return replay
         record = store.read("conversations", record_id)["record"]
+        if body.template_ref is not None:
+            from core.modules.templates.store import TemplateStore
+            TemplateStore(template_scope).read(body.template_ref.id, body.template_ref.revision)
         basis = _basis(scope, body.context_request, question=body.content) if body.role == "user" else None
         if body.role == "assistant":
             basis = _turn(record, body.reply_to, role="user")["basis"]
@@ -122,9 +127,15 @@ async def append_turn(request: Request, tenant: str, record_id: RecordId, token:
             "basis": basis, "origin": "client_reported", "human_approval": False, "basis_storage": "embedded_full_snapshot"}
         if is_basis_reference(basis):
             event["basis_storage"] = "immutable_snapshot_reference"
+        if body.template_ref is not None:
+            event["template_ref"] = body.template_ref.model_dump()
+        def guard():
+            _guard(request, tenant, token, "conversation_write", scope)()
+            if body.template_ref is not None:
+                _guard(request, tenant, token, "read", scope)()
         return store.append("conversations", record_id, body.request_id, body.expected_revision,
             body.model_dump(), event, access_value(scope),
-            before_commit=_guard(request, tenant, token, "conversation_write", scope))
+            before_commit=guard)
     return await json_operation(request, tenant, token, AppendTurn, "conversation_write", operation)
 
 

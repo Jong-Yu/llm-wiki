@@ -1,0 +1,12 @@
+.fileName {
+  min-width: 0;
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+// 기존 목록이 좁은 배치로 바뀌면 파일명이 이름을 밀어내지 않도록 다음 줄에 둡니다.
+@container workspace (width < 720px) {
+  .fileName {
+    grid-column: 1 / -1;
+    max-width: 100%;
+  }
+}

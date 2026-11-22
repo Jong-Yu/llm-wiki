@@ -16,6 +16,7 @@ from core.client.session_refs import SessionRefs, binding
 from core.client.transport import AnalysisClientError
 from core.modules.access.policy import AccessPolicy
 from core.modules.access.auth import initialize_auth
+from core.tests.poc_access.fixtures import grant_test_membership
 from core.modules.extraction_rules.publish import publish
 from core.modules.extraction_rules.store import RulesetRegistry
 from core.modules.analysis_results.diagnostics import empty_report
@@ -59,6 +60,7 @@ class PostExtractionTests(unittest.IsolatedAsyncioTestCase):
             root=Path(temp).resolve();(root/'data').mkdir();(root/'tenancy').mkdir()
             config=root/'tenancy/policy.json';config.write_text(json.dumps({'version':1,'tenants':{},'users':{}}))
             policy=AccessPolicy(config,root/'data');auth=initialize_auth(policy);user=auth.signup('continuation fixture')
+            user=grant_test_membership(policy,user)
             tenant=user['default_tenant'];scope=policy.authorize(user['token'],tenant,'read')
             scope.store.save('existing.md','A uses B.\n',expected_revision=None)
             OntologyStore(scope.store).generate('existing.md',scope.store.read('existing.md').revision,

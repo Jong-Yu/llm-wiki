@@ -16,4 +16,7 @@ class AIAdapterError(AnalysisClientError):
     """CLI의 원문 오류 대신 고정 코드만 호출자에게 전달한다."""
 
     # 부모의 code 필드를 재사용한다. SDK/CLI 오류 원문에는 인증정보가 섞일 수 있다.
-    pass
+    def __init__(self, code, *, event=None):
+        super().__init__(code)
+        # 거부한 CLI 메시지의 이름표(예: system:hook_started)만 담는다. 메시지 본문은 담지 않는다.
+        self.event = event

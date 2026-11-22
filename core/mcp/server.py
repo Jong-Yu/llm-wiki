@@ -53,8 +53,12 @@ class WikiMCPServer(MCPServer):
             if known and task not in toolsets.tasks(selected, tenant=tenant):
                 return arguments, _invalid_argument(toolsets.blocked_message(selected, f"wiki_guidance task {task}"))
         view = toolsets.TOOLSETS[selected].read_view
-        if name == "wiki_read" and isinstance(arguments, dict) and "view" not in arguments and view != "full":
-            arguments = {**arguments, "view": view}
+        if name == "wiki_read" and isinstance(arguments, dict) and "view" not in arguments:
+            # 줄 번호만 준 읽기는 줄 범위 보기로 본다. 그 밖에는 묶음의 기본 보기를 채운다.
+            if "start_line" in arguments or "end_line" in arguments:
+                arguments = {**arguments, "view": "lines"}
+            elif view != "full":
+                arguments = {**arguments, "view": view}
         return arguments, None
 
     async def list_tools(self):

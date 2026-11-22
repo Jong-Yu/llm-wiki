@@ -12,6 +12,8 @@ MAX_QUERY_BYTES = 32768
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _ORIGINAL_DOWNLOAD = re.compile(r"/api/v1/tenants/[a-z][a-z0-9_-]{0,63}/sources/[0-9a-f]{32}/versions/[0-9a-f]{32}/file")
 _ARTIFACT_DOWNLOAD = re.compile(r"/api/v1/tenants/[a-z][a-z0-9_-]{0,63}/extractions/[0-9a-f]{32}/artifacts/[0-9a-f]{32}")
+_TEMPLATE_DOWNLOAD = re.compile(r"/api/v1/tenants/[a-z][a-z0-9_-]{0,63}/templates/[0-9a-f]{32}/versions/[0-9a-f]{64}/file")
+_TEMPLATE_RENDER = re.compile(r"/api/v1/tenants/[a-z][a-z0-9_-]{0,63}/templates/[0-9a-f]{32}/versions/[0-9a-f]{64}/render")
 
 
 class ReadApiLimits:
@@ -51,8 +53,9 @@ class ReadApiLimits:
                                                    (b"cache-control", b"no-store")]}
             await send(message)
 
-        if scope["method"] == "GET" and (_ORIGINAL_DOWNLOAD.fullmatch(scope["path"])
-                or _ARTIFACT_DOWNLOAD.fullmatch(scope["path"])):
+        if ((scope["method"] == "GET" and (_ORIGINAL_DOWNLOAD.fullmatch(scope["path"])
+                or _ARTIFACT_DOWNLOAD.fullmatch(scope["path"]) or _TEMPLATE_DOWNLOAD.fullmatch(scope["path"])))
+                or (scope["method"] == "POST" and _TEMPLATE_RENDER.fullmatch(scope["path"]))):
             # 원본/산출물은 별도20MiB·무결성 검사를 거쳐 전송한다. JSON16MiB와 분리한다.
             await self.app(scope, receive, uncached_send)
             return

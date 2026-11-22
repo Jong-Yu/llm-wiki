@@ -1,0 +1,24 @@
+.snapshot {
+  // 기존 답변의 아이콘 22px와 간격 10px 뒤에 있는 본문 시작선에 맞춥니다.
+  margin: 0 0 var(--wiki-space-24) var(--wiki-space-32);
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  summary {
+    min-height: 32px;
+    display: list-item;
+    align-content: center;
+    cursor: pointer;
+  }
+  strong {
+    display: block;
+    color: var(--wiki-color-text-primary);
+    margin-block: 8px;
+  }
+  p {
+    margin-bottom: 8px;
+  }
+}
+.rules {
+  white-space: pre-wrap;
+}

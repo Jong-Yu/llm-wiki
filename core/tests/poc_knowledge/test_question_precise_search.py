@@ -20,10 +20,11 @@ class PreciseSearchPromptTests(unittest.TestCase):
     def setUp(self):
         self.handoff = selection_handoff()
 
-    def test_default_false_preserves_prechange_tool_selection_prompt_bytes(self):
-        fingerprints = {"initial": "0daea27d8da2baf4322384125984bad2e5f1d2415be76e0acbf329b95a2f9c90",
-                        "search": "bb89b67cd7bea225ad535e46887b22752cdd3d4855e09e8896045014549a015a",
-                        "read": "62e3c7ec9745b82d22bcc3e41f6452157e774104c8fd79f3a543e000c0924753"}
+    def test_default_false_preserves_current_tool_selection_prompt_bytes(self):
+        # D-130의 전체 Wiki claims/history 조회 안내를 포함한 기준이며 검색어 실험은 기본에서 제외한다.
+        fingerprints = {"initial": "0933f7e3a78d6c03d31b29fc1d3c6e209308f9c1e3c135f62202b4b4a6f860cc",
+                        "search": "caa1d4e679ab4bd2c3bdc72f4c1e3170b09b75a4e22eeb4ca4ca8ea143cfec55",
+                        "read": "0123e5c3936be92024188421bd7874e5ebb5ac4cc72e61acb17495fa65be83e7"}
         for action, expected in fingerprints.items():
             reads = [] if action == "initial" else [read_fixture(action)]
             actual = grounding_prompt(self.handoff, reads, select_tools=True)

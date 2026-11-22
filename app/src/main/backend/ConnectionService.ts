@@ -235,7 +235,8 @@ export class ConnectionService {
         (item: WorkspaceProfile): boolean => item.id === scope?.profile,
       );
       if (
-        !sameAccessRevision(result, entry) ||
+        ((!entry.awaitingWorkspaceAssignment || scope !== null) &&
+          !sameAccessRevision(result, entry)) ||
         (scope &&
           (!workspace?.permissions.includes('read') ||
             !profile ||
@@ -262,14 +263,25 @@ export class ConnectionService {
               );
         }
       }
+      let selection = scope
+        ? { tenant: scope.tenant, profile: scope.profile }
+        : null;
+      if (entry.awaitingWorkspaceAssignment && result.workspaces.length > 0) {
+        const assigned = result.workspaces.find(
+          (item: WorkspaceMembership): boolean =>
+            item.id === result.defaultTenant,
+        );
+        const neutral = workspaceDefault(assigned);
+        if (!assigned?.permissions.includes('read') || !neutral)
+          return workspaceDefaultFailure();
+        selection = { tenant: assigned.id, profile: neutral.id };
+      }
       this.#active = {
         status: 'connected',
         connectionId: randomUUID(),
         serverUrl,
         ...result,
-        selection: scope
-          ? { tenant: scope.tenant, profile: scope.profile }
-          : null,
+        selection,
         checkedAt: new Date().toISOString(),
       };
       this.#token = entry.token;
@@ -277,7 +289,9 @@ export class ConnectionService {
         this.#account = { name: result.displayName, serverUrl };
       this.#rememberRequested = true;
       this.#remembered = true;
-      return this.getState();
+      if (entry.awaitingWorkspaceAssignment || result.workspaces.length === 0)
+        await this.#persist(generation);
+      return current() ? this.getState() : superseded();
     } finally {
       if (this.#pending === controller) this.#pending = null;
     }
@@ -317,6 +331,9 @@ export class ConnectionService {
         ? { accessRevision: active.accessRevision }
         : {}),
       ...(active.displayName ? { displayName: active.displayName } : {}),
+      ...(active.workspaces.length === 0 && selection === null
+        ? { awaitingWorkspaceAssignment: true as const }
+        : {}),
       selection:
         selection && profile
           ? {
@@ -749,6 +766,87 @@ export class ConnectionService {
     return this.getState();
   }
 
+  /** 현재 토큰으로 소속을 다시 읽고 대기 계정의 서버 기본 배정만 활성화합니다. */
+  async refreshAccess(): Promise<ConnectionResult> {
+    const active = this.#active;
+    const token = this.#token;
+    if (!active || !token) return this.getState();
+    const { controller, generation } = this.#begin();
+    const current = (): boolean =>
+      generation === this.#generation &&
+      this.#active?.connectionId === active.connectionId;
+    try {
+      const result = await this.#read(active.serverUrl, token, controller);
+      if (!current()) return superseded();
+      if ('ok' in result) {
+        if (result.error.status === 401 || result.error.status === 403)
+          this.disconnect();
+        return result;
+      }
+      if (result.userId !== active.userId) {
+        this.disconnect();
+        return apiFailure(
+          'subject_changed',
+          '인증 사용자가 변경되었습니다. 다시 로그인해 주세요.',
+        );
+      }
+      let selection = active.selection;
+      if (active.selection) {
+        const workspace = result.workspaces.find(
+          (item: WorkspaceMembership): boolean =>
+            item.id === active.selection?.tenant,
+        );
+        const neutral = workspaceDefault(workspace);
+        if (
+          !sameAccessRevision(result, active) ||
+          !workspace?.permissions.includes('read') ||
+          !neutral ||
+          neutral.id !== active.selection.profile
+        ) {
+          this.#active = {
+            ...active,
+            ...result,
+            selection: null,
+            checkedAt: new Date().toISOString(),
+          };
+          this.#remembered = false;
+          return apiFailure(
+            'access_changed',
+            '권한 또는 기본 조회 설정이 변경되었습니다. 작업 공간을 다시 확인해 주세요.',
+          );
+        }
+      } else if (
+        active.workspaces.length === 0 &&
+        result.workspaces.length > 0
+      ) {
+        const workspace = result.workspaces.find(
+          (item: WorkspaceMembership): boolean =>
+            item.id === result.defaultTenant,
+        );
+        if (!workspace) return workspaceDefaultFailure();
+        if (!workspace.permissions.includes('read'))
+          return apiFailure(
+            'read_required',
+            '배정된 기본 작업 공간의 읽기 권한을 관리자에게 확인해 주세요.',
+          );
+        const neutral = workspaceDefault(workspace);
+        if (!neutral) return workspaceDefaultFailure();
+        selection = { tenant: workspace.id, profile: neutral.id };
+      }
+      this.#active = {
+        ...active,
+        ...result,
+        selection,
+        checkedAt: new Date().toISOString(),
+      };
+      this.#restoreIssue = 'none';
+      await this.#persist(generation);
+      return current() ? this.getState() : superseded();
+    } finally {
+      if (this.#pending === controller) this.#pending = null;
+    }
+  }
+
   /** 현재 소속을 재조회해 작업 공간의 제한 없는 기본 설정만 선택합니다. */
   async selectWorkspace(
     request: SelectWorkspaceRequest,
@@ -1157,12 +1255,7 @@ export class ConnectionService {
           if (data.document !== request.document)
             throw new Error('invalid_response');
           return { ok: true, data };
-        } catch (error: unknown) {
-          if (error instanceof Error && error.message === 'document_too_large')
-            return apiFailure(
-              'document_too_large',
-              '문서가 UTF-8 1 MiB 크기 제한을 초과했습니다.',
-            );
+        } catch {
           return apiFailure(
             'invalid_response',
             '서버의 문서 본문 응답 형식을 확인할 수 없습니다.',

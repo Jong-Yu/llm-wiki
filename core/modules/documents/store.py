@@ -29,7 +29,9 @@ from uuid import uuid4
 
 
 from core.paths import DEFAULT_DATA_DIR
-MAX_DOCUMENT_BYTES = 1024 * 1024
+# 문서당 크기 한도는 없다(D-141). None이면 저장·읽기·이력에서 크기를 막지 않는다. 요청 본문(HTTP·MCP 8 MiB),
+# 응답, AI 입력, 요청당 읽기 예산 같은 다른 경계의 한도는 각 모듈에 그대로 있다.
+MAX_DOCUMENT_BYTES = None
 DEFAULT_LOCK_TIMEOUT_SECONDS = 5.0
 
 
@@ -174,12 +176,12 @@ class WikiStore:
         if expected_revision is not None and not isinstance(expected_revision, str):
             raise TypeError("expected_revision must be a string or None")
         self._document_path(self.wiki_dir, document)
-        # Each valid UTF-8 character takes at least one byte. Reject enormous
-        # strings without allocating another full-size encoded copy.
-        if len(content) > MAX_DOCUMENT_BYTES:
+        # Each valid UTF-8 character takes at least one byte. When a limit is
+        # configured, reject enormous strings before allocating an encoded copy.
+        if MAX_DOCUMENT_BYTES is not None and len(content) > MAX_DOCUMENT_BYTES:
             raise DocumentTooLargeError(document, len(content))
         encoded = content.encode("utf-8")
-        if len(encoded) > MAX_DOCUMENT_BYTES:
+        if MAX_DOCUMENT_BYTES is not None and len(encoded) > MAX_DOCUMENT_BYTES:
             raise DocumentTooLargeError(document, len(encoded))
         revision = self._revision(encoded)
         cleanup_failures: List[CleanupFailure] = []
@@ -269,8 +271,8 @@ class WikiStore:
         # One bounded read also catches growth without trusting a prior stat().
         increment("canonical_reads")
         with span("canonical_read"), path.open("rb") as stream:
-            raw = stream.read(MAX_DOCUMENT_BYTES + 1)
-        if len(raw) > MAX_DOCUMENT_BYTES:
+            raw = stream.read() if MAX_DOCUMENT_BYTES is None else stream.read(MAX_DOCUMENT_BYTES + 1)
+        if MAX_DOCUMENT_BYTES is not None and len(raw) > MAX_DOCUMENT_BYTES:
             raise DocumentTooLargeError(document, len(raw))
         return raw
 

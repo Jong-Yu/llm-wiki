@@ -160,7 +160,9 @@ class DraftValidationTests(unittest.TestCase):
                 self.assertFalse(result["repairable"])
 
     def test_source_and_work_limits_do_not_promise_complete_validation(self):
-        result = self.check(source="x" * (draft.MAX_DOCUMENT_BYTES + 1))
+        # 문서 한도는 기본으로 없지만(D-141) 한도를 설정하면 원문 검사가 그대로 동작한다.
+        with patch.object(draft, "MAX_DOCUMENT_BYTES", 1024):
+            result = self.check(source="x" * 1025)
         self.assertFalse(result["repairable"])
         with patch.object(draft, "MAX_SOURCE_SCAN_WORK", 1):
             result = self.check()

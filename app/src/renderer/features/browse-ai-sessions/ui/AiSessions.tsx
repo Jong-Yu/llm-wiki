@@ -21,6 +21,7 @@ import {
 } from '../model/sessionPresentation';
 import type { SessionFilter, SessionItem } from '../api/aiSessions.api';
 import { SessionSkeleton } from './SessionSkeleton';
+import { SessionActions } from './SessionActions';
 import styles from './AiSessions.module.scss';
 import { KnowledgeComparisons } from './KnowledgeComparisons';
 
@@ -107,7 +108,7 @@ export function AiSessions({
     finishedRows.length === 0 &&
     targetItems.length === 0;
   return (
-    <div className={styles.root}>
+    <div className={styles.root} data-session-page tabIndex={-1}>
       <WorkspacePage
         title="AI 세션"
         actions={
@@ -148,6 +149,11 @@ export function AiSessions({
                 const saved = savedOf(item);
                 const href = activityLocation(item) ?? saved?.href;
                 const key = activityKey(item);
+                const title =
+                  saved?.title ??
+                  (item.document
+                    ? documentDisplayName(item.document)
+                    : kindLabel(item.kind));
                 return (
                   <li key={key}>
                     <div>
@@ -155,13 +161,17 @@ export function AiSessions({
                         <span className={styles.kind}>
                           {kindLabel(item.kind)}
                         </span>
-                        {saved?.title ??
-                          (item.document
-                            ? documentDisplayName(item.document)
-                            : kindLabel(item.kind))}
+                        <span className={styles.rowTitle} title={title}>
+                          {title}
+                        </span>
                       </h3>
                       {item.document && (
-                        <p>{documentDisplayName(item.document)}</p>
+                        <p
+                          className={styles.rowTarget}
+                          title={documentDisplayName(item.document)}
+                        >
+                          {documentDisplayName(item.document)}
+                        </p>
                       )}
                     </div>
                     <span className={styles.rowState}>
@@ -173,7 +183,7 @@ export function AiSessions({
                     </span>
                     <div className={styles.rowActions}>
                       {href ? (
-                        <Link to={href}>
+                        <Link to={href} aria-label={`열기 · ${title}`}>
                           열기 <Icon name="arrow-right" size={14} />
                         </Link>
                       ) : (
@@ -226,7 +236,9 @@ export function AiSessions({
                         <span className={styles.kind}>
                           {kindLabel(item.kind)}
                         </span>
-                        {title}
+                        <span className={styles.rowTitle} title={title}>
+                          {title}
+                        </span>
                       </h3>
                     </div>
                     <span className={styles.rowState}>
@@ -236,6 +248,7 @@ export function AiSessions({
                       {href ? (
                         <Link
                           to={href}
+                          aria-label={`열기 · ${title}`}
                           onClick={(): void => finished.dismiss(item)}
                         >
                           열기 <Icon name="arrow-right" size={14} />
@@ -243,13 +256,10 @@ export function AiSessions({
                       ) : (
                         <span>대상 확인 필요</span>
                       )}
-                      <button
-                        type="button"
-                        aria-label={`확인하고 목록에서 지우기 · ${title}`}
-                        onClick={(): void => finished.dismiss(item)}
-                      >
-                        <Icon name="x" size={14} />
-                      </button>
+                      <SessionActions
+                        title={title}
+                        onDismiss={(): void => finished.dismiss(item)}
+                      />
                     </div>
                   </li>
                 );
@@ -270,17 +280,30 @@ export function AiSessions({
                       <span className={styles.kind}>
                         {kindLabel(item.kind)}
                       </span>
-                      {documentDisplayName(
-                        item.title,
-                        item.kind === 'question' ? item.title : undefined,
-                      )}
+                      <span
+                        className={styles.rowTitle}
+                        title={documentDisplayName(
+                          item.title,
+                          item.kind === 'question' ? item.title : undefined,
+                        )}
+                      >
+                        {documentDisplayName(
+                          item.title,
+                          item.kind === 'question' ? item.title : undefined,
+                        )}
+                      </span>
                     </h3>
-                    <p>{documentDisplayName(item.target)}</p>
+                    <p
+                      className={styles.rowTarget}
+                      title={documentDisplayName(item.target)}
+                    >
+                      {documentDisplayName(item.target)}
+                    </p>
                   </div>
                   <span className={styles.rowState}>{item.status}</span>
                   <div className={styles.rowActions}>
                     {item.href ? (
-                      <Link to={item.href}>
+                      <Link to={item.href} aria-label={`열기 · ${item.title}`}>
                         열기 <Icon name="arrow-right" size={14} />
                       </Link>
                     ) : (

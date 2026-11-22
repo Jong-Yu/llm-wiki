@@ -27,19 +27,12 @@ macOS 외부 Python 실행기용 [토큰·속도 개선 보완판](https://githu
 
 | 스킬 | 용도 |
 | --- | --- |
-| [wiki-route](.agents/skills/wiki-route/SKILL.md) | 복합 요청을 역할별 도구 묶음과 스킬로 연결 |
 | [wiki-query](.agents/skills/wiki-query/SKILL.md) | 현재 지식·질문 근거·검토함·이력 조회 |
 | [wiki-edit](.agents/skills/wiki-edit/SKILL.md) | 본문 작성·수정과 판본 비교·복원 |
 | [wiki-review](.agents/skills/wiki-review/SKILL.md) | 원문 검토·전문가 판단·관계 추가·Clean Up |
 | [wiki-analyze](.agents/skills/wiki-analyze/SKILL.md) | 분석 작업 조회·준비·실행·취소와 온톨로지 추출 |
 | [wiki-diagnose](.agents/skills/wiki-diagnose/SKILL.md) | API·MCP·개인 실행 환경의 읽기 전용 진단 |
 | [wiki-maintain](.agents/skills/wiki-maintain/SKILL.md) | 기존 호출 호환과 여러 종류 변경의 절차 연결 |
-
-## 기능별 MCP 안내와 도구 묶음
-
-기본 `all` 연결은 전체 도구를 제공합니다. stdio·개인 launcher의 `--toolset ask|write|extract|review|all` 또는 HTTP `/mcp?toolset=ask`로 업무에 필요한 도구만 선택할 수 있습니다. 고정한 묶음은 요청으로 바꿀 수 없으며 실제 인증·tenant·profile 권한 검사는 그대로 적용합니다. 묶음에 없는 업무는 맞는 연결을 사용합니다.
-
-`wiki_guidance(task="catalog")`와 `wiki_<task>` 프롬프트로 업무별 안내를 선택합니다. `--guidance-mode compact`는 초기 안내를 줄이며 기본은 `full`입니다. `wiki_read(view="body")`는 중복된 `content`를 제외하고 본문·판본을 보존합니다. `ask`에서 보기를 생략하면 `body`, 다른 연결에서는 `full`입니다. 실제 토큰 효과는 클라이언트의 도구 로드 방식에 따라 달라집니다.
 
 ## Python 실행 환경
 
@@ -80,7 +73,7 @@ XLSX는 원본을 다시 저장하지 않고 읽습니다. 먼저 시트·병합
 
 발행한 공통 규약을 사용하는 배포에서는 `.local/server-rulesets.json`에 `{"ruleset_root":"/절대/규약/폴더","ruleset_policy":"/절대/규약/허용정책.json"}`을 명시합니다. 런처는 이 파일이 있을 때만 서버에 `--ruleset-config`로 전달하며, 두 경로는 자료 폴더 밖에 있어야 합니다. 설정 파일은 이 두 키만 허용하며 상대경로·누락·손상·심볼릭 링크는 시작 오류로 처리합니다. 파일이 없으면 기존의 규약 미설정 실행을 유지합니다. 로컬 서버를 직접 시작할 때도 같은 옵션을 추가할 수 있으며, 기존 `--ruleset-root`·`--ruleset-policy` 쌍과 함께 사용할 수는 없습니다. 설정은 시작 시 읽으므로 변경 후 서버를 다시 시작합니다.
 
-실행 창에 **앱 서버 주소**와 **MCP 주소(`/mcp`)**가 표시됩니다. 기존 개인 인증을 사용하며, 창을 열어 둔 동안 실행되고 `Ctrl+C` 또는 창 닫기로 함께 종료됩니다. 기본 포트가 사용 중이면 기존 서버를 종료하거나 `./tools/start-mac.command 8767`처럼 다른 포트를 지정합니다. 이 런처는 다른 서버 프로세스를 종료하지 않습니다. [Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) 주소는 실행마다 바뀌므로 원격 앱의 서버 주소도 갱신해야 합니다. 주소 표시는 개인 인증·다른 PC 연결 검증을 뜻하지 않습니다.
+실행 창에 **앱 서버 주소**와 **MCP 주소(`/mcp`)**가 표시됩니다. 기존 개인 인증을 사용하며, 창을 열어 둔 동안 실행되고 `Ctrl+C` 또는 창 닫기로 함께 종료됩니다. 다시 실행하면 같은 포트에서 돌던 이 프로젝트의 이전 런처를 정상 종료한 뒤 새로 시작하므로, 새 코드를 반영할 때도 같은 명령을 씁니다. 정책·자료 확인에 실패하면 이전 서버를 그대로 둡니다. 이 프로젝트 런처가 아닌 프로세스가 포트를 쓰면 그 PID를 알리고 중단하며 종료하지 않습니다. 이때는 그 프로세스를 직접 확인하거나 `./tools/start-mac.command 8767`처럼 다른 포트를 지정합니다. `--new-window`를 붙이면 새 터미널 창에서 실행한 뒤 주소를 출력하고 돌아오므로, 다른 도구나 세션에서 시작해도 그 세션이 끝난 뒤 서버가 유지됩니다. [Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) 주소는 실행마다 바뀌므로 원격 앱의 서버 주소도 갱신해야 합니다. 주소 표시는 개인 인증·다른 PC 연결 검증을 뜻하지 않습니다.
 
 로컬 서버만 실행할 때는 아래 명령을 사용합니다.
 
@@ -92,7 +85,7 @@ XLSX는 원본을 다시 저장하지 않고 읽습니다. 먼저 시트·병합
   --tenant-root data --port 8766
 ```
 
-앱에서는 같은 서버 주소로 가입·로그인합니다. `POST /api/v1/auth/signup`과 `/api/v1/auth/login`만 이름을 받는 공개 경로이며, `/mcp`와 업무 API에는 반환받은 개인 토큰이 필요합니다. 재로그인은 같은 토큰을 반환합니다. 신규 사용자는 `sdv-platform`(SDV 플랫폼)에 가입하며 기존 workspace ID와 자료를 자동 연결하지 않습니다. 다른 PC의 원격 연결에는 인증된 HTTPS 구성이 필요합니다.
+앱에서는 같은 서버 주소로 가입·로그인합니다. `POST /api/v1/auth/signup`과 `/api/v1/auth/login`만 이름을 받는 공개 경로이며, `/mcp`와 업무 API에는 반환받은 개인 토큰이 필요합니다. 재로그인은 같은 토큰을 반환합니다. 신규 사용자는 소속·업무 권한 없이 가입하고 관리자의 워크스페이스 배정을 기다립니다. 기존 사용자 소속과 자료는 유지합니다. 관리자 콘솔/API는 아직 설계 단계이며 현재 배정은 기존 서버 정책 관리 절차를 따릅니다. 다른 PC의 원격 연결에는 인증된 HTTPS 구성이 필요합니다.
 
 복구용 토큰은 정책 옆 `credentials/<userId>.enc`에 암호화해 보관합니다. 키는 `--credential-key-file`, `LLM_WIKI_CREDENTIAL_KEY_FILE`, 정책 옆 `credential.key` 순으로 선택합니다. 기존 키를 교체하거나 잃어버린 키를 재생성하지 않습니다. 정책·키·credentials는 자료 루트 밖의 보호된 전용 폴더에 함께 보존합니다. 기존 `.token` 파일과 Bearer 인증은 호환하며, 이름 로그인으로의 기존 토큰 등록은 인증 모듈의 명시적 관리자 작업입니다. 토큰 값을 문서·명령 인수·로그에 기록하지 않습니다.
 
@@ -109,6 +102,51 @@ Codex의 로컬 stdio 연결은 `.codex/config.toml`의 개인 런처 설정을 
 .venv/bin/python -B -m tools.publish_ruleset --help
 ```
 
+## 기능별 MCP 명령과 지침 선택
+
+MCP 프롬프트 메뉴에서 아래 `wiki_<task>`를 선택하면 공통 규칙과 해당 작업의 지침만 받습니다. 공통 인수는 `request`(요청), `document`(대상 경로/식별자), `tenant`(작업 공간), `profile`(허용 관점)입니다. 명령 이름의 표시 방식과 슬래시 메뉴 지원은 클라이언트에 따라 다릅니다. 프롬프트를 받는 동작 자체는 위키를 수정하지 않습니다.
+
+| 작업 | 프롬프트 이름 |
+| --- | --- |
+| 검색·질문·용어 | `wiki_search`, `wiki_answer`, `wiki_glossary` |
+| 그래프·전체 맥락·연결 후보 | `wiki_graph`, `wiki_context`, `wiki_connections` |
+| 본문 편집·판본 비교·복원 | `wiki_edit`, `wiki_versions`, `wiki_restore` |
+| 등록 원본·기본 등록 | `wiki_sources`, `wiki_register` |
+| 분석 작업·취소·결과 | `wiki_jobs`, `wiki_cancel`, `wiki_results` |
+| 추출·주장 검토·전문가 정책 | `wiki_extract`, `wiki_review`, `wiki_policy` |
+| 독립 관계·문서 대응·변경 영향 | `wiki_relations`, `wiki_correspondences`, `wiki_impact` |
+| Clean Up·연결 진단 | `wiki_cleanup`, `wiki_diagnose` |
+
+예를 들어 `wiki_edit`에 `document="운영.md"`, `request="마지막 문단에 복구 절차를 추가해줘"`를 전달합니다. 프롬프트 메뉴가 없으면 `wiki_guidance` 도구에 `{"task":"catalog"}`로 목록을 요청하고 `{"task":"edit"}`처럼 필요한 안내 하나를 읽습니다. AI에게 “위키 편집 안내를 읽고 운영.md를 수정해줘”처럼 요청할 수도 있습니다. 같은 안내를 이미 받았다면 다시 조회할 필요가 없습니다. legacy 서버에는 `search/graph/context/connections/edit/extract/diagnose`만 노출됩니다.
+
+서버의 공통 안내를 짧게 시작하려면 기존 `core.runtime.http_cli` 또는 `core.runtime.mcp_cli` 실행 인수에 `--guidance-mode compact`를 추가합니다. 기본 `full`은 기존 전체 안내를 유지합니다. 선택 프롬프트 22개와 안내 도구는 두 모드 모두에서 제공하며, 현재 프로세스에는 서버 재시작·클라이언트 재연결 후 반영됩니다.
+
+### 역할별 도구 묶음
+
+한 연결이 한 역할의 도구만 노출하도록 묶음을 고를 수 있습니다. 기본 `all`(58개 도구, 정의와 안내 약135KB)은 그대로입니다. 묶음은 노출 범위일 뿐 권한이 아닙니다. 인증·tenant·profile·행동 권한은 그대로 확인하며 묶음 밖 도구 호출은 거부합니다.
+
+| 묶음 | 역할 | 도구 | 정의+안내 |
+| --- | --- | ---: | ---: |
+| `ask` | 질문 답변·값 조회·탐색(읽기 전용). `wiki_read` 기본이 본문 보기 | 20 | 약36% |
+| `write` | 본문 작성·산출물 저장·판본 비교/복원 | 10 | 약11% |
+| `extract` | 원본 등록·분석 작업·온톨로지 추출 | 22 | 약37% |
+| `review` | 검토·정책·관계·문서 대응·Clean Up·영향 | 29 | 약52% |
+
+토큰 효과는 클라이언트의 도구 적재 방식에 따라 다릅니다. [실측](evals/2026-11-19-toolset-cache-measurement/REPORT.md)에서 Codex 0.169와 기본 Claude Code는 MCP 도구를 필요할 때만 불러와 묶음 간 차이가 거의 없었고, 도구를 미리 싣는 연결(내장 도구를 끈 Claude Code)에서는 `ask`가 MCP 몫을 약68% 줄였습니다.
+
+- stdio: `core.runtime.mcp_cli` 또는 `core.personal_launcher` 인수에 `--toolset ask`처럼 추가합니다. 시작 시 고른 묶음은 요청으로 넓힐 수 없습니다.
+- HTTP: 기본 `all` 서버의 주소에 `/mcp?toolset=ask`처럼 붙입니다. 알 수 없는 이름은 오류입니다.
+- 서버 안내는 공통 규칙, 역할, 토큰 사용 원칙과 그 묶음 업무의 기존 지침만 담습니다. 프롬프트·`wiki_guidance` 목록도 묶음 업무로 좁혀집니다.
+- `wiki_read`는 `view="body"`로 전체 파일 사본(`content`) 없이 본문·Front Matter 정보·revision만 받을 수 있습니다. 편집에는 기본 `full`을 사용합니다. `view="lines"`와 `start_line`·`end_line`(한 번에 최대 200줄, 전체 파일 줄 번호)을 주면 그 줄만 정확히 받습니다.
+
+질문은 `knowledge_lookup`(지식 한 번에 찾기)으로 시작하면 후보 탐색과 근거 준비를 한 번에 받습니다. 결과는 상위 문서 목록과, 질문과 맞는 원문 단락(정확한 줄·문구)·주장·판단(검토 이벤트는 축약형)입니다. 문서 전체는 싣지 않습니다. 단락 앞뒤가 더 필요하면 `wiki_read`의 줄 범위 보기로 읽고, 전체 원문·지식은 `knowledge_context_prepare`로 받습니다. tenant를 생략하면 기본 작업 공간을 쓰고 권한 검사는 같습니다. Codex 실측에서 여러 도구로 나눠 조회할 때보다 평균 입력이 약23% 줄었고, 추출 그래프가 있는 한국어 문서 10문항에서는 원문 전체를 주던 방식보다 입력 합계가 약24% 줄었습니다.
+
+여러 업무가 섞인 요청을 조각으로 나누고 조각 사이에 식별자만 넘기는 절차는 [wiki-route 스킬](.agents/skills/wiki-route/SKILL.md)을 따릅니다.
+
+개인 분석 CLI에는 `--rules-view stage-v1`을 추가하면 전체 고정 원문·규약은 검증·보존하면서 현재 단계의 지침만 모델에 전달합니다. 동일한 구조화 출력 스키마의 본문 중복도 제외합니다. `--rules-view full`은 이전 전체 지침 조립을 사용합니다. 명시 기능 선택에는 별도의 AI 분류 호출이 필요하지 않습니다. 실제 절감·품질·반복 비교 범위는 [검증 보고서](evals/2026-11-18-modular-guidance/REPORT.md)를 참고합니다.
+
+실제 비교에서 본문 단계의 핵심 보존과 토큰 절감은 확인했지만, 추출 및 명령 계획의 품질·일관성 유지 조건을 충족하지 못해 기본값은 `full`로 유지합니다. 추출 비교에 사용한 공통 스키마 호환 전송은 평가 전용이며 제품 Codex 어댑터에 적용하지 않았습니다.
+
 ## 새 서버 준비
 
 처음 설치하는 서버에서만 존재하지 않는 새 절대 경로를 지정합니다. 부모 폴더는 미리 있어야 하며 기존 경로는 덮어쓰지 않습니다.
@@ -120,7 +158,7 @@ Codex의 로컬 stdio 연결은 `.codex/config.toml`의 개인 런처 설정을 
   --tenant-root /absolute/new-wiki-server/data --port 8766
 ```
 
-초기화는 빈 정책·자료 루트와 보호 키를 준비합니다. 첫 가입 때 새 workspace를 만들며 기존 서버 시작에는 이 초기화 명령을 사용하지 않습니다. API와 MCP는 같은 주소에서 제공됩니다. 분석에는 별도로 발행·허용한 규약을 `--ruleset-root`와 `--ruleset-policy`로 연결합니다.
+초기화는 빈 정책·자료 루트와 보호 키를 준비합니다. 가입은 워크스페이스를 자동 생성하지 않으므로 관리자가 공간과 소속을 준비해야 합니다. 기존 서버 시작에는 이 초기화 명령을 사용하지 않습니다. API와 MCP는 같은 주소에서 제공됩니다. 분석에는 별도로 발행·허용한 규약을 `--ruleset-root`와 `--ruleset-policy`로 연결합니다.
 
 ## 데스크톱 앱
 
@@ -173,13 +211,11 @@ tenant MCP에서는 `wiki_list`로 등록 원본과 Wiki 목록, `wiki_versions`
 
 제공자 기본값은 기존 Codex이며 필요하면 기존 `--ai-provider`/`--ai-model` 선택을 그대로 사용합니다. `current-review-v1`은 전체 선택 본문·조건·예외·규약·유효 그래프·현재 판단을 보존하면서 중복 값과 적용되지 않는 과거 이벤트의 반복 전송을 줄입니다. 서버의 전체 bundle/원장과 로컬 수신 사본은 유지합니다. 기본 `--input-view full`도 사용할 수 있습니다. 전체 맥락을 자동 발견했다는 뜻은 아닙니다.
 
-분석 CLI의 `--rules-view stage-v1`은 명시적으로 선택한 단계 규약만 모델에 전달합니다. 서버의 전체 입력은 보존하며 기본은 `full`입니다. 추출 의미 보존 기준을 충족하지 못해 기본 적용하지 않았습니다. 철회된 `json-values-v1`은 제공하지 않습니다.
-
-`usage_observations.timings`는 준비·AI·진단·저장·후속 대조의 시간을 구분합니다. 본문 앵커와 진단 위치의 서로 다른 줄 좌표를 모델에 명시해 불필요한 교정을 줄입니다. 기록된 실행기 시간은 화면 관측까지의 전체 시간과 구분합니다.
-
 여러 기존 작업은 `--job-id`와 `--expected-job-revision` 대신 `--batch-jobs /absolute/selected-jobs.json`으로 실행합니다. 파일은 `[{"job_id":"32자리 작업 ID","expected_job_revision":"64자리 관측 revision"}]` 형식이며 최대 8개를 명시합니다. 선택한 순서로 실행하고 실패는 개별 기록하며 자동 재시도하지 않습니다. 일부 실패는 종료 코드 1, 취소는 남은 작업 시작 중단입니다. 이미 저장한 결과/초안은 각 작업 폴더와 서버 영수증에 남습니다.
 
 완료 결과는 원본·규약·판단·맥락·권한·실행 설정이 같은 경우에만 재사용합니다. 재사용/새 호출 여부는 결과에 구분됩니다. 옛 AI 실행에 설정 지문이 없거나 설정이 달라졌다면 과거 결과는 조회할 수 있지만 재사용하지 않습니다. `assembly.json`은 조립한 입력의 바이트/문자·보기 hash를, `ai-result.json`/`ai-failure.json`의 `usage_observations`는 호출 시도와 입출력 크기를 기록합니다. 제공자가 실제 토큰 수를 보고한 경우만 `token_usage`에 남기며 값이 없으면 null입니다. 이를 독립 반복 생성이나 실제 비용 절감률의 증거로 해석하지 않습니다.
+
+`usage_observations.timings`는 입력 준비·첫 AI 호출·교정·검증·저장과 영수증 확인·의미검사·후속 대조 시간을 기록합니다. `phase_seconds`는 중첩 시간을 중복 합산하지 않으며 호출별 `duration_seconds`를 다시 더하지 않습니다. 전체 `elapsed_seconds`와 계측 밖 `unmeasured_seconds`를 함께 확인합니다. 최종 로컬 기록과 연결 종료는 전체시간에서 제외하며, 재사용은 새 호출0과 `status=reused`로 구분합니다. 준비 중 실패하면 이미 만든 이번 실행 폴더에 `preparation-failure.json`을 남깁니다.
 
 온톨로지 추출은 저장 전에 고정 원문과 발행 스키마로 구조·본문 인용·참조를 검사합니다. 수정 가능한 검사 오류에는 전체 제출을 최대 두 번 재추출하며 각 호출의 원시 결과·검사 보고·사용량을 보존합니다. 미독, 실행/파싱 오류, 취소, 저장 실패는 이 수정 대상으로 삼지 않습니다. 수정 한도를 소진하면 그래프를 저장하지 않습니다. 의미 정확도나 사람 승인은 별도이며 최종 저장 검사를 그대로 거칩니다. 수동 MCP 작업에서도 읽기 권한의 `ontology_validate_draft(document, expected_revision, submission, max_errors=20)`로 저장 없이 진단할 수 있습니다. tenant 서버에는 기존 `tenant`와 필요한 `profile`을 함께 전달합니다.
 

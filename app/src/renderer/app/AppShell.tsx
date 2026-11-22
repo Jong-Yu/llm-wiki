@@ -60,6 +60,12 @@ const navigation: readonly NavigationItem[] = [
     ],
   },
   {
+    path: '/templates',
+    label: '템플릿',
+    icon: 'file-text',
+    routes: ['/templates'],
+  },
+  {
     path: '/ontology',
     label: '온톨로지',
     icon: 'network',
@@ -87,6 +93,7 @@ const navigation: readonly NavigationItem[] = [
 
 const pageTitles: Readonly<Record<string, string>> = {
   '/documents': '문서',
+  '/templates': '템플릿',
   '/register': '문서 등록',
   '/document': '문서 상세',
   '/source': '등록 원본 상세',
@@ -301,6 +308,7 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
   const connection = useConnectionDisplay(location.pathname);
   const snapshot = connection.status === 'ready' ? connection.snapshot : null;
   const connected = snapshot?.status === 'connected';
+  const serverUnreachable = connected && snapshot.serverUnreachable === true;
   const selection =
     snapshot?.status === 'connected' ? snapshot.selection : null;
   const workspaceName =
@@ -315,9 +323,11 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
       ? '연결 확인 중'
       : connection.status === 'error'
         ? '연결 상태 확인 실패'
-        : connected
-          ? '연결됨'
-          : '연결되지 않음';
+        : serverUnreachable
+          ? '서버 연결 끊김'
+          : connected
+            ? '연결됨'
+            : '연결되지 않음';
 
   /** 작은 창에서 목적지를 열면 본문을 가리고 있던 탐색기를 접습니다. */
   const openDestination = (): void => {
@@ -595,8 +605,11 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
           data-workspace-container
           tabIndex={-1}
         >
-          {snapshot?.status === 'connected' && snapshot.serverUnreachable && (
-            <ConnectionNotice kind="server-disconnected" />
+          {serverUnreachable && (
+            <ConnectionNotice
+              kind="server-disconnected"
+              action={<Link to="/settings">연결 설정 확인</Link>}
+            />
           )}
           {switching && (
             <StatusNotice tone="info" title="작업 공간을 바꾸는 중" />
@@ -612,7 +625,11 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
       <footer className={styles.statusbar} aria-label="작업 공간 상태">
         <Link to="/settings" className={styles.connection}>
           <span
-            className={connected ? styles.connectedDot : styles.disconnectedDot}
+            className={
+              connected && !serverUnreachable
+                ? styles.connectedDot
+                : styles.disconnectedDot
+            }
             aria-hidden="true"
           />
           <span>{connectionLabel}</span>

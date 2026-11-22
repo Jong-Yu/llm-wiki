@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join } from 'node:path';
 import type { AiProvider } from '@contracts/runtime.contract';
+import { AI_NETWORK_ENVIRONMENT } from './aiNetworkEnvironment';
 
 export type CliLoginResult = {
   status: 'logged_in' | 'logged_out' | 'error';
@@ -36,6 +37,7 @@ export function loginEnvironment(): NodeJS.ProcessEnv {
     'LC_CTYPE',
     'CODEX_HOME',
     'CLAUDE_CONFIG_DIR',
+    ...AI_NETWORK_ENVIRONMENT,
   ]) {
     if (process.env[name]) result[name] = process.env[name];
   }

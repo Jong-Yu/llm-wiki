@@ -1,0 +1,40 @@
+{
+  "passed": true,
+  "checks": [
+    "v2 저장 상태 거부, 독립 관리 탐색, actual AppShell/TemplateList 기하·타이포·색 일치",
+    "사용자 목록→전용 상세→권한 편집 DOM 분리, 아이콘 focus/툴팁/Escape/Enter, 복귀 focus 보존, host echo 후 변경 권한 유지",
+    "합성 사용자 240명·20개 페이지, 이름/고정 ID 검색, 동명 구분·빈 결과·지우기, 페이지와 focus 복귀",
+    "공간 목록→상세→별도 멤버 선택 분리, 검색 결과 20개·페이지 간 선택 chip·해제·추가",
+    "변경 이력의 대상·행동·변경 전후·관리자·시각 구조, 별도 검색 필터와 AND 적용",
+    "별도 이름 편집 충돌 시 초안·최신값 보존, 인증 만료 상태에서 편집 화면 숨김",
+    "320/736/1280 밝음·어두움 권한 화면과 좁은 목록 overflow 없음",
+    "host version3 상태 저장·이벤트 복원·16KiB 상한, 외부 요청·브라우저 오류 없음"
+  ],
+  "geometry": {
+    "product": {
+      "mode": "CSS1Compat",
+      "header": 52,
+      "sidebar": 208,
+      "footer": 26,
+      "font": "13px",
+      "line": "20px",
+      "background": "rgb(238, 240, 242)",
+      "search": 36,
+      "overflow": false
+    },
+    "admin": {
+      "mode": "CSS1Compat",
+      "header": 52,
+      "sidebar": 208,
+      "footer": 26,
+      "font": "13px",
+      "line": "20px",
+      "background": "rgb(238, 240, 242)",
+      "search": 36,
+      "overflow": false
+    }
+  },
+  "errors": [],
+  "requests": [],
+  "verifiedAt": "2026-11-16T15:45:24.851Z"
+}

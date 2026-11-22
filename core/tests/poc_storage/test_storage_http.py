@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from core.modules.access.policy import AccessPolicy
 from core.modules.documents import changes
 from core.runtime.application import create_application
+from core.tests.poc_access.fixtures import grant_test_membership
 from tools.initialize_server import initialize_new_server
 
 
@@ -25,6 +26,7 @@ class StorageHTTP(unittest.TestCase):
         response = self.client.post('/api/v1/auth/signup',json={'name':'저장 사용자'})
         self.assertEqual(response.status_code,200,response.text)
         self.user = response.json()['data']
+        self.user = grant_test_membership(self.policy, self.user)
         self.headers = {'Authorization':'Bearer '+self.user['token']}
         self.prefix = '/api/v1/tenants/'+self.user['default_tenant']
 
@@ -86,6 +88,7 @@ class StorageHTTP(unittest.TestCase):
         self.assertEqual(response.status_code,201,response.text)
         record_id = response.json()['data']['record']['id']
         bob = self.client.post('/api/v1/auth/signup',json={'name':'다른 사용자'}).json()['data']
+        bob = grant_test_membership(self.policy, bob)
         other = {'Authorization':'Bearer '+bob['token']}
         self.assertEqual(self.client.get(self.prefix+'/conversations/'+record_id,headers=other).status_code,404)
         self.assertEqual(self.client.get(self.prefix+'/conversations',headers=other).json()['data']['items'],[])

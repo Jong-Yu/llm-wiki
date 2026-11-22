@@ -161,6 +161,9 @@ export function PersonalAiSettings({
             onRequest={onRequest}
             onChangePath={openPaths}
             advancedId={advancedId}
+            canDiagnose={selected === 'claude' && state.platform === 'win32'}
+            diagnosing={pending === 'diagnose-claude'}
+            diagnosticReport={state.diagnosticReport}
           />
           {connected && pathsNeeded && (
             <StatusNotice

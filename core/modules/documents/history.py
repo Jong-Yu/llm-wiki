@@ -58,8 +58,8 @@ def _read(descriptor, history_id, document):
     with span("canonical_read"), os.fdopen(fd, "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError("History entries must be regular files")
-        raw = stream.read(MAX_DOCUMENT_BYTES + 1)
-    if len(raw) > MAX_DOCUMENT_BYTES:
+        raw = stream.read() if MAX_DOCUMENT_BYTES is None else stream.read(MAX_DOCUMENT_BYTES + 1)
+    if MAX_DOCUMENT_BYTES is not None and len(raw) > MAX_DOCUMENT_BYTES:
         raise DocumentTooLargeError(document, len(raw))
     return {"history_id": history_id, "content": raw.decode("utf-8"),
             "revision": sha256(raw).hexdigest(), "size_bytes": len(raw),

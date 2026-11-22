@@ -2,9 +2,9 @@ import { useMemo } from 'react';
 import type { JSX } from 'react';
 import type { ChatTurn } from '../model/chatState';
 import type { KnowledgeValue } from '@contracts/knowledge.contract';
-import { Link } from 'react-router';
 import styles from './KnowledgeChat.module.scss';
 import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
+import { Icon } from '@renderer/shared/ui/Icon';
 import type { ExportFormat } from '@contracts/fileExports.contract';
 import { splitOutputDirective } from '../model/outputIntent';
 import {
@@ -21,6 +21,10 @@ import { AssistantMessage } from './AssistantMessage';
 import { ChatAnswer } from './ChatAnswer';
 import { AnswerActions } from './AnswerActions';
 import { AnswerFileCard } from './AnswerFileCard';
+import { TemplateAnswerFile } from './TemplateAnswerFile';
+import { splitTemplateResult } from '../model/templateSnapshot';
+import type { TemplateSnapshot } from '../model/templateSnapshot';
+import type { TemplateSession } from '@contracts/templates.contract';
 type ChatReplyProps = {
   turn: ChatTurn;
   citations: KnowledgeValue[];
@@ -34,6 +38,8 @@ type ChatReplyProps = {
   onEvidence: (index: number) => void;
   onDownload: (format: ExportFormat) => void;
   onCopyError: () => void;
+  templateSnapshot?: TemplateSnapshot;
+  templateSession?: TemplateSession;
 };
 /** 저장된 답변 하나에 본문, 실제 근거, 요청한 파일, 가능한 동작만 붙입니다. */
 export function ChatReply({
@@ -49,8 +55,13 @@ export function ChatReply({
   onEvidence,
   onDownload,
   onCopyError,
+  templateSnapshot,
+  templateSession,
 }: ChatReplyProps): JSX.Element {
-  const { format, body } = splitOutputDirective(turn.content);
+  const ordinary = splitOutputDirective(turn.content);
+  const plan = templateSnapshot ? splitTemplateResult(turn.content) : null;
+  const format = templateSnapshot ? null : ordinary.format;
+  const body = plan?.body ?? ordinary.body;
   const recommended = useMemo(
     (): ExportFormat => suggested ?? (countTables(body) > 0 ? 'xlsx' : 'docx'),
     [body, suggested],
@@ -79,7 +90,7 @@ export function ChatReply({
   ).size;
   const evidence = citations.length ? (
     <div className={styles.evidenceActions}>
-      <span className={styles.evidenceLabel}>근거</span>
+      <span className={styles.evidenceLabel}>근거 {citations.length}개</span>
       {citations.map((citation: KnowledgeValue, index: number): JSX.Element => (
         <button
           key={index}
@@ -87,6 +98,7 @@ export function ChatReply({
           className={styles.citation}
           data-chat-evidence-trigger={turn.id + ':' + index}
           aria-label={`근거 ${index + 1} 확인 · ${citationChip(citation)}`}
+          title="인용문과 출처 보기"
           onClick={(): void => onEvidence(index)}
         >
           {citationChip(citation)}
@@ -101,20 +113,21 @@ export function ChatReply({
   const file = !!format && !!body.trim() && turn.status !== 'failed';
   return (
     <AssistantMessage saved>
-      <p className={styles.scopeNote}>
-        {webSummary ?? '워크스페이스 근거만 사용'}
-      </p>
+      {webSummary && (
+        <p className={styles.scopeNote}>
+          <Icon name="globe" />
+          <span>{webSummary}</span>
+        </p>
+      )}
       {noWiki && (
-        <StatusNotice
-          variant="box"
-          tone="info"
-          className={styles.inAnswer}
-          title="위키에서 관련 문서를 찾지 못했어요"
-        >
-          {partialSearch
-            ? '검색 범위 일부만 확인했어요. 확인한 범위에서는 이 질문에 쓸 문서를 찾지 못했어요.'
-            : '이 질문에 쓸 수 있는 문서가 없습니다.'}
-        </StatusNotice>
+        <p className={styles.scopeNote}>
+          <Icon name="files" />
+          <span>
+            {partialSearch
+              ? '일부 범위만 검색했으며 관련 위키 근거를 찾지 못했습니다.'
+              : '관련 위키 근거 없음'}
+          </span>
+        </p>
       )}
       <ChatAnswer
         content={summary || body}
@@ -125,26 +138,11 @@ export function ChatReply({
           이 답변은 실패 상태로 저장되었어요.
         </StatusNotice>
       )}
-      {noWiki && !webIncluded && (
-        <div className={styles.answerActions}>
-          <Link
-            className={`${styles.button} ${styles.primaryAction}`}
-            to="/register"
-          >
-            자료 등록하기
-          </Link>
-          <button
-            className={styles.button}
-            type="button"
-            disabled={disabled}
-            onClick={onAsk}
-          >
-            질문 바꿔 보기
-          </button>
-        </div>
-      )}
       {!noWiki && partialSearch && (
-        <p className={styles.scopeNote}>검색 범위 일부만 확인했어요.</p>
+        <p className={styles.scopeNote}>
+          <Icon name="info" />
+          <span>검색 범위 일부만 확인했어요.</span>
+        </p>
       )}
       {showEvidence && !file && evidence}
       {file && (
@@ -158,7 +156,17 @@ export function ChatReply({
           onDownload={onDownload}
         />
       )}
-      {(showEvidence || file) && (
+      {templateSnapshot &&
+        templateSession &&
+        plan?.hasPlan &&
+        turn.status !== 'failed' && (
+          <TemplateAnswerFile
+            session={templateSession}
+            snapshot={templateSnapshot}
+            content={turn.content}
+          />
+        )}
+      {(showEvidence || file) && !templateSnapshot && (
         <AnswerActions
           body={body}
           fileFormat={format}
@@ -172,6 +180,27 @@ export function ChatReply({
         />
       )}
       {showEvidence && file && evidence}
+      {templateSnapshot && (
+        <details className={styles.templateRequest}>
+          <summary>이 요청에 적용한 템플릿·지침</summary>
+          <p>
+            {templateSnapshot.template.name} ·{' '}
+            {templateSnapshot.template.filename}
+          </p>
+          <p className={styles.templateInstructions}>
+            {templateSnapshot.template.instructions ||
+              '등록한 지침이 없습니다.'}
+          </p>
+          <button
+            type="button"
+            className={styles.button}
+            disabled={disabled}
+            onClick={onAsk}
+          >
+            다시 묻기
+          </button>
+        </details>
+      )}
     </AssistantMessage>
   );
 }

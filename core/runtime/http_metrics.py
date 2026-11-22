@@ -42,8 +42,13 @@ class HttpMetricsMiddleware:
     def _template(self, scope):
         if self._patterns is None:
             # 서버가 선언한 OpenAPI 템플릿만 사용한다. literal 요청 경로를 저장하지 않는다.
-            templates = self._route_templates()
-            self._patterns = tuple((compile_path(template)[0], template) for template in templates)
+            # 템플릿을 만들지 못하면 <unmatched>로 기록하고 다시 만들지 않는다. 실패한 OpenAPI 생성을
+            # 요청마다 반복하면 모든 요청이 느려진다(2026-11-22 요청당 약 80 ms).
+            try:
+                templates = self._route_templates()
+                self._patterns = tuple((compile_path(template)[0], template) for template in templates)
+            except Exception:
+                self._patterns = ()
         for pattern, template in self._patterns:
             if pattern.fullmatch(scope.get("path", "")):
                 return template

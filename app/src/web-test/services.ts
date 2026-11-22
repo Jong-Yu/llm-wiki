@@ -344,6 +344,9 @@ export async function createWebServices(
   register(CONNECTION_CHANNELS.getState, 0, (): unknown =>
     connection.getState(),
   );
+  register(CONNECTION_CHANNELS.refreshAccess, 0, (): Promise<unknown> =>
+    connection.refreshAccess(),
+  );
   register(
     CONNECTION_CHANNELS.selectWorkspace,
     1,

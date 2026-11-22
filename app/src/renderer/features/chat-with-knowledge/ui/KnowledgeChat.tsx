@@ -1,10 +1,19 @@
 import { documentDisplayName } from '@renderer/domains/documents';
+import { useTemplateCatalogQuery } from '@renderer/domains/templates';
+import { templatesGateway } from '@renderer/platform/templates';
 import { Icon } from '@renderer/shared/ui/Icon';
 import type { ExportFormat } from '@contracts/fileExports.contract';
 import { ConnectionNotice, EmptyState } from '@renderer/shared/ui/PageNotice';
 import { useAiConnection } from '@renderer/platform/aiConnection';
 import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
-import { useEffect, useMemo, useLayoutEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { JSX, KeyboardEvent } from 'react';
 import { Link } from 'react-router';
 import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
@@ -27,15 +36,19 @@ import {
 import { templateById } from '../model/answerTemplates';
 import { splitOutputDirective } from '../model/outputIntent';
 import {
-  chatRunActive,
-  chatRunUncertain,
-  chatTurns,
-  chatWebQuerySchema,
+  registeredTemplateId,
+  splitTemplateResult,
+} from '../model/templateSnapshot';
+import { chatRunActive, chatRunUncertain, chatTurns } from '../model/chatState';
+import type {
+  ChatRunNotice as ChatRunNoticeValue,
+  ChatThread,
+  ChatTurn,
 } from '../model/chatState';
-import type { ChatThread, ChatTurn } from '../model/chatState';
 import { chatLocationForThread } from '../model/chatNavigation';
 import type { ChatLocation } from '../model/chatNavigation';
-import { ChatRunFeedback, chatProblem } from './ChatRunFeedback';
+import { ChatRunFeedback, ChatRunNotice, chatProblem } from './ChatRunFeedback';
+import { splitQuestion } from '../model/externalMaterial';
 import { getAiConnectionPresentation } from '@renderer/shared/lib/useAiConnection';
 import { sessionContinuationHint } from '../model/sessionContinuation';
 import { ChatComposer } from './ChatComposer';
@@ -164,6 +177,7 @@ function ConnectedKnowledgeChat({
     if (activity.current) onArtifact(id);
   }
   const model = useKnowledgeChat(access, artifactSaved);
+  const templates = useTemplateCatalogQuery(access.session, templatesGateway);
   const { navigationError, locationMatches } = useChatNavigation({
     model,
     location,
@@ -187,7 +201,9 @@ function ConnectedKnowledgeChat({
       (receipt: NonNullable<typeof model.run>['receipts'][number]): boolean =>
         receipt.saved === true,
     )
-      ? splitOutputDirective(model.run.local.preview).body
+      ? registeredTemplateId(model.thread.template)
+        ? splitTemplateResult(model.run.local.preview).body
+        : splitOutputDirective(model.run.local.preview).body
       : '';
   const uncertainRun = model.run !== null && chatRunUncertain(model.run);
   const uncertain = model.thread.startUnconfirmed || uncertainRun;
@@ -204,12 +220,7 @@ function ConnectedKnowledgeChat({
   const aiUnavailable = ai.status === 'required';
   const canWrite = access.permissions.includes('conversation_write');
   const canSend =
-    !scopeDisabled &&
-    !!model.thread.draft.trim() &&
-    (!model.thread.webEnabled ||
-      chatWebQuerySchema.safeParse(model.thread.webQuery).success) &&
-    !aiUnavailable &&
-    canWrite;
+    !scopeDisabled && !!model.thread.draft.trim() && !aiUnavailable && canWrite;
   const turns = useMemo(
     (): ChatTurn[] => (model.invalidScope ? [] : chatTurns(model.conversation)),
     [model.invalidScope, model.conversation],
@@ -302,25 +313,21 @@ function ConnectedKnowledgeChat({
   const problem = chatProblem(model, uncertain, failedRun, aiUnavailable);
   const headerStatus = getAiConnectionPresentation(ai.level, provider);
   const idle = !working && !aiUnavailable && !problem;
-  const failedHeader = failedRun && !aiUnavailable;
+  const failedHeader = failedRun && !aiUnavailable && !working;
   const showStart =
-    !disabled &&
-    idle &&
-    turns.length === 0 &&
-    !model.thread.draft &&
-    !model.thread.template &&
-    model.thread.attachments.length === 0;
+    !disabled && idle && turns.length === 0 && !model.submittedQuestion;
   const showRetry =
     !!model.thread.questionTurnId &&
     !running &&
     !uncertainRun &&
     answerCount === 0 &&
-    model.run?.status !== 'complete';
+    model.run?.status !== 'complete' &&
+    model.run?.status !== 'cancelled';
   const lastTurn = turns.at(-1)?.id;
   useEffect((): void => {
     if (active && followAnswer.current)
       messages.current?.scrollTo({ top: messages.current.scrollHeight });
-  }, [lastTurn, model.run?.local.preview, active]);
+  }, [lastTurn, model.run?.local.preview, model.submittedQuestion?.id, active]);
 
   /**
    * 내 폴더에 저장된 결과물을 원하는 위치에 Markdown 파일로 저장합니다.
@@ -448,6 +455,7 @@ function ConnectedKnowledgeChat({
         tabIndex={-1}
         hidden={!conversationVisible}
         className={styles.column}
+        data-start={showStart || undefined}
         onFocusCapture={rememberFocus}
       >
         {navigationError ? (
@@ -567,10 +575,24 @@ function ConnectedKnowledgeChat({
                 const { turn, question } = message;
                 if (message.kind === 'question')
                   return (
-                    <ChatQuestionMessage
-                      key={turn.id}
-                      question={message.question}
-                    />
+                    <Fragment key={turn.id}>
+                      <ChatQuestionMessage question={message.question} />
+                      {model.thread.runNotices
+                        .filter(
+                          (notice: ChatRunNoticeValue): boolean =>
+                            notice.questionTurnId === turn.id &&
+                            !(
+                              notice.runId === model.run?.id &&
+                              notice.status === 'failed' &&
+                              failedRun &&
+                              !working &&
+                              (problem === 'failed' || problem === 'connection')
+                            ),
+                        )
+                        .map((notice: ChatRunNoticeValue): JSX.Element => (
+                          <ChatRunNotice key={notice.runId} notice={notice} />
+                        ))}
+                    </Fragment>
                   );
                 return (
                   <ChatReply
@@ -587,10 +609,16 @@ function ConnectedKnowledgeChat({
                       templateById(question?.template?.id ?? '')
                         ?.suggestedFormat
                     }
+                    templateSnapshot={question?.registeredTemplate}
+                    templateSession={access.session}
                     downloading={downloading}
                     disabled={actionsDisabled || !question?.question}
                     onAsk={(): void => {
                       model.setDraft(question?.question ?? '');
+                      if (question?.registeredTemplate)
+                        model.setTemplate(
+                          `tpl-${question.registeredTemplate.template.id}`,
+                        );
                       textarea.current?.focus();
                     }}
                     onEvidence={(index: number): void =>
@@ -605,6 +633,12 @@ function ConnectedKnowledgeChat({
                   />
                 );
               })}
+              {model.submittedQuestion && (
+                <ChatQuestionMessage
+                  key={model.submittedQuestion.id}
+                  question={splitQuestion(model.submittedQuestion.content)}
+                />
+              )}
               <ChatRunFeedback
                 model={model}
                 working={working}
@@ -671,7 +705,10 @@ function ConnectedKnowledgeChat({
             )}
             {awayFromLatest && (
               <button
-                className={styles.button}
+                className={styles.jumpToLatest}
+                type="button"
+                aria-label="최신 답변으로 이동"
+                title="최신 답변으로 이동"
                 onClick={(): void => {
                   followAnswer.current = true;
                   setAwayFromLatest(false);
@@ -680,7 +717,7 @@ function ConnectedKnowledgeChat({
                   });
                 }}
               >
-                최신 답변으로 이동 <Icon name="chevron-down" />
+                <Icon name="chevron-down" />
               </button>
             )}
             {aiUnavailable && !problem && (
@@ -716,11 +753,17 @@ function ConnectedKnowledgeChat({
               }
               onRemoveAttachment={model.removeAttachment}
               template={model.thread.template}
+              registeredTemplates={templates.data?.items ?? []}
+              templateNotice={
+                templates.error
+                  ? '등록한 템플릿을 읽지 못했습니다. 연결을 확인해 주세요.'
+                  : templates.isPending
+                    ? '템플릿을 읽고 있습니다.'
+                    : undefined
+              }
               onTemplate={model.setTemplate}
               webEnabled={model.thread.webEnabled}
-              webQuery={model.thread.webQuery}
               onWebEnabled={model.setWebEnabled}
-              onWebQuery={model.setWebQuery}
               providerName={provider}
               models={modelOptions}
               currentModel={currentModel}

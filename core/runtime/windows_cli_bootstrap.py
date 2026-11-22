@@ -8,7 +8,9 @@ if __name__ == "__main__":
     import threading
     if sys.argv[1:2] != ["--"] or os.read(sys.stdin.fileno(), 1) != b"\0":
         raise SystemExit(2)
-    child = subprocess.Popen(sys.argv[2:], stdin=subprocess.PIPE)
+    # bootstrap 자신도 콘솔 없이 시작하므로 자식 CLI가 새 콘솔 창을 만들지 않게 한다.
+    child = subprocess.Popen(sys.argv[2:], stdin=subprocess.PIPE,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     def forward():
         try:
             # Raw reads forward live cancel lines and leave no buffered lock held

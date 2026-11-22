@@ -36,6 +36,8 @@ export const connectionGateway: ConnectionBridge = {
     getConnectionBridge().connect(request),
   getState: async (): Promise<ConnectionResult> =>
     getConnectionBridge().getState(),
+  refreshAccess: async (): Promise<ConnectionResult> =>
+    changed(getConnectionBridge().refreshAccess()),
   selectWorkspace: async (
     request: SelectWorkspaceRequest,
   ): Promise<ConnectionResult> =>

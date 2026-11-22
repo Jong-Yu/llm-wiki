@@ -1,5 +1,24 @@
 # 실행 환경 작업 기록
 
+## 2026-11-22 — Windows 포터블 fix4 사전 릴리스 공개
+
+- 사용자 요청(Windows Claude 연결 오류 대책 ①②⑤⑥, 안내 메시지는 B안, 사전 릴리스 공개까지)으로 [D-143](DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22)의 안내 메시지 허용·연결 설정 전달·거부 이름표·앱 진단 보고서와 [D-144](DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)의 실행기 경로 자동 교체를 구현했다.
+- 앱: `diagnose-claude` 요청과 상태 카드의 "진단 보고서 만들기"(Windows·Claude 호출 실패 때만)를 추가했다. 보고서는 앱 데이터 `diagnostics/`에 새 파일로 저장하고 기존 파일은 덮어쓰지 않는다. 연결 기록에 형식이 맞는 거부 이름표(`event`)만 싣는다. 앱→개인 실행기 환경 허용 목록 세 곳(설정·개인 실행·로그인 확인)에 같은 네트워크 변수 8개를 공통 모듈로 더했다.
+- 검증: 관련 Python(`test_claude_events` 8·`test_claude_call_diagnostic` 21, `poc_analysis` 293개 중 기존 탐색 import 오류 2개만 남고 같은 모듈은 직접 실행 시 통과), 앱 typecheck·lint·format·빌드, 설정 통합 검사 5개(이전 포터블 경로 교체·외부 실행기 유지·이름표 형식 거부·보고서 저장/열기/비덮어쓰기·실패 처리)와 Electron 흐름(sandbox 밖 실행)이 통과했다. Mac의 Claude Code 2.1.327로 앱과 같은 `tools.search_terms_cli` 경로를 실제 1회 호출해 성공했다.
+- 패키징: 21:05의 현재 작업 트리(미커밋)로 `npm run package:win:portable -- --output-dir release/portable/0.1.0/windows-x64-fix4`를 실행했다. fix1~3과 달리 전체 재빌드라 그 사이 다른 개선도 포함한다. ZIP 3,469항목 CRC, 실행기 소스 8개 파일의 작업 트리 바이트 일치, Python·OCR·pywin32 포함, 앱 번들의 새 화면 문자열을 확인했다. 빌더의 압축 해제 폴더·디버그 파일은 지우고 ZIP·SHA-256만 남겼다.
+- 공개: [fix4 사전 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix4)를 초안으로 올려 두 자산의 크기·GitHub digest가 로컬과 같음을 확인한 뒤 공개했다. 최신 릴리스는 `app-0.1.0` 그대로다. 익명 다운로드(ZIP 범위 요청 206, 체크섬 본문)를 확인했다. ZIP 253,427,671바이트, SHA-256 `c8489772fd5f3ff8a9939f51321423fa4a80764185dd18b009a61b2b577dda37`.
+- 남은 것: Windows 실기기의 실제 Claude 호출, 회사 프록시·인증서 환경, 실행기 경로 자동 교체의 실기기 확인. 운영 서버·설치판 자동 업데이트는 바꾸지 않았다.
+
+## 2026-11-22 — 남은 변경의 정리와 통합 커밋 검사
+
+- 사용자가 남은 변경 전체의 정리·커밋을 요청했고, 검토 중 추가된 Claude 실행/진단·앱 실행 변경도 검증 후 함께 커밋하도록 확인했다. D-141의 문서 한도 제거도 재확인했다. 신규 템플릿·계정 배정·질문 조회·웹 조사·Windows 실행·포터블/릴리스와 관련 검사/문서를 포함한다.
+- 전체 Python은 namespace 폴더 때문에 단순 discover가0개를 수집해 중단했고, 실제107개 `test_*.py` 모듈을 명시해1,317검사를 실행했다. 258.003초에1,314통과·Windows native3skip, 프로세스 exit0을 확인했다. 추가 Claude 계약/알림/진단7모듈90검사는 별도 최신11파일의 실행 전후SHA 일치를 확인했다. 기존 clean-worktree Python 선택 검사도 유지하고1개 재검증을 통과했다.
+- MCP 줄 좌표와 영향 기준 캡처 안내의 두 회귀를 수정했다. MCP 전체164개 중 sandbox 바인딩 제한5개는 loopback 허용으로 재실행해 모두 통과했다. 초기 backend 프롬프트 SHA 기대1개와 앱의 기존 규칙과 다른 기대는 원래 계약을 확인해 수정했다. 앱 상세 검사와 실패·재실행은 UI HISTORY를 따른다. 실제 AI 모델은 호출하지 않았다.
+- 현재 참조가 없는 `tools/open-server-terminal-mac.sh`는 `start-mac.command --new-window`로 통합돼 삭제했다. 앞선 분리 릴리스 작업에서만 만든 중복 백업·검사 사본9개(1,324,630바이트)를 정리하고 최종 배포 ZIP·다운로드 검증·새 통합 검사 로그를 보존했다. 시안/검증 그림과 기본 비활성 실험은 기존 결정·기록에서 참조하므로 삭제하지 않는다.
+- 추가 앱 전체 실행기 검사는 동시 실행/취소/격리·계정 캐시·Electron 트레이/수명·CLI 연결/provider·이전 번들 경로 교체·event label·Claude 진단 저장/열기를 통과했다. 최신667파일 스냅샷의 검사 전후 변경은0개이고 성공 빌드 뒤 제품 변경은 없었다. 외부 runner의 `tmpdir()` 변경으로 생긴 심볼릭 경로/고정 `/private/tmp` 기대 실패는 `realpath`와 정규화 OS 임시 경로의 소유 접두어 검사로 고쳤다. 생산 Python322파일의 컴파일도 통과했다.
+- 새 Windows `.cmd`의 CRLF를 기본 Git 공백 검사가 후행 공백으로 보고해 커밋 준비가 한 번 멈췄다. 파일 바이트는 보존하고 `cr-at-eol`을 포함한 공백 검사로 실제 후행 공백·파일 끝 공백을 다시 확인했다.
+- 새 패키징·원격 게시·운영 서버 재시작·사용자 자료 쓰기는 수행하지 않는다. 기존 문서·히스토리·인증 설정·공개 배포를 보존한다. 이 기록의 모의 검사 통과를 Windows 실기기 성공이나 실제 모델 의미 검증으로 확대하지 않는다.
+
 ## 2026-11-22 — 실행기 보완판 공개와 다운로드 검증 완료
 
 - 선택한 개선을 소스 `main`의 [700a0a4](https://github.com/Jong-Yu/llm-wiki/commit/700a0a4fb2ea7c26504209e70fe6401676e2b06c)로 게시하고 해당 커밋의 Git archive에서 실행기 ZIP을 생성했다. 허용 소스 311개와 설치 안내만 포함하며 사용자 자료·인증정보·로컬 설정은 없다. 기존 미커밋 작업과 별도로 스테이징된 삭제를 보존했다.
@@ -13,6 +32,227 @@
 - 분리 소스의 MCP 전체 **146개 검사 통과(60.199초)**, 분석·진단 **90개 통과(49.473초)**. 처음 MCP 검사에서 새 안내 도구 추가로 기존 legacy 목록 개수 단언 하나가 실패해 8→9와 안내 도구 존재 확인으로 고친 뒤 관련 검사와 전체 검사를 통과했다. 격리 worktree의 실제 모듈 경로를 확인했고 모델 호출은 0회다. 독립 읽기 전용 검토에서 배포 차단 결함을 발견하지 못했다.
 - 실제 격리 HTTP MCP의 `tools/list` 도구 배열을 compact JSON(UTF-8)으로 직렬화한 바이트와 `initialize.instructions` 바이트 합을 측정했다. 기준 56도구 144,547B → `all` 57도구 129,520B(10.40% 감소), `ask` 20도구 46,739B(67.67%), `write` 10도구 14,394B(90.04%), `extract` 22도구 47,606B(67.07%), `review` 29도구 69,622B(51.83%)다. JSON envelope·네트워크 전체·실제 모델 토큰의 측정이 아니며 서비스 전체 절감률로 확대하지 않는다.
 - 배포는 검증한 Git 커밋의 허용 목록 Python 소스 ZIP과 SHA-256으로 한정한다. 기존 `app-0.1.0` 설치 파일과 Windows fix3를 교체하거나 자동 업데이트 최신 버전으로 지정하지 않는다. 전체 앱의 추가 설치·Windows 실기기·분리 커밋의 실제 모델 A/B는 수행하지 않았다.
+
+## 2026-11-22 — 설치 앱의 실제 실행 완료 확인
+
+- 앞선 설치본에서 공개원문2건을 실제 Codex로 등록·추출·운영저장·후속대조까지 완료했다. 최종UI의 완료와 실행중해제를 확인했으며 결과파일확인까지181.6/175.0초였다. 앱을 다시 빌드하거나 서버를 이 작업에서 재시작하지 않았다.
+- 관측결과10파일과 설치ASAR·외부Python7파일의 해시를 재확인했다. 기존자료를 수정/삭제하지 않고 이번QA문서2개와이력을보존했다. 화면 관측 간격을 포함한 정확한 측정 범위는 [실측 보고서](../../../evals/2026-11-22-installed-app-latency/REPORT.md)를 따른다.
+
+## 2026-11-22 — 현재 Mac 앱 설치와 실행본 확인
+
+- 사용자 요청으로 현재 작업 트리를 `npm run build`(타입·lint·format·토큰·빌드 통과)한 뒤 동일 Electron 45.0.0 로컬 배포본으로 패키징해 `/Applications/LLM Wiki.app`에 설치했다. 최초 다운로드 패키징은 DNS 오류로 실패했다. ad-hoc 서명 검사, `out/` 10파일 전수 비교, 설치 ASAR 해시 일치를 확인했다. 실제 Electron 종료·취소·정리 등을 포함한 session-runtime 검사도 host 재실행에서 통과했다(최초 sandbox는 loopback EPERM).
+- 처음 열린 10월 26일 DMG 앱이 동일 bundle ID의 실행 잠금을 소유해 새 앱이 정상 종료했다. 구형 앱을 메뉴로 종료하고 설치본 PID·`file:///Applications/...` 최신 로그인/문서 화면을 확인했다. 기존 런타임 설정의 SHA-256은 설치 전후 같고 사용자 자료·이력은 삭제하지 않았다.
+- 전체 등록·추출·후속 대조·최종 UI 시간 측정은 아직 시작하지 못했다. 화면 자동화의 파일 선택/키 입력 불일치와 좌표 제어 오류를 관측해 사용자에게 파일 선택까지만 요청했다. 제품 파일 필터 결함은 확인되지 않았으며 실제 모델 호출 0회다. [앱 반영 기록](../../../evals/2026-11-22-installed-app-latency/REPORT.md).
+
+## 2026-11-22 — 모든 HTTP 요청의 80 ms 지연 제거
+
+- 원인: 새 양식 API의 `/templates/{id}/versions/{revision}/file`·`/render`에 응답 코드가 없어 FastAPI OpenAPI 생성이 `UnboundLocalError`로 실패했다. 시작 스크립트가 켜는 `--read-metrics`의 시간 기록 계층이 경로 이름을 얻으려 이 생성을 요청마다 다시 시도해 MCP·API 요청마다 약 80 ms(401 거부 포함)를 쓰고, 실패를 삼켜 시간 기록도 남기지 않았다. 알 수 없는 `/api` 경로 처리와 기존 실패 시험 `test_actual_api_mcp_auth_rejections_and_unknown_routes_log_only_templates`도 같은 원인이었다.
+- 수정: 두 경로에 `status_code=200`을 명시했다. `HttpMetricsMiddleware`는 경로 이름 목록을 만들지 못하면 `<unmatched>`로 기록하고 다시 만들지 않는다(회귀 시험 1개 추가).
+- 결과(격리 서버, 같은 옵션): `access_context` 80→2 ms, `tools/list` 92→4 ms, `wiki_read` 100줄 92→13 ms, `wiki_search` 115→39 ms. 서버 시작 뒤 첫 요청만 API 목록 생성에 약 0.2초를 한 번 쓴다. `poc_mcp` 164개 통과. 조회 자체의 개선은 [knowledge](../knowledge/HISTORY.md#2026-11-22--질문-조회-속도-개선결과-동일), 전체 수치는 [보고서](../../../evals/2026-11-22-claude-mcp-speed/REPORT.md)에 있다.
+- 운영 8766 서버는 이 작업에서 재시작하지 않았다. 변경 뒤 20:01에 새로 시작된 서버에서 미인증 `/mcp` 요청 20회가 중앙값 0.5 ms(수정 전 같은 옵션 81 ms)라 반영을 확인했다. 운영 자료가 비어 인증된 조회 시간은 재지 않았다.
+
+## 2026-11-21 — 정상 로그인으로 로컬·공개 MCP 조회 확인
+
+- 사용자가 알려준 로그인 이름으로 기존 `/api/v1/auth/login`을 호출해 정상 인증했다. 가입·권한 변경·다른 계정 탐색은 하지 않았다. 반환 토큰은 한 검증 프로세스의 메모리에서만 사용했고 출력·파일 저장·기존 보호 토큰 교체는 하지 않았다.
+- 실제 로컬 8766과 런처가 기록한 공개 URL의 `/mcp?toolset=ask`에서 초기화·`access_context`·`tools/list`·`ontology_review_queue`를 실행했다. 양쪽 모두 로그인 계정/정책 일치, ask 도구 21개, 검토함 노출과 성공, 쓰기 도구 제외를 확인했다. 검토함은 항목 0·잘림 없음·skipped 0이었다.
+- 같은 계정의 기본 공간에서 `wiki_list(limit=1)`은 항목 0·다음 페이지 없음이고 `knowledge_lookup`도 빈 선택을 정상 반환했다. 따라서 이번 운영 확인에서는 실제 문서의 status/보류 건수/detail_query 대조를 실행하지 못했다. 앞선 격리 113검사를 운영 실자료 검증으로 표시하지 않는다.
+- 서버 반영·정상 계정의 실제 조회는 확인됐지만 기존 `.codex/config.toml`의 보호 토큰 파일은 앞서 확인한 401 상태 그대로다. 해당 stdio 연결의 인증 갱신·재연결, 문서가 있는 공간에서 상태 요약을 대조하는 작업은 이번 검증에서 수행하지 않았다.
+
+## 2026-11-21 — MCP 보완의 실제 서버 재시작과 인증 차단
+
+- 사용자의 적용·확인 요청에 따라 8766의 서버와 터널이 프로젝트 `start-mac.command`의 자식임을 확인하고 `tools/start-mac.command --new-window`로 정상 재시작했다. 이전 서버 PID 19893의 종료와 새 PID 37868의 시작을 확인했다. 두 보완 파일의 수정 시각은 새 프로세스 시작보다 앞서며 서버의 작업 경로는 현재 프로젝트다. 설치 앱 사본은 이번 MCP 전용 변경 대상이 아니다.
+- 런처 성공과 새 공개 주소 기록을 확인했고 로컬·공개 `/mcp` 모두 미인증 요청에 401을 반환했다. 공개 주소는 런처가 관리하는 `.local/last-server-url.txt`에 둔다. 자료·인증 초기화나 임의 서버 종료는 하지 않았다.
+- 기존 `.codex/config.toml`이 지정한 보호 토큰으로 재시작 전 연결 진단을 수행했으나 API/MCP 모두 거부됐다. 구체 확인은 HTTP 401 `unauthenticated`였다. 토큰은 메모리에서만 사용했고 다른 토큰/tenant/legacy로 우회하지 않았다. 실제 계정으로 tools/list·검토함·상태 요약을 확인하는 단계는 미완료이며 로그인 이름 확인을 요청했다. 기존 113개 격리 검사를 이 운영 인증 검증의 완료로 대신하지 않는다.
+
+## 2026-11-21 — ask 검토함 조회 복원과 축소 유지
+
+- 사용자 요청으로 `ask`의 extra_tools에 `ontology_review_queue`만 추가했다. 변경 전 새 HTTP 회귀 검사의 목록 노출·tenant/선택 조회·권한 오류 확인이 실패했고, 변경 후 모두 통과했다. 관련 `test_guidance`, `test_toolsets`, `test_tool_presentation`, `test_knowledge_lookup` 41검사 통과. 쓰기 도구 차단·현재 권한 회수 후 거부를 유지한다.
+- 같은 격리 HTTP 조건의 `tools/list` JSON은 all 58개/127,527 bytes, ask 보완 전 20개/41,860→후 21개/43,756 bytes였다. 1,896 bytes를 더 쓰며 전체 대비 65.69% 감소를 유지한다. 초기화 안내 제외 UTF-8 크기이며 제공자 토큰 재측정이 아니다.
+- legacy ask는 기존 읽기 도구 6개 그대로이고 write/extract에는 검토함을 추가하지 않았다. 제품 데이터·설정·운영 서버·설치 앱은 변경하지 않았고 실제 모델을 호출하지 않았다. 앞선 감사의 조회 지침 문구 충돌은 이번 두 기능 누락 보완에서 변경하지 않았다.
+
+## 2026-11-21 — 개발용 프롬프트·도구 축소 감사
+
+- 사용자 요청으로 HEAD 대비 AGENTS·wiki 스킬·Claude server 스킬을 검토했다. 파일 합계는 40,405→46,380 UTF-8 bytes(+14.79%)로 문구 자체는 줄지 않았다. 격리 HTTP의 `tools/list` JSON은 all 58개/127,527 bytes, ask 20개/41,860 bytes였다(초기화 안내 제외, 실제 모델 토큰 아님). 관련 MCP 4개 모듈 40검사 통과; 제품·설정 변경과 새 모델 호출은 없다.
+- 미해결 회귀: `wiki-query`가 안내하는 `ontology_review_queue`가 ask 묶음에 없다. 같은 격리 HTTP 요청은 all/review 성공, ask는 `invalid_argument`와 `not available in the 'ask' toolset`으로 거부됐다. 읽기 전용 검토함 노출을 복원하는 수정이 남았다.
+- 지침 불일치: ask/answer는 `knowledge_lookup` 한 번으로 시작하라고 하지만 `TENANT_COMMON`과 wiki-query 접근 절은 선행 `access_context`를 요구하고 공통 지침은 별도 검토 조회를 요구한다. 저장 도구의 성공 후에만 `ontology_impact`를 호출하라는 문구도 변경 전 baseline 확보 안내와 충돌한다. 권한 확인은 유지하면서 중복 왕복·baseline 예외의 안내를 정리할 필요가 있다.
+
+## 2026-11-19 — 도구 묶음 실측과 로컬 Codex 연결 변경
+
+- 로컬 `.codex/config.toml`(git 제외)의 `enabled_tools` 13개 지정을 지우고 launcher 인수에 `--toolset ask`를 더했다. 변경 전 사본은 작업 폴더에만 두었다. 같은 인수로 launcher를 실행하면 `credentials_rejected`가 나며 변경 전 설정도 같았다. 정책 파일은 오늘 16:23, 토큰 파일은 10-24에 바뀌었으며 토큰 재등록은 관리자 작업이라 하지 않았다.
+- [실측](../../../evals/2026-11-19-toolset-cache-measurement/REPORT.md): 격리 임시 서버·공개 문서2개, Codex 0.169.1 20호출·Claude Code 2.1.327(sonnet) 9호출. 요청1회 고정 입력은 Codex MCP 없음/all/ask/write 10,767/10,826/10,827/10,827, 기본 Claude Code 12,633/14,799/14,118, 내장 도구를 끈 Claude Code 2,972/51,195/18,601토큰이다. Codex 같은 질문은 all 88,259·89,369, ask 88,327·89,697토큰이고 네 답변 모두 맞았다.
+- Claude 기본 모델은 사용 크레딧 부족으로 실행 전 거절(사용량0)돼 기록만 보존했다. `--safe-mode`가 MCP 서버를 꺼서 무효인 6회는 `runs/invalid`로 분리했다. 표본이 작고 제공자 모델 ID는 미보고다.
+
+## 2026-11-19 — 역할별 MCP 도구 묶음과 읽기 본문 보기
+
+- 기존 기록과 실제 MCP 목록을 다시 분해했다. 기본 tenant 연결은 도구57개·정의129,344바이트·서버 안내3,680바이트이고, 가장 큰 단일 정의는 `ontology_generate`12,578바이트다. D-134 안내 축소가 정의를 그대로 둬 절감이 작았다. `wiki_read`는 같은 응답에 전체 파일 `content`와 `body`를 함께 담아 본문을 두 번 보낸다.
+- `core/mcp/toolsets.py`를 추가했다. 미들웨어가 초기화 안내·도구/프롬프트 목록·`wiki_guidance` 업무 목록을 좁히고, `WikiMCPServer.toolset_check`가 legacy/tenant `call_tool`과 `get_prompt`의 묶음 밖 호출을 거부한다. tenant 거부는 인증을 먼저 확인한다. `mcp_cli`·HTTP 앱 생성·개인 launcher에 `--toolset`을 연결했고 launcher는 `all`일 때 기존 실행 인수를 바꾸지 않는다. `wiki_read`에 `view=full|body`를 추가했다.
+- 실제 HTTP 측정(정의+안내): all133,024·ask46,065·write14,733·extract49,486·review70,757바이트. 프롬프트 목록도 22→9/5/7/8개다. 바이트 측정이며 제공자 토큰·실제 클라이언트 세션 비교는 하지 않았다.
+- 새 `test_toolsets.py`9검사 통과: 기본 연결 불변, 묶음별 목록·안내·프롬프트, 묶음 밖 쓰기 거부와 미저장, 미인증 401 유지, 본문 보기의 revision·body·metadata 일치, 안내 목록, 고정 묶음 확장 거부, launcher 인수. MCP 전체148검사 중147 통과, 실패1은 변경 전에도 재현된 FastAPI OpenAPI `status_code` 오류다.
+- `.agents/skills/wiki-route`를 추가하고 wiki-query/edit/analyze/review/maintain에 묶음 연결 한 줄씩을 더했다. 로컬 `.codex/config.toml`과 운영 서버·설치 앱은 바꾸지 않았다.
+
+## 2026-11-19 — 첫 Claude system 알림 거부와 진단 v2 공개
+
+- 사용자 Windows 보고서에서 `runtime_matches_bundled=true`·`python_matches_current=true`, `--version`·`--help` 종료0과 `--print` 시작1회를 확인했다. 첫 `system/subtype=other`에서 `claude._Events.__call__` 92행이 `ai_unexpected_tool_activity`를 반환했다. 이는 모델의 정상 응답·실제 사용량 성공 확인이 아니다. v1이 미등록 subtype 이름을 가려 정확한 알림 종류를 확정할 수 없었다.
+- [공식 SDK0.3.328 타입](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/0.3.328)과 로컬 CLI2.1.327의 정적 문자열에서 `notification`·`informational` 및 고정 key/tag를 확인했다. 시작 시 `config-two-files` 알림이 가능한 것은 후보이며 사용자 PC의 원인으로 단정하지 않았다. `informational`에는 훅 관련 `prevent_continuation`도 있어 제품 검사를 일괄 완화하지 않았다.
+- `tools/claude_call_diagnostic.py`를 v2로 보완했다. SDK의 알려진 system subtype·고정 key/tag/priority/level·bool 종료 표시와 필드 존재만 보고하며 본문·계정·임의 값은 제외한다. 미등록 subtype/key/tag는 원문 대신 SHA-256만 기록한다. `--version` 결과는 정확한 숫자3부분만 허용하고 `client_process.py`·`claude.py`도 소스 지문에 포함한다. 원래 파서 판정·1회 실행·설정/로그인 보존·실행 종료 후 복원을 유지했다.
+- 관련3모듈 31검사 통과. 실제 앱 파서가 informational을 계속 거부하는 통합 시험, 비밀을 넣은 미등록 이름/본문/필드·버전 정제, 기존 보고서 보존과 정리를 확인했다. 독립 읽기 전용 검토도 통과했다. 이 Mac에서 새 모델 호출은 하지 않았으며 v2의 실제 Windows 보고서는 아직 받지 않았다.
+- 앞선 Release 전달 요청을 이어 [진단 v2 ZIP·SHA-256](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/claude-windows-diagnostic-v2)을 별도 사전 릴리스로 공개했다. CMD·Python2파일, ZIP7,993바이트, SHA-256 `50165751b1109f77a2399c92db207b46bd77f2ec05286420a3702af1f14b7787`. ZIP CRC·원본2파일 일치·GitHub 자산 digest·익명 다운로드 HTTP200과 체크섬을 확인했다. 기존 Release 자산과 설치판 최신 `app-0.1.0`은 유지했다. 이 ZIP은 진단 도구이며 앱 수정본은 아니다.
+
+## 2026-11-19 — Windows 포터블 fix3 Release 공개
+
+- 사용자의 명시 Release 요청에 따라 검증된 fix3 ZIP·SHA-256을 [별도 사전 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix3)로 게시했다. 업로드한 초안의2자산·크기·SHA-256을 대조한 뒤 공개했으며 GitHub 자산 digest가 로컬 파일과 일치한다. ZIP은262,600,660바이트, SHA-256은 `adb96871b04ad4be605cfb771437c359bd314b993b538b004f748470a4a9e9b5`이다.
+- 게시 전 독립 확인에서 ZIP3,466항목·중복/CRC 오류 없음과 fix2 대비 실행 코드·manifest2항목만 변경됨을 재확인했다. 공개 뒤 ZIP의 익명 다운로드 HTTP200·체크섬 파일 본문을 확인했다. 기존4릴리스의18자산은 동일하며 설치판 최신 대상도 `app-0.1.0`을 유지한다.
+- 최초 sandbox의 GitHub CLI 조회는 네트워크 연결 실패였다. 연결 도구로 조회하고 승인된 네트워크 실행으로 업로드·공개를 완료했다. README·현재 PLAN을 공개 링크로 갱신했다. 새 모델 호출·전체 재빌드는 없으며 실제 Windows 호출과 실행 경로 변경 후 재시험은 남아 있다.
+
+## 2026-11-19 — Windows 진단의 CreateJobObject TypeError와 fix3 준비
+
+- 사용자 보고서는 `model_attempts=0`, `--version`에서 예외, `client_process.WindowsJob.__init__` 45행의 `TypeError`이다. `runtime_matches_bundled=false`이며 두 소스 해시(`client_platform.py`의 `55360041…`, `search_terms_cli.py`의 `f9ed090a…`)가 보존된 fix1 ZIP과 정확히 일치했다. 따라서 fix2 앱과 별도로 저장 설정은 fix1 실행기를 선택하고 있었다. 개인 경로·계정은 수집하지 않았다.
+- 해당 줄은 `CreateJobObject(None, None)`이다. [pywin32 b311 선언](https://github.com/mhammond/pywin32/blob/b311/win32/src/win32job.i#L30)·[SWIG의 WCHAR 변환](https://github.com/mhammond/pywin32/blob/b311/SWIG/swig_lib/python/pywintypes.i#L134)·[None 거부 구현](https://github.com/mhammond/pywin32/blob/b311/win32/src/PyUnicode.cpp#L208)과 배포 wheel의 `win32job.pyd` 인자 변환을 정적으로 대조했다. 이름 인자는 None을 허용하지 않으며 이 호출은 fix2에도 남아 있었다. 이전 PyHANDLE 수정 단계에 도달하기 전에 실패하는 별도 버그다.
+- `core/runtime/client_process.py`의 이름 인자를 빈 문자열로 수정했다. Job 종료 시 자식 회수·기존 보안 속성·핸들 정리를 유지한다. 테스트 대역은 실제 b311처럼 None을 거부하도록 했으며 생성·제한 설정·설정 실패 시 핸들 정리를 확인했다. 실제 Windows 전용 시험은 빈 이름으로 만든 두 Job의 제한이 독립적인지도 확인하도록 추가했다.
+- 검증: 수정 전 새2시험(실패 경로의 subtest 포함3건)이 같은 TypeError로 실패했고 수정 후 관련6모듈 53개 중50개 통과·Windows 전용3개 skip이다. 실제 Windows 생성/분리·프로세스 회수·Claude 모델 호출 성공은 아직 검증하지 않았다. 이 Mac에서 모델 호출·사용자 PC 설정 변경은 수행하지 않았다.
+- 산출물: 기존 fix2 ZIP의 SHA-256을 확인한 뒤 `client_process.py`와 `runtime-manifest.json`만 교체한 [fix3 ZIP](../../../app/release/portable/0.1.0/windows-x64-fix3/LLM-Wiki-0.1.0-windows-x64-portable-fix3.zip)·SHA-256 파일을 준비했다. 전체 앱을 현재 작업 트리로 재빌드한 산출물이 아니다. ZIP 3,466항목 CRC·실행기2,958파일과 sources 해시·나머지항목 바이트 동일을 확인했다. SHA-256은 `adb96871b04ad4be605cfb771437c359bd314b993b538b004f748470a4a9e9b5`, 크기는262,600,660바이트이다. 첫 비교는 ZIP 작성 시 재사용한 ZipInfo의 메모리 오프셋 변경으로 실패했으며, 두 아카이브를 새로 열어 전체 검증을 통과했다. 원본 fix2의 체크섬은 불변이다.
+- 적용: 새 폴더에 전체 압축을 푼 뒤 앱의 ‘문서 처리 프로그램 폴더’를 fix3의 `resources/personal-runtime`, ‘Python 실행 파일’을 그 안의 `python/python.exe`로 선택·저장하고 완전히 재시작한다. 기존 설정을 자동 초기화하지 않는다. fix3 GitHub 공개·실제 Windows 재시험은 남아 있다.
+
+## 2026-11-19 — Windows 포터블 fix2 Release 공개
+
+- 사용자가 Release 다운로드를 요청해 기존 fix2 ZIP과 SHA-256 파일을 [별도 사전 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix2)에 게시했습니다. ZIP은 253,397,012바이트이며 SHA-256 `235e23188773b62132381c97707605516d232b64b2dfcd4d841c3021743b3bc8`이 로컬 체크섬과 GitHub 자산 digest에서 일치합니다. ZIP 3,466항목 CRC 검사와 익명 다운로드 URL HTTP 200을 확인했습니다.
+- 기존 설치판 최신 대상 `app-0.1.0`과 기존 자산은 유지했습니다. 11월18일 빌드 이후의 MCP·프롬프트 개선은 포함하지 않으며 실제 Windows AI 호출·콘솔 창 숨김 확인은 남아 있습니다. 덮어 풀기와 새 폴더 실행 경로 설정 방법을 릴리스 본문에 안내했습니다.
+
+## 2026-11-18 — MCP 입력 오류 안내·도구 정의 분량·표시 정리
+
+- 점검: 격리 임시 서버에서 tenant 도구 57개·프롬프트 22개·legacy 9개를 수집했다. 발견한 문제는 네 가지다.
+  - tenant 사전 검사의 형식 오류가 모두 `Invalid tool arguments.`였다.
+  - 8개 도구는 타입 오류 때 SDK 원문(입력 값·pydantic URL 포함)을 비구조화로 반환했다.
+  - `tools/list`가 146,844B였고, 같은 3문장이 40개 도구에 반복됐으며 자동 스키마 title이 232개였다.
+  - 쓰기 25개가 모두 파괴적으로 표시됐고, 도구 title이 없었다.
+- 오류: tenant 계층이 누락·형식 오류 tenant, 허용하지 않는 필드, profile 미지원, domain/viewpoint, 알 수 없는 도구, 업무 검사 실패의 필드와 사유를 알려 준다. 업무 검사 실패에는 SDK 인자 모델, 필수 필드, JSON 타입 순서로 확인된 실제 사유만 붙인다. `WikiMCPServer`는 SDK와 같은 인자 모델로 미리 검사해 `{ok:false,error}` 형식으로 돌려준다. 받아들이는 입력은 바뀌지 않는다. 입력 값은 넣지 않고 필드 이름만 안전 형식으로 표시한다. 권한 거부는 tenant 존재를 숨기도록 `access_denied` 하나로 유지한다.
+- 분량: 프로필 3문장을 도구 설명에서 빼고, 남는 access 확인 문장만 full 지침과 `TENANT_COMMON`에 넣었다. 영향 조회 안내는 저장 도구 6개에 한 문장으로 줄였다. 스키마 키워드 title만 제거하고 `title` 매개변수와 default·examples 값은 보존한다. 결과 `tools/list`는 129,134B(−12.1%), legacy는 24,418→22,539B이다. 안내 문구가 바뀌어 `GUIDANCE_VERSION`을 `2026-11-18.2`로 올렸다. 아래 평가 기록의 안내문은 `.1` 기준이다.
+- 표시: `core/mcp/presentation.py`에 확정 용어로 한국어 title 59개를 두었다.
+  - 추가형 7개(등록·claim·heartbeat·입력 준비·추출 제출·관계 직접 추가·대응 제안)는 `destructiveHint=false`로 표시한다.
+  - 같은 request_id·입력 재전송이 저장 영수증을 돌려주는 6개(원본 등록·추출 제출·관계 추가/되돌림·정리 반영/되돌림)는 `idempotentHint=true`로 표시한다. 각 저장소 코드의 replay 분기로 확인했다.
+  - 실제 권한·저장 검사는 바꾸지 않았다.
+- 검증: 새 `test_tool_presentation` 7개를 추가했다. MCP 전체와 연관 32모듈 265개 중 2개가 실패했다.
+  - 하나는 기존 FastAPI OpenAPI `status_code` 오류이다.
+  - 다른 하나는 `test_real_loopback_first_exact_screen_has_no_canonical_capture`이다. 이번 MCP 변경만 되돌린 복사본에서도 같게 실패했다.
+  - 실제 AI 클라이언트 연결·운영 서버 반영·도구 선택 평가는 하지 않았다. 권한별 도구 목록과 `ontology_generate` 설명 축소는 결정·평가가 필요해 보류했다.
+- MCP 프롬프트 후속:
+  - 제목을 확정 용어로 바꿨다. 판본→버전(2개), 영수증→저장 확인, 기계 그래프→추출 결과 그래프, 독립 관계 추가→관계 추가(앱 화면 이름)이다.
+  - 도구 title도 앱 화면 이름(Clean Up·관계 추가)에 맞췄다.
+  - 메뉴에 보이는 프롬프트 설명은 `PROMPT_DESCRIPTIONS`(한국어)로 바꿨다. 모델이 읽는 영어 description·instructions는 그대로 두었다.
+  - 빈 입력 칸은 JSON에서 빼고 보낸다. request가 비면 데이터 도구를 부르기 전에 무엇을 할지 묻는 문장을 넣는다. 이에 맞춰 `GUIDANCE_VERSION`을 `2026-11-18.3`으로 올렸다.
+  - answer 안내 보강(wiki_read 인용·답변 언어)은 평가한 안내문을 바꾸는 일이라 보류했다.
+  - 검증: 새 시험 2개를 추가했고 `poc_mcp` 139개 중 138개가 통과했다. 실패 1개는 기존 OpenAPI `status_code` 오류이다.
+
+## 2026-11-18 — 지침 분리의 승인된 실제 추출 비교 완료
+
+- 명시 승인 후 평가용 전송 후보3의 실제 실패와 중복 공통 외피를 제거한 다음 후보의 성공을 확인했습니다. 새 후보4개 오프라인 검사, 동일 조건의 추출12회 및 익명 채점2회를 완료했습니다. 원본 스키마 검증을 유지했고 제품 Codex 어댑터는 이번 후보 변경 없이 보존했습니다.
+- 추출 총토큰15.18% 감소에도 구조 통과6→5·핵심 보존37/48→30/48로 기본 전환 조건을 충족하지 못했습니다. 분석/명령 선택 옵션과22개 MCP 프롬프트는 제공하되 기본full을 유지합니다. 운영 서버·앱·기존 권한/자료는 이번 작업에서 변경하지 않았습니다.
+- Python 익명 채점은 추가 payload 승인 부족으로 실행 전에1회 거절됐으며, 공개 원문에서 생성한5그래프·실패표시1·고정질문8의 입력을 감사하고 사용자 추가 승인 후 같은 지문으로 완료했습니다. 거절을 모델 호출로 세거나 기존 결과를 덮어쓰지 않았습니다. [회계·품질·한계](../../../evals/2026-11-18-modular-guidance/REPORT.md)를 보존했습니다.
+
+## 2026-11-18 — Windows 포터블 AI 호출 확인의 pywin32 핸들 오류
+
+- 증상: Windows 포터블에서 Claude CLI 탐색·로그인 확인은 되지만 AI 호출 확인이 실패했다. 원인: `client_process.WindowsJob.assign`과 `client_platform._sid`가 pywin32 `PyHANDLE`을 `with`로 사용했다. 포함된 pywin32 311의 바이너리 51개 모두 `__enter__`가 없음을 확인했다(대조: `python313.dll`에는 있음). 첫 단계 Job 연결이 `TypeError`→`ai_process_job_failed`가 되고, preflight가 이를 `ai_cli_unavailable`(“실행 파일을 실행하지 못했습니다”)로 바꿔 표시했다. Job을 통과해도 비공개 폴더 생성의 SID 조회에서 같은 오류가 난다. 최초 커밋부터 있던 코드이며 기존 시험은 MagicMock 대역이라 잡지 못했다.
+- 수정: 두 곳을 `try/finally`의 `Close()`로 바꾸었다. 새 파일 핸들 직후 `GetFileInformationByHandle`(기본 정보 조회는 `FILE_READ_ATTRIBUTES` 필요)을 호출하므로 생성 접근 권한에 그 권한을 추가했다. 권한 추가는 Windows 접근 규칙에 근거한 예방 수정이며 실기기 확인 전이다.
+- 검증: `test_windows_client_platform` 13개 중 11개 통과, 실제 Windows 전용 2개는 skip. 새 시험 6개 중 5개는 수정 전 코드에서 같은 `TypeError`/권한 누락으로 실패함을 확인했다. 관련 Claude·검색어·진단·질문 모듈 151개를 실행했고 실패 19개는 이 PC에 Codex CLI가 없는 기존 `ai_cli_unavailable`(질문 프로필·웹 Codex 시험)이다. 실제 Windows 실행·포터블 재빌드는 하지 않았다.
+- 같은 Job 연결 코드는 `desktop_bridge` 실행 준비 확인에도 쓰여 Windows의 질문·분석 실행 시작도 막고 있었다.
+- 콘솔 창: 앱이 띄운 Python은 콘솔이 없어서, bootstrap·CLI·Tesseract 같은 콘솔 자식이 새 창을 만들었다. `spawn_options`에 `CREATE_NO_WINDOW`를 더하고 bootstrap의 자식, Tesseract 호출 4곳(`no_window_options`), 실행 준비 확인의 손자 프로세스도 창 없이 시작하게 했다. POSIX 옵션은 그대로이다.
+- 오류 코드: 두 어댑터의 preflight·질문 프로필 확인이 실행 경계 오류를 `ai_cli_unavailable`로, 실행 중에는 `ai_invalid_result`로 바꾸던 것을 `platform_error_code`의 고정 코드(예: `ai_process_job_failed`)로 유지한다. 알 수 없는 문구는 계속 숨긴다. 앱은 `isAiRuntimePreparationFailure`로 AI 호출 확인·채팅·분석에서 “설치·로그인 문제가 아닌 실행 준비 실패”로 안내하고 위치 변경·재로그인을 권하지 않는다.
+- 검증: 새 `test_runtime_preparation_errors` 6개 통과, 예전 변환을 끼우면 3건 실패함을 확인했다. Python 관련 193개 중 실패 19개는 위와 같은 Codex 부재 실패(이름·개수 동일)이다. 앱 채팅 안내 시험 8개, 5종 typecheck·oxlint·oxfmt 검사 통과. 실제 Windows에서 창이 사라지는지는 확인 전이다.
+- 포터블 재빌드: `npm run package:win:portable -- --output-dir release/portable/0.1.0/windows-x64-fix2`(현재 작업 트리 기준, 미커밋 변경 포함)가 통과했다. 실행기 2,958파일·Python 3.13.17·OCR 5.5.3이다. ZIP 3,466항목의 CRC 검사를 통과했고, 수정한 Python 8파일이 작업 트리와 같으며 `app.asar`에 새 안내 문구가 있음을 확인했다. 산출물은 `LLM-Wiki-0.1.0-windows-x64-portable-fix2.zip`(SHA-256 `235e2318…b3bc8`)과 `.sha256` 파일이다. 빌더의 `win-unpacked`·`builder-debug.yml`은 정리했다. 게시와 실제 Windows 실행은 하지 않았다.
+
+## 2026-11-18 — 기능별 MCP 명령과 선택 안내
+
+- `guidance.py` 한 카탈로그에서 공통/업무 지침과 표준 MCP prompts를 생성합니다. tenant 도구57개(기존56+안내1)·프롬프트22개, legacy 도구9개·프롬프트7개입니다. 사용자 요청/대상은 별도 JSON 데이터로 전달하고 알 수 없는 인수·비문자열·과대 입력을 거부합니다. 안내는 자료를 읽거나 수정하지 않으며 실제 업무 권한을 부여하지 않습니다.
+- stdio/API+MCP/전용MCP HTTP·legacy에 `--guidance-mode full|compact`를 연결했습니다. SDK initialize/prompts/list/get·인증 철회·전체 도구 대응·자료 무변경·실제 subprocess/HTTP 진입점 전용11개 통과. 전체130개 중129개 통과, FastAPI OpenAPI `status_code` 오류1개는 변경 전 MCP 원본을 별도 로드해도 재현했습니다. sandbox 포트 제한5개는 허용 후 모두 통과했습니다. [검증 로그·명령·hash](../../../evals/2026-11-18-modular-guidance/mcp-verification.json)
+- 사용자 요청으로 실제 모델 비교를 시작했습니다. 본문 단계의 토큰/품질은 analysis 기록을 따릅니다. 추출의 원래 schema 거절과 두 호환 진단 실패를 보존했으며, 원본 검증을 유지하는 세 번째 Codex 전송 후보16개 검사는 통과했습니다. 후보 native 호출과 스키마 전용 대안이 자동 승인 검토에서 구체적 전송 승인 부족으로 거절돼 입력 감사 후 사용자 승인을 요청했습니다. 호출이 실행되지 않은 거절과 실제 provider 실패·미보고 사용량을 구분합니다.
+- 미검증 전송 후보를 평가 전용으로 격리하고 제품 Codex 어댑터의 이번 후보 변경을 제거했습니다. 명시 `output_schema` 인계와 원본/전송 결과 검증·기존 실패 관측/선택 관련25검사를 통과했으며 새 모델 호출은 없습니다. 과거 실행 결과·동결 지문은 그대로 보존합니다.
+- 명령4종×3회×A/B 계획 생성24회 모두 완료, 총토큰187,643→180,483(−3.82%)입니다. 기계 검사 A12/12·B11/12이며 B편집1회의 기준 revision 표현 검출 실패는 원점수를 보존했습니다. 세 반복 검사 벡터 일치 업무 A4/4·B3/4, 도구 순서는 양쪽 모두 일부 달랐습니다. 실제 업무 쓰기·자동 라우팅 비용·독립 의미 채점은 포함하지 않으며 행동 일관성 개선으로 결론내리지 않습니다. [보고서·원시 결과](../../../evals/2026-11-18-modular-guidance/REPORT.md)를 따릅니다. 현재 운영 설정/서버·앱은 갱신하지 않았습니다.
+
+## 2026-11-16 — 템플릿 생성 CLI 실패 진단과 실제 DOCX 저장
+
+- CLI 오류의 고정 분류·허용 코드·HTTP 상태·메시지 지문/크기·보고된 사용량만 보존하는 관측을 추가했습니다. 원문 오류/URL/토큰을 기록하지 않습니다. 새 두 실행에서 실제 `output_limit`을 확인했으며 실패 호출의 정확한 출력 상한/사용량은 제공자가 보고하지 않았습니다.
+- 큰 템플릿의 단일 응답은 분량 안내/명시low 설정 후에도 실패했습니다. [D-131](../knowledge/DECISIONS.md#d-131--큰-등록-템플릿의-묶음-작성과-단일-산출물-저장-2026-11-16)의 최대7파트 작성과 v2 인용 수집으로 새 실행7회가 완료됐고 정식 답변1개/DOCX1개가 저장됐습니다. v1의 중복 인용 선언 누락 실패와 모든 원시 결과는 보존했습니다.
+- CLI 진단/프로필 관련68검사, 묶음 작성 관련82검사와 독립 핵심12검사 통과. 이번 라운드 실제CLI16회, 추출0회, 보고된 입력+출력939,778토큰이며 실패2회 사용량은 없어 총량은 불완전합니다. 자체 실행 할당 변경을 실행 전에 기록했습니다. 이전 평가/사용자 입력/기존 본문·그래프를 보존했습니다.
+- 실제 API/client 생성→저장→템플릿 렌더와 Electron 다운로드/완전 재시작 후 재다운로드의 바이트 일치를 확인했습니다. 생성 시작은 UI Send 클릭이 아닙니다. 내용·시각 비교는 [현재 보고서](../../../evals/2026-11-16-template-from-existing-data/REPORT.md), 흐름은 [독립 검사](../../../evals/2026-11-16-template-from-existing-data/result/flow-verification.json)를 따릅니다. 운영 서버·설치 앱·전역 설정은 교체하지 않았습니다.
+
+## 2026-11-16 — 템플릿 질문 판본과 조회 계약 재검증
+
+- AppendTurn.template_ref를 현재 권한·불변 템플릿 판본으로 검증하고 질문 실행 입력에 고정했습니다. 생략/null 요청은 기존 직렬화·해시를 유지하며 재시도와 저장 직전 권한 검사를 확인했습니다. 실제 global claims(null) 거부를 조회 계약과 맞췄고 read(null), 원본/웹의 claims 거부는 유지합니다.
+- 이전 평가 래퍼의 네 번째 프롬프트 변조를 제거하고 누적 호출 상한·새 run 재시도에서도 원시/실패 보존을 검사했습니다. Electron 4건은 실제 HTTP/파일 저장+모의 AI이며, 실제 Codex의 격리 ASGI 질문 생성/저장 검사와 구분합니다. [실제 결과와 제한](../../../evals/2026-11-15-next-data-template-retry/REPORT.md)·[지식 기록](../knowledge/HISTORY.md#2026-11-16--등록-템플릿-전원문-조회와-실제-생성-실패-보완)을 따릅니다. 운영 서버·설치 앱은 교체하지 않았습니다.
+
+- 마지막 실문서 생성 CLI는 exit1·결과0바이트로 종료했습니다. 읽기 전용 runtime_doctor는 의존성/CLI 기능/로그인 정보 존재를 확인했으나 실제 요청 실패 원인은 미확정입니다. 답변·DOCX 미저장과 원문 전달 검증 통과를 분리하고 추가 모델 호출 없이 종료했습니다. [실패 진단](../../../evals/2026-11-15-next-data-template-retry/result/provider-failure-diagnosis.json).
+
+## 2026-11-15 — 등록 템플릿의 저장·API·렌더 구현
+
+- `core/modules/templates`와 `/templates` API에 파일·지침·이전 판본·요청 영수증을 연결했습니다. workspace의 `read`/`source_write`, 저장 직전 재인가, CAS·잠금, 크기/개수/합계 제한, 경로/링크/해시 검증을 적용합니다. 보관은 선택 목록에서만 제외하고 과거 요청의 불변 판본을 유지합니다. 문서·원본 저장소와 분리하며 기존 자료를 갱신하지 않습니다.
+- 저장/HTTP 관련18검사와 렌더26검사를 통과했습니다. 실제 Office 파일의 비대상 ZIP 내용·표시 서식·그림·마스터·수식을 보존하며 Word/Excel 라이브러리로 결과를 재열었습니다. 잘못된 필드·중복 키·무변경·악성/초과 ZIP/XML을 거부합니다. Electron main의 실서버 통합 검사에서 생성·수정·CAS·보관·판본 렌더·원본/결과 저장·기존 파일 보존·권한/스코프 변경·위변조를 확인했습니다. 저장 후 JSON/상세 응답 손상과 수신 유실은 `outcome_unknown`이고 동일 요청 재시도는 같은 id/revision을 반환하여 중복을 만들지 않았습니다.
+- 실제 Codex 1호출은 제품 `templatePrompt`와 모의 프로젝트 원문/지침을 사용했습니다. Word 빈 셀6개 작성, 원문 오류문구·미정 값 유지, 고정 제목/행 라벨/순서/굵기 및 비대상 패키지 바이트 보존11항목을 통과했습니다. 입력5,007/출력205토큰·8.334초이며 사용자 자료·전역 설정은 변경하지 않았습니다. [실행 원시 결과](../../../app/test-results/template-implementation-20261115/live-template-result.json)·[검증 범위와 한계](../../../app/test-results/template-implementation-20261115/verification.md)를 따릅니다.
+- 지원은 기존 DOCX/PPTX/XLSX 작성 영역과 UTF-8 텍스트입니다. PDF/HWP/이미지 등은 등록/원본 보존만 지원하며 새 행/슬라이드·배치 조정·서버 수식 계산·독립적인 지침 의미 검사는 미구현입니다. 운영 서버/설치 앱 교체·웹 시험판 연동·Windows 실기기 검증은 하지 않았습니다.
+
+## 2026-11-14 — 스킬 안내 설정 감사와 승인된 24회 통제 진단
+
+- 기존138명령은 호출 경로 정규화 후 B의 `skills.include_instructions=false`만 다릅니다. 제거 블록은 스킬 정의·경로3개·목록19항목/고유18이름이며 구체적 조회·완전성 지침은 없습니다. 공통 완전성 프로필은 유지됐고 명시 effort/temperature/seed 차이도 없습니다. 오프라인901로컬토큰과 실제874입력토큰 차이를 구별하며 실제 serving/effort 동일성은 미보고입니다.
+- 초기 자동 승인 검토는 전송 범위의 명시 승인을 요구해 프로세스 전에 거부했고 모델0호출을 보존했습니다. 사용자가 공개 원문·질문·이전 답변·내부ID의 로그인된 Codex 서비스/gpt-6-astra 전송24회를 승인한 뒤, 정확한2상태를 A/B각6회 새 세션·AB/BA교대로 실행했습니다. 24완료·실패/재시도/usage누락/native도구실행0, 301개원본핀·독립794검사와 재현이 통과했습니다.
+- 12쌍 입력−874, 단발 전체116,092→105,948·총소비222,040이며 전체 채팅 비용·최종 품질 비교와 분리합니다. 행동 선택은 설정별 차이와 설정 내 변동이 함께 관측됐고 제품/전역 설정을 변경하지 않았습니다. [원인 보고서](../../../evals/2026-11-13-skills-instructions-flow/cause-audit/REPORT.md)·[통제 감사](../../../evals/2026-11-13-skills-instructions-flow/cause-audit/controlled-audit.json)·[지식 기록](../knowledge/HISTORY.md#2026-11-14--스킬-안내-제외의-원인-추적과-24회-통제-진단).
+
+## 2026-11-14 — 스킬 안내 제외 설정의 실제 v6 반복 비교
+
+- 기존질문v2 A와 `skills.include_instructions=false`만 추가한B를 격리 인증/API·실제질문클라이언트·조회·저장으로 각18답변 비교했습니다. 양쪽 compact_versions/compact_initial_citations는False입니다. source/질문/core실행소스/CLI핀과순차설정복원·자기대화이력 보존을 확인했고 제품/전역설정/설치 수정은 없습니다.
+- A64호출668,066→B74호출727,457(+8.89%), 세반복모두증가·관측실패/재시도/usage누락0입니다. 독립6,074검사+재현1과원시138회usage가일치하며native도구실행0입니다. 독립원문품질108/111→104/111·B중요설명부족/누락4항목으로기본연결하지않습니다. ASGI 검증이며설치GUI·원격네트워크검증은아닙니다. [전체 보고서](../../../evals/2026-11-13-skills-instructions-flow/REPORT.md)·[지식 기록](../knowledge/HISTORY.md#2026-11-14--스킬-안내-제외의-실제-채팅-전체-흐름-반복-비교).
+
+## 2026-11-13 — 질문 전용 CLI 고정 입력의 렌더링과 실제 진단
+
+- CLI `0.167.0-alpha.4.1`의 격리·오프라인 렌더링4설정을 대조했습니다. v2 기본138/스킬901/권한799로컬토큰 중 스킬 안내만 지원 설정으로 제거됐고 다른 본문·도구 정의는 같았습니다. 두 code_mode 설정은 변화가 없었으며 권한 본문에는 작업 경로가 없었습니다. 초기 import·샌드박스·debug strict 거부·Python3.9 집계 실패를 보존한 뒤 성공 결과를 Python3.12로 확인했습니다. 원래 CLI 설정 읽기/쓰기를 막은 렌더러의 네트워크·모델 호출은0입니다.
+- 이어 가상1질문·동일 prompt/schema의 현재 프로필/스킬 안내 제외를 각2회 실제 호출했습니다. 매번 입력−874, 전체8,550→6,803, 사실 검토24/24입니다. 프로세스 안에서만 설정을 바꾸었고 제품 파일·전역 설정·설치는 수정하지 않았습니다. 실행 원시 사용량과46검사가 일치하며 호출4/실패·재시도0입니다. 전체 앱 품질·호출 수·반복 절감은 미검증입니다. [조사 보고서](../../../evals/2026-11-13-retransmission-fixed-cost/REPORT.md)·[렌더링](../../../evals/2026-11-13-retransmission-fixed-cost/cli-input-probe.json)·[실제 사용량](../../../evals/2026-11-13-retransmission-fixed-cost/native-probe/accounting.json).
+
+## 2026-11-10 — 질문 기반 개인 웹 검색 입력과 도구 관측
+
+- [D-125](../knowledge/DECISIONS.md#d-125--현재-질문을-사용하는-웹-검색-토글-2026-11-10)에 따라 `QuestionRunService`/`webResearch`와 `web_search_cli`에 기존 query 또는 새 question의 상호배타 입력을 연결했습니다. 개인 작업 디렉터리의 질문 파일을 사용하고 기존 인증/임시 파일 정리·중단·출력 크기 제한을 유지합니다. 새 질문의 검색어 생성 전 실패는 명시 미확인 상태입니다.
+- Codex/Claude 어댑터는 완료된 네이티브 검색어와 관측 완전성을 제공하고 질문 검색에서 모델 자기 보고와 대조합니다. 도구 완료 여부만으로 다른 검색어를 확정 기록하지 않으며 공개 URL/원문 보존·확인 한계는 유지합니다. 실제 자식 프로세스의 웹 runtime 검사와 Python 관련 54개·앱 검사/빌드를 통과했습니다. 세부 검증과 실제 AI/설치/운영 미실행 범위는 [지식 기록](../knowledge/HISTORY.md#2026-11-10--질문-기반-웹-검색-토글-d-125)을 따릅니다.
+
+## 2026-11-09 — Windows Claude 후속 실패의 관측 도구
+
+- fix1 이후에도 같은 안내가 나온다는 제보를 받았습니다. 사용자가 경로 일치·Claude2.1.319·로그인·직접 `claude -p` 응답을 확인했으며 후속 내부 오류 코드는 아직 확인하지 못했습니다. 앱의 `tools.search_terms_cli` 진입점·환경 제한·고정 연결 질문으로 macOS에서 실제1회 호출해 JSON 응답까지 성공했습니다. 이 결과를 Windows 성공으로 해석하지 않습니다. [실제 호출 기록](../../../.local/diagnostics/claude-call-compare-20261109-52p13rwt/result.json)을 보존합니다.
+- `tools/claude_call_diagnostic.py`와 `app/scripts/diagnose-claude-windows.cmd`를 추가했습니다. EXE 옆에서 더블클릭하면 기존 프로필·Python·Claude를 사용해 앱의 연결 호출을 한 번 관측하고 TXT를 엽니다. 기본 Python 직접 실행은 메타정보만 읽으며 실제 호출은 명시 `--test`에서만 수행합니다. 원래 어댑터/파서의 반환·실패 판정을 유지하고 관측 래핑을 복원합니다. 제한한 환경 이름·소스 해시·호출 단계·고정 오류 분류만 기록하며 원시 응답/오류·개인 경로·인증정보를 보고서에 남기지 않습니다.
+- 진단16검사와 기존 검색어/Claude7검사가 통과했습니다. 독립 검토에서 발견한 초기 경로/프로필 예외의 원문 traceback 가능성을 고정 오류 보고서로 보완하고, Python 재실행은 최대1회·기존 보고서는 새 이름으로 보존합니다. 별도 임시 위치의 메타정보 전용 실행은 모델0회·stdout/stderr 비출력으로 통과했으며 임시 자료를 정리했습니다. 진단 도구 개발·검사·묶음 생성 중 추가 모델 호출·설정/로그인 변경은 없습니다.
+- 로컬 `app/release/diagnostics/claude-windows-call-v1/LLM-Wiki-Claude-Windows-diagnostic-v1.zip`은 두 스크립트만 포함한6,788바이트, SHA256 `a6cfa425b087907cd95dc63ad88c8cf0a9d98e3482e2085b82fcc0e65ed3ba4b`입니다. CRC·원본 바이트·Python AST·CMD ASCII/CRLF를 검증하고 SHA256 파일도 보존했습니다. [묶음 검증](../../../.local/diagnostics/claude-helper-20261109-sie57e0c/verification.json)을 따릅니다. 실제 Windows 실행·후속 원인 수정·새 외부 게시를 수행하지 않았습니다. 화면의 오류 코드 상세 표시는 [UI 기록](../ui/HISTORY.md#2026-11-09--ai-연결-오류-코드의-상세-표시)에 별도로 구분합니다.
+
+## 2026-11-09 — Windows 포터블 fix1 승인 후 공개
+
+- 사용자 응답 **수정본 업로드 승인**에 따라 `Jong-Yu/llm-wiki-releases`의 `app-0.1.0-portable-windows-fix1` 초안에 수정 ZIP·SHA256을 업로드했습니다. 원격 크기·SHA-256·Release 설명 일치를 확인한 뒤 prerelease·not-latest로 공개했습니다. [공개 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix1)·[게시 검증](../../../.local/diagnostics/claude-windows-constants-20261109-3hou3edk/publication.json)·[공개 다운로드 검사](../../../.local/diagnostics/claude-windows-constants-20261109-3hou3edk/public-downloads.json)를 보존합니다.
+- 기존 두 Release의 안내 수정은 별도 승인 없는 원격 변경이라는 자동 승인 검토의 거절에 따라 제외했습니다. 승인된 새 Release만 공개했고 기존14자산의 ID·크기·digest와 설치용 최신 `app-0.1.0`을 유지했습니다. 이전 거절된 요청의 본문 변경을 다른 경로로 실행하지 않았습니다.
+- 수정 파일·검사·한정 재포장 결과는 아래 원인 수정 기록을 따릅니다. 앱 버전은0.1.0을 유지하는 Windows 실행기 수정 차수이며 사용자 PC에서 기존 포터블 위치에 전체 ZIP을 교체한 뒤 AI 호출 재확인이 필요합니다. 사용자 설정·운영 서버/자료·Mac 앱을 변경하지 않았습니다.
+
+## 2026-11-09 — Windows AI 호출의 search_terms_failed 원인 수정
+
+- 사용자 Windows에서 Claude Code2.1.319 경로·`auth status`의 `loggedIn:true`·직접 `claude -p` 응답은 정상이지만 앱의 실제 호출 확인이 실패했습니다. 기존 IPC 읽기로 받은 코드는 `search_terms_failed`였습니다. 모델/로그인 문제가 아닌 실행 경계를 조사했고 실제 공개 ZIP의 `win32con.py`에 `FILE_FLAG_OPEN_REPARSE_POINT`·`FILE_ALL_ACCESS`가 없음을 확인했습니다. 첫 `_win_parents → _win_handle`에서 `AttributeError`가 발생하고 첫 상수를 보완해도 `_attributes`가 별도로 실패하는 것을 독립 재현했습니다.
+- `core/runtime/client_platform.py`에서 두 값을 올바른 `win32file` 모듈로 참조합니다. 기존 owner/DACL·상속 차단·reparse/hardlink·조상 delete sharing 보호는 유지했습니다. `tools/search_terms_cli.py`는 `ClientPlatformError`의 고정12코드만 안전한 `ai_` 코드로 보존하며 미확인 예외의 경로·토큰은 계속 감춥니다. 정상 프로토콜과 기존 AI 오류 계약을 유지했습니다.
+- 관련67검사 중65개 통과·실제 Windows 전용2개 미실행입니다. 실제 배포 `win32con`과 native API 대체로 실행한5계약은 수정 전6오류·수정 후0오류였으며 원시 전후 로그를 보존했습니다. 독립 재현·코드/재포장 검토, 생산2·검사2파일 AST/공백 검사도 통과했습니다. 실제 Windows API·새 모델 호출·사용자 설정·운영 자료 쓰기는 하지 않았습니다.
+- 검증한 기존 Windows ZIP에서 Python2파일과 `runtime-manifest.json`만 바꾸어 `LLM-Wiki-0.1.0-windows-x64-portable-fix1.zip`을 만들었습니다.3448항목의 중복 없음·같은 이름/권한/속성·CRC·허용3항목 외 모든 내용 일치와 ASAR 바이트 일치를 확인했습니다. manifest의 `sources`·`files` 해시를 함께 갱신했고2942파일·현재306소스가 검증됐으며 `windows_execution_verified:false`는 유지했습니다. ZIP262,508,334바이트·SHA256 `35bb2f5a831c39a0d1541118b0cb10bc14759c0adcef6085691e8cf6de14b993`입니다.
+- 최종 ZIP·SHA256은 `app/release/portable/0.1.0/windows-x64-fix1/`에 보존했습니다. [원인·계약](../../../.local/diagnostics/claude-windows-constants-20261109-3hou3edk/initial-verification.json)·[전후 검사](../../../.local/diagnostics/claude-windows-constants-20261109-3hou3edk/before-after-contracts.json)·[묶음 검증](../../../.local/diagnostics/claude-windows-constants-20261109-3hou3edk/repack-verification.json)·[게시 계획](../../../.local/diagnostics/claude-windows-constants-20261109-3hou3edk/github-upload-plan.json)을 보존합니다. 기존0.1.0/포터블 자산과 설치용 최신 대상은 읽기만 했습니다. 새 수정 ZIP의 GitHub 초안 생성·업로드 요청은 자동 승인 검토에서 이번 payload 공개의 명시 승인이 부족하다는 이유로 거절됐으며 실행되지 않았습니다. 게시와 사용자 Windows의 새 AI 호출 확인이 남습니다.
+
+## 2026-11-09 — 포터블 GitHub Release 공개
+
+- 사용자의 게시 요청으로 원격0.1.0을 확인했고 `immutable=true`여서 기존 자산에 파일을 추가할 수 없었습니다. 같은 기존 태그의 commit을 대상으로 `app-0.1.0-portable` 초안을 만들고 Windows x64·Mac arm64 ZIP과 SHA256 총4파일을 검증한 뒤 공개했습니다. 포터블 전용 prerelease·`make_latest=false`로 설치용 최신 `app-0.1.0`을 유지했습니다. 기존0.1.0 설명 맨 앞에는 포터블 다운로드 링크를 추가하고 이전 본문 전체를 그대로 보존했습니다.
+- 업로드4파일의 원격 크기·SHA-256이 로컬 검증본과 모두 일치합니다. 기존10자산의 ID·크기·digest도 보존했습니다. 구·신 개인 실행기 ZIP은 압축 바이트만 다르고 내부307파일의 이름·내용이 모두 같아, Mac 안내에서 기존 공개 실행기를 재사용했습니다. 새로운 실행기 중복 업로드·설치 메타정보 교체는 하지 않았습니다.
+- [공개 포터블 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable)·[게시/보존 검증](../../../.local/diagnostics/portable-20261109-wocro1bn/github-publication.json)·[공개 다운로드 검사](../../../.local/diagnostics/portable-20261109-wocro1bn/github-public-downloads.json)를 보존합니다. 원격 게시와 안내만 변경했으며 앱/서버·운영 자료를 교체하지 않았습니다. 앞선 제품 검증과 실제 OS/키체인 미검증 범위를 유지하며 GitHub 게시가 서명·공증을 대체한다고 안내하지 않았습니다.
+
+## 2026-11-09 — Windows·Mac 무설치 포터블 ZIP
+
+- 사용자 요청과 양 OS 선택에 따라 `package:portable`·`package:win:portable`·`package:mac:portable`을 추가했습니다. ZIP의 `llmWikiDistribution=portable` 표지로 updater 초기화·조회·다운로드·설치를 끄며 `publish=null`·`--publish`/`--dir` 혼용 거부·기존 출력 거부로 설치 채널과 구별했습니다. 기존 productName/appId·설정/로그인/복구 경로·설치용 배포는 유지했습니다.
+- 실제 앱 전체 검사/제품 빌드와 release/package/updater70검사가 통과했습니다. Mac 서명 보완 뒤 패키징42검사를 재통과했고 변경6파일 형식도 확인했습니다. 양 ZIP의 app.asar에서 제품 출력10파일이 검증한 빌드와 각각 일치하며 포터블 표지·업데이트 메타정보 부재를 확인했습니다. 독립 소스 검토도 수행했습니다.
+- Windows ZIP은253,307,483바이트·CRC3448항목을 확인했습니다. 포함된 Python/OCR2942파일의 전체 manifest·고정 다운로드·현재 실행기306소스가 일치했고, 별도 개인 실행기 ZIP도 같은306소스임을 확인했습니다. Windows 설치/실행·OCR 인식·보호 파일/프로세스 진단의 실기기 검증은 수행하지 않았습니다.
+- Mac의 최초 `identity:null` 결과는 strict 서명 검사에서 실패해 포터블에만 `identity:'-'`·`notarize:false`를 적용했습니다. 수정 ZIP은131,325,505바이트·CRC601항목·실행권한0755·심볼릭 링크14개를 확인했고 다시 풀어 deep/strict ad-hoc 서명을 검증했습니다. Developer ID·공증은 아닙니다. 실제 키체인 경로의 시험은 첫 창 대기15초/5초가 시간 초과했고 원인은 확정하지 않았습니다. `--use-mock-keychain`을 시험에만 지정한 별도 임시 프로필에서는 실제 패키지의 로그인 화면을 확인했습니다. 이 시험 옵션은 배포 설정에 넣지 않았고 사용자 계정 로그인·실제 AI·자료 쓰기는 실행하지 않았습니다.
+- 초기 제한 환경의 공식 다운로드/실행 실패는 허용된 빌드·실행에서 보완했습니다. 검증용 앱은 이번 실행 경로와 PID를 확인해 종료했으며, 빌드 임시 앱·다운로드 캐시·불필요한 blockmap은 이번 작업 공간에서만 정리했습니다. 기존 공개0.1.0의10파일 SHA-256은 모두 유지했습니다.
+- 최종 ZIP·SHA256은 `app/release/portable/0.1.0/{windows-x64,mac-arm64}/`에 두고 Mac용 같은 차수의 개인 실행기 ZIP·SHA256도 첨부했습니다. [검증 기록](../../../.local/diagnostics/portable-20261109-wocro1bn/final-artifacts.json)·[Windows 묶음](../../../.local/diagnostics/portable-20261109-wocro1bn/windows-zip.json)·[Mac 묶음](../../../.local/diagnostics/portable-20261109-wocro1bn/mac-zip.json)·[격리 화면](../../../.local/diagnostics/portable-20261109-wocro1bn/mac-smoke-mock-keychain.json)을 보존합니다. GitHub 게시·운영 서버/설치 앱 교체는 하지 않았습니다. ZIP이어도 OS의 미서명 앱 경고·조직 정책이 적용되며 실제 키체인·Gatekeeper 첫 실행 확인은 남습니다.
+
+## 2026-11-09 — 릴리스 버전 폴더와 자동 정리
+
+- 릴리스 패키징/실행기 준비/Windows 다운로드 캐시를 소유한 임시 공간으로 분리하고 실제 업데이트 YAML이 참조한 설치 파일·블록맵·실행기만 수집합니다. SHA-512/SHA-256 검증 뒤 공개 전 복사를 준비하고, GitHub 공개 성공 후 `app/release/<버전>/`으로 저장합니다. 기존 같은 버전은 덮어쓰지 않고 검증 가능한 이전 버전만 제거하며, 알 수 없는 기존 파일/기록은 `.local/releases/runs/<실행>/retained/`에 보존합니다.
+- 공개 전 실패·SIGINT/SIGTERM 취소는 이전 배포를 유지하며 작업물·캐시·잠금을 정리합니다. root와 Windows 자식의 소유 프로세스만 종료하고 종료를 기다리며 native builder의 부분 반환도 취소 상태로 구별합니다. 공개 응답이 불명확하면 기록에 unknown을 남기고, 공개 후 로컬 정리 오류는 이미 공개됐음을 별도 표시합니다. 전원 차단/SIGKILL·실제 Windows 프로세스 종료는 검증하지 않았습니다.
+- dry-run 파일은 기록 폴더의 `preview/`에 보관해 현재 배포를 바꾸지 않습니다. 동시 릴리스 잠금·기존 출력 추가 감지·링크/경로 이탈·체크섬 불일치·이전 파일과 기록 보존을 검사합니다. 일반 `package`의 캐시 기본값도 `.local/build-cache/windows-runtime/`으로 옮겼으며 전역 npm/Electron 캐시는 건드리지 않습니다.
+- 독립 코드 검토에서 raw build API에 `dir`을 넘기던 Mac/Linux 회귀를 찾아 공개 Platform targets로 보완하고 실제 옵션 검증을 시험에 연결했습니다. 현재 폴더의 Finder `.DS_Store`로 첫 폴더 검사가 실패한 뒤 일반 파일로 한정한 Finder 캐시 처리를 보완했습니다. 현재 0.1.0 파일10개의 메타정보/기존 SHA-256 일치는 읽기 전용으로 확인했습니다.
+- `npm run test:release`의 격리 실제 파일시스템과 VM 명령 시험55개, Node 구문·대상 Oxc·형식 검사를 통과했습니다. [최종 검사/원시 로그](../../../.local/releases/20261109-automatic-cleanup/FINAL-CHECKS.json)·[현재 배포 보존 확인](../../../.local/releases/20261109-automatic-cleanup/current-release-check.json)을 보존합니다. 외부 CLI·GitHub·native builder는 시험에서 대체했으며 실제 빌드/게시·AI 호출·사용자 자료/설정 변경은 하지 않았습니다.
 
 ## 2026-11-09 — release 폴더의 최종 배포 파일만 정리
 
@@ -482,3 +722,17 @@
 - 기존 승인 범위의 QA-013 프롬프트·원 출력 계약으로 별도2회 호출해 동일 오류 지문의 `Incomplete response returned, reason: max_output_tokens`를 확인했습니다. 첫 관측 필터가 원문을 가려 규칙을 교정 후1회 추가했고 거기서 종료했습니다. 전달용 schema는 required63개 목록의 순서만 달라 의미 동등 확인·지문 차이를 공개했습니다. 기존40문항·점수·23회 집계는 그대로 두고 추가2회를 분리했습니다.
 - CLI의 모든 비정상 종료를 `ai_login_or_execution_failed`로 묶는 제품 오류 처리와, 확정 personal_limit 뒤 영수증404를 mutation_unconfirmed로 바꾸는 평가 보조 도구의 구분 문제를 확인했습니다. 실제 모델·출력 상한·실패 usage 미기록 때문에 설정 생성 상한과 전체 문맥 잔여 공간 중 결정적 원인 및 다른10건의 정확한 과거 오류는 미확정입니다. Python·의존성·CLI·인증정보 존재의 읽기 전용 진단은 통과했고 새 API/MCP 확인·서버 쓰기·설정 수정·설치·배포는 미실행입니다.
 - [진단 보고서](../../../evals/2026-11-06-maritime-corpus/execution/chat-rerun-cause-diagnosis/REPORT.md)와 [검증](../../../evals/2026-11-06-maritime-corpus/execution/chat-rerun-cause-diagnosis/FINAL-VERIFICATION.json)을 보존했습니다. 저장 분리·생성 예산 관측·오류 분류의 제품 수정은 이번 조사 범위에서 적용하지 않았습니다.
+
+## 2026-11-09 — Mac 런처 단일화(재시작·새 창 실행)
+
+- `tools/start-mac.command`가 `tools/open-server-terminal-mac.sh`의 일을 맡고 그 스크립트를 제거했다. 정책·자료를 읽기만 해서 확인한 뒤, 포트 소유 서버의 부모가 이 프로젝트(작업 폴더로 식별)의 `start-mac.command`일 때만 그 런처에 TERM을 보내고, 런처 종료와 포트 해제를 기다린다. 다른 프로세스나 다른 프로젝트 런처가 포트를 쓰면 PID를 알리고 중단한다. `--new-window [포트]`는 새 터미널 창에서 런처를 실행하고 `.local/last-server-url.txt`의 주소를 출력한다. 스킬 `wiki-server`와 README를 맞췄다.
+- 검증: 셸 문법·도움말·인자 거부, 신규 `core/tests/poc_mcp/test_mac_launcher.py` 3개(같은 프로젝트 이전 런처 재시작, 일반 프로세스·다른 프로젝트 런처 보존, 정책 실패 시 이전 런처 보존)와 기존 `test_ruleset_config.py` 6개를 통과했다. 기존 런처 시험은 8767 고정 포트가 관련 없는 `http.server`에 점유되어 실패해 빈 포트를 쓰도록 고쳤다. 임시 폴더의 가짜 서버(401)·가짜 터널로 실제 터미널 창을 연 `--new-window` 시작→재시작(이전 런처 종료)→TERM 정리(포트 해제·주소 파일 삭제)를 확인했다.
+- 실제 8766 서버는 이번 변경 전에 시작한 런처로 계속 실행 중이며 재시작하지 않았다. 새 방식의 실제 서버·공개 터널 재시작은 다음 재시작 요청 때 확인할 항목이다. 서버 준비 대기 30초는 바꾸지 않았다(이번 첫 시작에서 한 번 초과, 재시도는 정상).
+
+## 2026-11-09 — SDV 테스트 자료 초기화와 단일 시험 문서
+
+- 사용자 요청으로 `data/sdv-platform`을 초기화했다. 프로젝트 서버·터널을 정상 종료하고 열린 데이터 파일이 없음을 확인한 뒤 등록·저장 잠금을 확보했다. 기존 루트 전체를 `.local/sdv-reset-20261109/backup/sdv-platform`으로 이동하고 같은 안정 ID에 빈 루트를 만들었다. 원본·전체 위키 이력·관계·검토·개인 기록·색인 11,252파일(918,492,989바이트)은 삭제하지 않았으며 이동 전후 모든 파일의 SHA-256·크기·권한이 일치했다.
+- 기존 MCP 설정의 토큰으로 한 최초 조회는 401이었다. 자료를 변경하기 전에 정상 로그인으로 기존 사용자·SDV 권한을 확인했으며, 토큰 재발급·정책 변경 없이 진행했다. `.local/tenancy`와 서버 규약 설정의 파일 해시·권한은 재시작 전후 일치했다. 다른 작업 공간이나 관련 없는 시험 서버·팀원 프로세스는 변경하지 않았다.
+- `tools/start-mac.command --new-window 8766`으로 실제 서버·Quick Tunnel을 재시작했다. 인증된 HTTP 목록에서 문서·원본·대화·분석 작업·질문 실행이 모두 비었고, 온톨로지 검색도 `total=0` 및 완전한 조회 상태였다. 공개 접속의 미인증 요청은 401이다. 새 접속 주소는 `.local/last-server-url.txt`, 전체 보존 목록과 실제 응답은 `.local/sdv-reset-20261109/reset-verification.json`에 기록했다. 설치 앱 화면 확인·연결 설정 변경은 하지 않았다.
+- 루트의 `SDV-플랫폼-테스트-문서.md` 한 개(UTF-8 3,198바이트)를 작성했다. 가상의 선박·선주·운항사·선급·기계·제어/감시 노드·Service BOM·SBOM·OTA 적용 조건과 복구 규칙을 16개 문장으로 담았다. 빈 작업 공간을 유지하도록 등록·추출·추가 AI 호출은 실행하지 않았다. 제품 코드·전역 설정·배포 변경은 없다.
+- 후속 피드백에 따라 같은 파일을 가상 현장 협의 메모로 다시 작성했다. 회의 메모·메일 답장·구성표 일부에 약칭, 이전 배치표 정정, 승인 대기, 미수령 SBOM과 미실시 선상 시험을 섞었다. 본문의 확정 사실·조건부 허용·업체 설명·미확정 사항이 구분되는지 직접 읽고 Markdown 변경 검사를 확인했다. 새 문서 등록·추출·서버 변경은 하지 않았다.

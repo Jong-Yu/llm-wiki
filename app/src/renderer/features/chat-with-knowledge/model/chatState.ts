@@ -13,7 +13,7 @@ export const chatQuestionSchema = z.object({
     .min(1, '질문을 입력해 주세요.')
     .max(16000, '질문은 16,000자 이내로 입력해 주세요.'),
 });
-/** 외부에 전달할 검색어는 질문·첨부에서 자동 생성하지 않고 사용자가 별도로 정합니다. */
+/** 이전 버전에서 별도로 입력한 공개 검색어를 읽는 호환 검증입니다. */
 export const chatWebQuerySchema = z
   .string()
   .trim()
@@ -47,6 +47,14 @@ export const chatEnvelopeSchema = z.object({
 });
 export type ChatEnvelope = z.infer<typeof chatEnvelopeSchema>;
 export type ChatTurn = z.infer<typeof chatTurnSchema>;
+/** AI 답변과 구분하여 질문에 연결해 보관하는 실행 종료 상태입니다. */
+export const chatRunNoticeSchema = z.object({
+  runId: id,
+  questionTurnId: id,
+  status: z.enum(['failed', 'cancelled']),
+  errorCode: z.string().max(200).nullable(),
+});
+export type ChatRunNotice = z.infer<typeof chatRunNoticeSchema>;
 const attachmentSchema = z.object({
   id: z.string().min(1).max(64),
   kind: z.enum(['text', 'file']),
@@ -73,6 +81,7 @@ const chatThreadBase = z.object({
   conversationId: id.nullable(),
   questionTurnId: id.nullable(),
   runId: id.nullable(),
+  runNotices: z.array(chatRunNoticeSchema).default([]),
   startUnconfirmed: z.boolean().default(false),
   noEvidenceQuestion: z.string().nullable(),
   searchNotice: z.string(),
@@ -134,6 +143,7 @@ export function emptyChat(): ChatThread {
     conversationId: null,
     questionTurnId: null,
     runId: null,
+    runNotices: [],
     startUnconfirmed: false,
     noEvidenceQuestion: null,
     searchNotice: '',

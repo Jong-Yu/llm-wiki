@@ -45,14 +45,8 @@ export const markdownExportRequestSchema = z.strictObject({
         }),
       '제목에는 제어 문자를 사용할 수 없습니다.',
     ),
-  content: z
-    .string()
-    .max(1024 * 1024)
-    .refine(
-      (value: string): boolean =>
-        new TextEncoder().encode(value).byteLength <= 1024 * 1024,
-      '본문은 UTF-8 1 MiB 이내로 입력해 주세요.',
-    ),
+  /** 문서 크기 한도는 없습니다(D-141). */
+  content: z.string(),
   /** 생략하면 Markdown입니다(기존 호출 호환). */
   format: exportFormatSchema.optional(),
   connectionId: z.string().min(1).max(4096).optional(),

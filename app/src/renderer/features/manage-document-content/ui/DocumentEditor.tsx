@@ -293,8 +293,7 @@ export function DocumentEditor({ model }: DocumentEditorProps): JSX.Element {
           </div>
           <div className={styles.footer}>
             <span className={styles.hint}>
-              {formatSize(new TextEncoder().encode(draft.content).byteLength)} /
-              1 MiB
+              {formatSize(new TextEncoder().encode(draft.content).byteLength)}
             </span>
             <span className={styles.hint}>
               저장하지 않은 초안은 앱을 종료하면 사라집니다

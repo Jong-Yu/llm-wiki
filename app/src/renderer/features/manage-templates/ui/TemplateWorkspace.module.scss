@@ -1,0 +1,351 @@
+@use '../../../shared/ui/button';
+
+// 승인 시안이 사용하는 문서 목록·등록·세션 행의 토큰과 치수를 유지합니다.
+.root {
+  --page-gutter: var(--wiki-space-24);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: var(--page-gutter);
+  color: var(--wiki-color-text-primary);
+  font: var(--wiki-font-size-13) / var(--wiki-font-line-height-ui)
+    var(--wiki-font-family-ui);
+  :is(button, a, select, summary):focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+  }
+}
+.finder {
+  display: grid;
+  gap: var(--wiki-space-8);
+  margin-bottom: var(--wiki-space-12);
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-8);
+  min-width: 0;
+}
+.search {
+  display: flex;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.searchInput {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  flex: 1;
+  min-width: 0;
+  min-height: var(--wiki-component-control-height);
+  box-sizing: border-box;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
+  padding: var(--wiki-space-7) var(--wiki-space-12);
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-secondary);
+  input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    margin: 0;
+    background: transparent;
+    color: var(--wiki-color-text-primary);
+    font: inherit;
+    line-height: var(--wiki-component-control-line-height);
+    padding: 0;
+    outline: none;
+  }
+  &:focus-within {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+  }
+}
+.filter {
+  box-sizing: border-box;
+  min-height: var(--wiki-component-control-height);
+  padding: var(--wiki-space-7) var(--wiki-space-36) var(--wiki-space-7)
+    var(--wiki-space-12);
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+  line-height: var(--wiki-component-control-line-height);
+}
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  li {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(5rem, auto) auto;
+    align-items: center;
+    gap: var(--wiki-space-16);
+    min-height: calc(var(--wiki-space-32) * 2);
+    padding-block: var(--wiki-space-8);
+    border-bottom: 1px solid var(--wiki-color-border-default);
+    > div {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+  }
+  h3 {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--wiki-space-8);
+    margin: 0 0 var(--wiki-space-4);
+    font-size: var(--wiki-font-size-13);
+    line-height: var(--wiki-component-control-line-height);
+    font-weight: 600;
+  }
+}
+.kind {
+  display: inline-flex;
+  padding: 0 var(--wiki-space-8);
+  flex-shrink: 0;
+  border-radius: var(--wiki-radius-10);
+  background: var(--wiki-color-surface-subtle);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  font-weight: 500;
+}
+.title {
+  appearance: none;
+  display: block;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  &:hover {
+    color: var(--wiki-color-action-primary);
+  }
+}
+.fileName {
+  min-width: 0;
+  max-width: 360px;
+  color: var(--wiki-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.textButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--wiki-space-8);
+  min-height: var(--wiki-component-control-height-small);
+  padding: var(--wiki-space-5) 0;
+  border: 0;
+  background: transparent;
+  color: var(--wiki-color-action-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--wiki-space-16);
+  margin-top: var(--wiki-space-24);
+  button {
+    padding-inline: var(--wiki-space-8);
+  }
+}
+.state {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wiki-space-12);
+  text-align: center;
+  h2,
+  p {
+    margin: 0;
+  }
+  h2 {
+    font-size: var(--wiki-font-size-20);
+  }
+  p,
+  > svg {
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.form,
+.fields {
+  min-width: 0;
+}
+.fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.editorFields {
+  display: grid;
+  gap: var(--wiki-space-16);
+}
+.field {
+  display: grid;
+  gap: var(--wiki-space-6);
+  label {
+    font-weight: 600;
+  }
+  input,
+  textarea {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--wiki-color-border-control);
+    border-radius: var(--wiki-component-control-radius);
+    background: var(--wiki-color-surface-canvas);
+    color: var(--wiki-color-text-primary);
+    padding: var(--wiki-space-7) var(--wiki-space-12);
+    font: inherit;
+  }
+  input {
+    min-height: var(--wiki-component-control-height);
+    line-height: var(--wiki-component-control-line-height);
+  }
+  textarea {
+    min-height: 16rem;
+    resize: vertical;
+    line-height: 1.6;
+  }
+  [aria-invalid='true'] {
+    border-color: var(--wiki-color-status-danger);
+  }
+  small {
+    color: var(--wiki-color-text-secondary);
+    font-size: var(--wiki-font-size-12);
+  }
+}
+.dropZone {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--wiki-space-12);
+  padding: var(--wiki-space-16) 0;
+  border-block: 1px solid var(--wiki-color-border-default);
+  h3 {
+    margin: 0;
+    font-size: var(--wiki-font-size-13);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  p {
+    margin: 0;
+  }
+  small,
+  p,
+  > svg {
+    color: var(--wiki-color-text-secondary);
+    font-size: var(--wiki-font-size-12);
+  }
+  > .error {
+    grid-column: 2 / -1;
+  }
+}
+.fileContent {
+  display: grid;
+  gap: var(--wiki-space-4);
+  min-width: 0;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--wiki-space-8);
+  margin-top: var(--wiki-space-16);
+}
+.caption {
+  font-size: var(--wiki-font-size-12);
+  color: var(--wiki-color-text-secondary);
+  margin-right: auto;
+}
+.error,
+.field .error,
+.dropZone .error {
+  color: var(--wiki-color-status-danger);
+  font-size: var(--wiki-font-size-12);
+}
+.editToolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-12);
+  margin-bottom: var(--wiki-space-24);
+}
+.editToolbar span,
+.footer {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.footer {
+  margin-top: var(--wiki-space-40);
+}
+.form :focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
+}
+.chipRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+  margin-bottom: var(--wiki-space-16);
+}
+.documentBody {
+  min-width: 0;
+  font-size: var(--wiki-font-size-16);
+  max-width: var(--wiki-layout-content-reading-width);
+  padding-bottom: var(--wiki-space-24);
+  line-height: var(--wiki-font-line-height-reading);
+  h2 {
+    font-size: var(--wiki-font-size-20);
+    line-height: 1.4;
+    margin: var(--wiki-space-24) 0 var(--wiki-space-12);
+  }
+  p {
+    margin: 0 0 var(--wiki-space-16);
+  }
+}
+.preservedText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@container workspace (width < 900px) {
+  .root {
+    --page-gutter: var(--wiki-space-16);
+  }
+}
+@container workspace (width < 720px) {
+  .list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .fileName {
+    grid-column: 1 / -1;
+    max-width: 100%;
+    grid-row: 2;
+  }
+  .dropZone {
+    grid-template-columns: auto minmax(0, 1fr);
+    > button {
+      grid-column: 2;
+      justify-self: start;
+    }
+  }
+}

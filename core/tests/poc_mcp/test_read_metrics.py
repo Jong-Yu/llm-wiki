@@ -204,6 +204,26 @@ class ReadMetricsAsyncTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(caught.exception, failure)
             self.assertIsNone(metrics._CURRENT.get())
 
+    async def test_failed_route_templates_are_built_once_and_logged_unmatched(self):
+        # 실패한 템플릿(OpenAPI) 생성을 요청마다 반복하면 모든 요청이 느려진다.
+        attempts = []
+        def broken_templates():
+            attempts.append(1)
+            raise RuntimeError("openapi failed")
+        async def endpoint(private: str):
+            return {"ok": True}
+        app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+        app.post("/read/{private}")(endpoint)
+        app.add_middleware(http_metrics.HttpMetricsMiddleware, route_templates=broken_templates)
+        messages = []
+        with patch.object(http_metrics.LOGGER, "isEnabledFor", return_value=True), \
+                patch.object(http_metrics.LOGGER, "info", side_effect=messages.append):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                for _ in range(3):
+                    self.assertEqual((await client.post("/read/private")).json(), {"ok": True})
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual([json.loads(message)["route"] for message in messages], ["<unmatched>"] * 3)
+
     async def test_disabled_metrics_do_not_create_a_collector_or_emit_logs(self):
         async def endpoint(private: str):
             metrics.increment("scanned")

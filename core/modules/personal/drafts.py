@@ -6,7 +6,7 @@
 
 from core.common.json_codec import canonical_json_hash, canonical_json_bytes
 from core.common.cleanup import cleanup_details
-from core.modules.documents.store import RevisionConflictError, StorageBusyError
+from core.modules.documents.store import MAX_DOCUMENT_BYTES, RevisionConflictError, StorageBusyError
 from core.modules.access.policy import AccessDenied, PolicyError
 from core.modules.sources import files
 from core.modules.personal.store import PersonalStore, PersonalConflictError
@@ -48,7 +48,8 @@ class DraftStore:
         result = self.personal.read("result-drafts", draft_id)
         rendered = self._render(result["record"])
         return {**result, "draft": current_content(result["record"]), "rendered_content": rendered,
-            "rendered_size_bytes": len(rendered.encode("utf-8")), "can_apply_size": len(rendered.encode("utf-8")) <= 1024 * 1024,
+            "rendered_size_bytes": len(rendered.encode("utf-8")),
+            "can_apply_size": MAX_DOCUMENT_BYTES is None or len(rendered.encode("utf-8")) <= MAX_DOCUMENT_BYTES,
             "basis_observation": workflow_io.observe_basis(self.scope.store, result["record"]["data"]["basis"], self.actor)}
 
     def edit(self, draft_id, *, request_id, expected_revision, title, content, before_commit):

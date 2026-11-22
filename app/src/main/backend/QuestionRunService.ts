@@ -664,7 +664,7 @@ export class QuestionRunService {
     }
   }
 
-  /** 현재 접근 범위를 확인한 뒤 검색어만 별도 웹 조사에 전달합니다. */
+  /** 현재 접근 범위를 확인한 뒤 이번 질문 또는 기존 검색어만 별도 웹 조사에 전달합니다. */
   async webSearch(
     request: QuestionWebSearchRequest,
   ): Promise<QuestionWebSearchResult> {
@@ -678,7 +678,9 @@ export class QuestionRunService {
         throw new Error('scope_changed');
       const result = await researchPublicWeb(
         runtime,
-        request.query,
+        'question' in request
+          ? { question: request.question }
+          : { query: request.query },
         abort.signal,
       );
       if (abort.signal.aborted || !this.#connection.isAnalysisCurrent(context))

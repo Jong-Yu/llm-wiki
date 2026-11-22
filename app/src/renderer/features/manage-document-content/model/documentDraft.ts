@@ -2,14 +2,9 @@ import { z } from 'zod';
 import type { EditableMetadata } from './documentMetadata';
 import type { DocumentContent } from '@contracts/documents.contract';
 
+/** 편집 초안의 본문 형식. 문서 크기 한도는 없습니다(D-141). 내용을 임의로 자르지 않습니다. */
 export const documentDraftSchema = z.object({
-  content: z
-    .string()
-    .refine(
-      (value: string): boolean =>
-        new TextEncoder().encode(value).byteLength <= 1024 * 1024,
-      '본문은 UTF-8 1 MiB 이내여야 합니다. 내용을 임의로 자르지 않습니다.',
-    ),
+  content: z.string(),
 });
 export type DocumentDraft = {
   base: DocumentContent;

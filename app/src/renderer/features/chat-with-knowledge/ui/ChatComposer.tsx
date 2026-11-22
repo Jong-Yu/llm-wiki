@@ -11,6 +11,7 @@ import type {
 import { Icon } from '@renderer/shared/ui/Icon';
 import type { AiModelOption } from '../model/aiModelOptions';
 import { templateById } from '../model/answerTemplates';
+import type { TemplateSummary } from '@contracts/templates.contract';
 import {
   ATTACHMENT_FULL_MESSAGE,
   ATTACHMENT_ITEM_LIMIT,
@@ -36,11 +37,11 @@ type ChatComposerProps = {
   onDropFiles?: (files: File[]) => Promise<string | null>;
   onRemoveAttachment: (id: string) => void;
   template: string;
+  registeredTemplates?: readonly TemplateSummary[];
+  templateNotice?: string;
   onTemplate: (id: string) => void;
   webEnabled: boolean;
-  webQuery: string;
   onWebEnabled: (value: boolean) => void;
-  onWebQuery: (value: string) => void;
   /** AI 이름(예: Claude Code)과 선택한 모델입니다. 안내 문구와 ＋ 메뉴에 보입니다. */
   providerName: string;
   models: readonly AiModelOption[];
@@ -86,11 +87,11 @@ export function ChatComposer({
   onDropFiles,
   onRemoveAttachment,
   template,
+  registeredTemplates = [],
+  templateNotice,
   onTemplate,
   webEnabled,
-  webQuery,
   onWebEnabled,
-  onWebQuery,
   providerName,
   models,
   currentModel,
@@ -116,7 +117,10 @@ export function ChatComposer({
   const readInFlight = useRef(false);
   const optionsDisabled = disabled || running || locked || reading;
   const total = totalCharacters(attachments);
-  const selectedTemplate = templateById(template);
+  const selectedTemplate =
+    registeredTemplates.find(
+      (item: TemplateSummary): boolean => `tpl-${item.id}` === template,
+    ) ?? templateById(template);
   const modelLabel = currentModel === 'default' ? '' : ` · ${currentModel}`;
 
   const fileActions = [onPickFile && '＋', onDropFiles && '끌어다 놓기']
@@ -271,6 +275,8 @@ export function ChatComposer({
           <ComposerMenu
             disabled={optionsDisabled}
             template={template}
+            registeredTemplates={registeredTemplates}
+            templateNotice={templateNotice}
             onTemplate={onTemplate}
             models={models}
             currentModel={currentModel}
@@ -287,10 +293,8 @@ export function ChatComposer({
           {!locked && (
             <ComposerWebSearch
               enabled={webEnabled}
-              query={webQuery}
               disabled={optionsDisabled}
               onEnabledChange={onWebEnabled}
-              onQueryChange={onWebQuery}
             />
           )}
           {attachments.length > 0 && (

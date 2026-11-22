@@ -14,6 +14,30 @@ class ClientPlatformError(OSError):
     pass
 
 
+# winnt.h 값. win32con·win32file에는 없고 ntsecuritycon에만 있어 직접 둔다.
+_FILE_READ_ATTRIBUTES = 0x0080
+
+# 원시 경로·인증정보 없이 호출자에게 공개할 수 있는 실행 경계 오류다.
+_PUBLIC_ERROR_CODES = frozenset({
+    "windows_security_dependency_missing", "windows_directory_unavailable",
+    "windows_file_unavailable", "private_directory_required", "private_file_required",
+    "unsupported_file_acl", "unsafe_file_path", "file_limit", "file_changed",
+    "ai_cli_unavailable", "ai_cli_native_executable_required", "ai_process_job_failed",
+})
+
+
+def platform_error_code(error):
+    """알려진 실행 경계 오류만 ai_ 접두 고정 코드로 바꾸고, 그 밖의 오류는 None을 반환한다.
+
+    CLI 설치·로그인 문제와 앱의 실행 준비(Job·비공개 폴더) 실패를 구별하기 위해 쓴다.
+    """
+    if isinstance(error, ClientPlatformError):
+        code = str(error)
+        if code in _PUBLIC_ERROR_CODES:
+            return code if code.startswith("ai_") else "ai_" + code
+    return None
+
+
 def is_windows():
     return os.name == "nt"
 
@@ -32,16 +56,20 @@ def _win():
 
 def _sid():
     api, con, _, security, _ = _win()
-    with security.OpenProcessToken(api.GetCurrentProcess(), con.TOKEN_QUERY) as token:
+    # pywin32의 PyHANDLE은 with 문(context manager)을 지원하지 않으므로 직접 닫는다.
+    token = security.OpenProcessToken(api.GetCurrentProcess(), con.TOKEN_QUERY)
+    try:
         return security.GetTokenInformation(token, security.TokenUser)[0]
+    finally:
+        token.Close()
 
 
 def _attributes():
-    _, con, _, security, types = _win()
+    _, con, files, security, types = _win()
     sid = _sid()
     acl = security.ACL()
     acl.AddAccessAllowedAceEx(security.ACL_REVISION,
-        con.OBJECT_INHERIT_ACE | con.CONTAINER_INHERIT_ACE, con.FILE_ALL_ACCESS, sid)
+        con.OBJECT_INHERIT_ACE | con.CONTAINER_INHERIT_ACE, files.FILE_ALL_ACCESS, sid)
     sd = security.SECURITY_DESCRIPTOR()
     sd.SetSecurityDescriptorOwner(sid, False)
     sd.SetSecurityDescriptorDacl(True, acl, False)
@@ -75,10 +103,12 @@ def _check_acl(handle):
 @contextmanager
 def _win_handle(path, *, directory=False, private=True, create=False):
     _, con, files, _, types = _win()
-    flags = con.FILE_FLAG_OPEN_REPARSE_POINT | (con.FILE_FLAG_BACKUP_SEMANTICS if directory else 0)
+    flags = files.FILE_FLAG_OPEN_REPARSE_POINT | (con.FILE_FLAG_BACKUP_SEMANTICS if directory else 0)
+    # 새 파일도 아래 GetFileInformationByHandle(기본 정보 조회)을 거치므로 속성 읽기 권한을 함께 요청한다.
+    access = con.GENERIC_WRITE | con.READ_CONTROL | _FILE_READ_ATTRIBUTES if create else con.GENERIC_READ
     handle = None
     try:
-        handle = files.CreateFile(str(path), con.GENERIC_WRITE | con.READ_CONTROL if create else con.GENERIC_READ,
+        handle = files.CreateFile(str(path), access,
             con.FILE_SHARE_READ | (con.FILE_SHARE_WRITE if directory else 0),
             _attributes() if create else None, con.CREATE_NEW if create else con.OPEN_EXISTING, flags, None)
         info = files.GetFileInformationByHandle(handle)

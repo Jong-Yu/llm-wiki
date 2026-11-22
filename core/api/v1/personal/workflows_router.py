@@ -74,7 +74,8 @@ def application_receipt(draft_id: RecordId, request_id: RecordId, query: Annotat
 async def create_question_run(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """저장된 사용자 질문에 대한 실행 대기 자원을 만들며 서버 AI는 시작하지 않는다."""
     return await json_operation(request, tenant, token, models.RunCreate, "conversation_write",
-        lambda scope, value: QuestionRunStore(scope, user_dialogue=True).create(**value.model_dump(exclude={"profile"}),
+        lambda scope, value: QuestionRunStore(scope, user_dialogue=True, whole_window_reads=True).create(
+            **value.model_dump(exclude={"profile"}),
             before_commit=guard(request, tenant, token, "conversation_write", scope)), created=True)
 
 

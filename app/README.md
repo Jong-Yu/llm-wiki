@@ -29,6 +29,8 @@ npm run build
 npm start
 ```
 
+Windows에서는 앱 실행 중 시스템 트레이에 LLM Wiki 아이콘이 표시됩니다. 창의 닫기 버튼은 창만 숨기고 진행 중인 AI 작업은 계속 실행합니다. 트레이 아이콘을 누르거나 우클릭 메뉴의 **앱 열기**를 선택하면 기존 창이 다시 열립니다. 완전히 끝내려면 같은 메뉴의 **종료**를 선택합니다. 진행 중인 작업이 있으면 중단 여부를 확인하고 작업 정리 후 종료합니다.
+
 ## 브라우저에서 화면 테스트
 
 Electron을 열지 않고 같은 React 화면과 서버 처리 코드를 실행할 수 있습니다. Node.js 24 이상에서 다음 명령을 사용합니다.
@@ -49,7 +51,7 @@ AI 제공자와 실행 경로는 시작 전에 `WIKI_AI_PROVIDER=codex` 또는 `
 
 ## 서버 연결
 
-앱의 로그인 화면에서 **이름과 서버 주소**를 입력해 가입하거나 로그인합니다. 한 서버 주소에서 `/api/v1`과 `/mcp`를 파생하며, 가입·로그인 응답으로 기본 **SDV 플랫폼** 공간과 관점을 자동 선택합니다. 원격은 HTTPS, 같은 PC의 loopback 서버만 HTTP를 허용합니다. reverse proxy prefix도 유지합니다.
+앱의 로그인 화면에서 **이름과 서버 주소**를 입력해 가입하거나 로그인합니다. 한 서버 주소에서 `/api/v1`과 `/mcp`를 파생하며, 신규 가입은 소속 없는 계정으로 시작하며 관리자가 공간을 배정할 때까지 배정 대기를 표시합니다. 기존 계정은 허용된 기본 공간과 관점을 선택하고, 앱에서 배정 상태를 다시 확인할 수 있습니다. 원격은 HTTPS, 같은 PC의 loopback 서버만 HTTP를 허용합니다. reverse proxy prefix도 유지합니다.
 
 토큰은 main에서만 수신하고 OS 보호 저장으로 재시작 로그인을 유지합니다. 보호 저장 실패는 현재 로그인 성공과 구별해 설정에 표시합니다. 로그아웃은 오프라인에서도 메모리 토큰과 자동 복원을 해제하며 이름·서버 주소만 기억합니다. 서버의 사용자 토큰을 회수하거나 재발급하지 않습니다. 개인 AI CLI 로그인은 앱 계정과 별도이며 설정 화면에서 연결합니다.
 
@@ -83,7 +85,7 @@ Electron main이 개인 실행 환경에 지정한 Python의 기존 개인 AI �
 
 화면은 로컬 실행과 서버의 실제 저장 영수증을 따로 표시합니다. 문서 상세의 **AI 작업**, 헤더의 **AI 세션**, 분석 작업 상세에서 준비·진행·결과를 확인합니다. 여러 질문·분석·재추출·대조를 독립 실행하며 목록에서 선택한 작업만 중단할 수 있습니다. 기존 작업 선택은 실행을 다시 시작하지 않고, 진행 중인 채팅에서 다른 대화나 새 대화로 이동해도 실행과 각 초안을 유지합니다. 저장 결과가 미확인이면 같은 요청을 확인하고 자동 재실행하지 않습니다.
 
-채팅 입력창의 **＋ 옆 지구본**을 누르고 **외부 검색어**를 적용하면 그 공개 검색어만 별도 개인 AI 검색에 보냅니다. 적용 뒤 지구본 옆의 **웹** 표시로 선택 상태를 확인합니다. 기본은 해제이며 질문 접수 뒤 다시 해제됩니다. 웹 자료의 제목·확인 시각·보관 인용과 출처 링크는 해당 답변의 근거에서 확인합니다. 조회 실패·일부 자료만 확인한 상태도 남기며, 위키 문서나 전문가 판단으로 자동 등록하지 않습니다. 이 기능에는 같은 버전의 앱·개인 실행기·서버가 필요합니다. [웹 근거 계약](../docs/domains/knowledge/DECISIONS.md#d-099--질문별-외부-웹-근거-선택과-출처-보존-2026-11-05)을 참고합니다.
+채팅 입력창의 **＋ 옆 지구본**을 켜면 현재 작성한 질문을 바탕으로 웹을 검색합니다. 별도 검색어 입력 없이 개인 AI가 검색어를 만들고 같은 호출에서 웹을 조회합니다. 검색 세션에는 현재 질문만 보내며 첨부·이전 대화·위키 본문을 자동으로 합치지 않습니다. 같은 대화에서는 선택을 유지하고 새 대화는 해제 상태로 시작합니다. 웹 자료의 제목·확인 시각·보관 인용과 출처 링크는 해당 답변의 근거에서 확인합니다. 조회 실패·일부 자료만 확인한 상태도 남기며, 위키 문서나 전문가 판단으로 자동 등록하지 않습니다. 이 기능에는 같은 버전의 앱·개인 실행기·서버가 필요합니다. [질문 기반 웹 검색 결정](../docs/domains/knowledge/DECISIONS.md#d-125--현재-질문을-사용하는-웹-검색-토글-2026-11-10)을 참고합니다.
 
 헤더의 녹색 상태등은 현재 기기의 실행을, 한도 막대는 로그인한 개인 CLI 계정 전체의 실제 잔여량을 표시합니다. Codex 한도를 읽을 수 있으면 설정의 **AI 실행 → 계정 사용량**에서 기간·사용률·초기화 시각을 확인합니다. Claude 한도 미제공·조회 실패·이전 조회를 구분하며 미확인 값을 0%로 표시하지 않습니다. 창 닫기는 실행을 유지한 채 창을 숨깁니다. 메뉴나 단축키로 앱을 명시 종료하면 진행 중 작업의 중단을 확인하고, 연결 범위 변경 시에도 해당 로컬 실행을 정리합니다.
 
@@ -147,6 +149,10 @@ node app/scripts/build-design-tokens.mjs --check
 
 기본 실행 설정은 `WIKI_CLIENT_ROOT`·`WIKI_PYTHON`이며 개발 실행에서는 프로젝트 `.venv`를 찾습니다. 이전 `WIKI_ANALYSIS_PROJECT_ROOT`·`WIKI_CLIENT_PYTHON`·`WIKI_ANALYSIS_PYTHON`도 시작 때 정규화합니다. 저장된 앱 설정이 있으면 그 설정을 사용합니다. 선택한 Tesseract 디렉터리는 실행 PATH에, 언어 데이터 폴더는 `TESSDATA_PREFIX`에 반영합니다. Windows x64 설치 파일은 개인 실행기·Python·필수 패키지·한국어/영어 OCR을 포함하고 처음 시작할 때 자동 선택합니다. Codex·Claude Code는 포함하지 않습니다. macOS/Linux 패키지는 기존 외부 실행 환경을 사용합니다.
 
+Windows 앱의 **AI 호출 확인**이 실패할 때는 [Claude 진단 v2 ZIP](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/claude-windows-diagnostic-v2)을 내려받아 안의 `diagnose-claude-windows.cmd`와 `claude_call_diagnostic.py`를 현재 쓰는 `LLM Wiki.exe` 옆에 함께 풉니다. 같은 이름의 이전 진단 파일만 교체하고 CMD 파일을 더블클릭합니다. 소스에서는 `scripts/diagnose-claude-windows.cmd`와 `../tools/claude_call_diagnostic.py`입니다. 저장된 앱 설정의 실행기로 같은 고정 연결 질문을 한 번 호출하고 새 `claude-connection-report*.txt`를 열어 줍니다. 보고서의 `protocol`은 `claude-call-diagnostic-v2`입니다.
+
+v2는 호출 단계·종료 코드·숫자 CLI 버전·알려진 알림 종류/고정 분류·필드 존재·배포 소스 해시를 기록합니다. 미등록 이름은 원문 대신 해시만 남기며 응답/알림 본문·계정·토큰·개인 경로는 담지 않습니다. 기존 보고서는 새 이름으로 보존합니다. 설정·로그인·앱 응답 검사 조건을 바꾸지 않으며 진단 자체는 앱 수정본이 아닙니다. Python 파일을 직접 실행할 때는 `--runtime <개인 실행기 폴더> --output <새 보고서 경로>`가 필수이고, 실제 호출은 `--test`를 붙인 경우에만 수행합니다.
+
 ## 설치 산출물과 서명
 
 ```sh
@@ -157,11 +163,40 @@ npm run package:runtime       # Python 개인 실행기 소스 ZIP + SHA256
 npm run package               # 현재 OS: macOS DMG/ZIP, Windows NSIS, Linux tar.gz
 ```
 
+### 무설치 포터블 ZIP
+
+설치 프로그램 없이 ZIP 전체를 새 폴더에 풀어 실행할 수 있습니다. 기존 설치 파일·공개 업데이트 경로는 유지합니다.
+
+현재0.1.0 포터블은 [GitHub 포터블 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable)에서 ZIP·SHA256을 내려받습니다. 기존 설치판 Release는 게시 후 파일 추가가 잠겨 있어 별도 포터블 배포를 만들었으며, 설치판의 최신 업데이트 대상은 기존 `app-0.1.0`을 유지합니다. Mac 개인 실행기 ZIP은 기존0.1.0 공개 파일을 재사용하며 내부 파일 내용이 포터블 빌드와 같음을 확인했습니다. GitHub 게시는 OS의 실행 파일 서명·공증을 대신하지 않습니다.
+
+Windows 공개 수정본은 [포터블 fix4](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix4)입니다. fix3에서 남은 Claude 첫 안내 메시지 거부를 고치고([D-143](../docs/domains/platform/DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22)), 회사 프록시·인증서·Git Bash 설정을 Claude에 넘기며, 이전 포터블의 실행기 경로를 자동으로 바꿉니다([D-144](../docs/domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)). fix1~3과 달리 현재 작업 트리 전체로 다시 빌드한 사전 릴리스입니다. 실제 Windows 호출 성공 확인은 남아 있습니다. 이전 수정본의 원인은 [실행 기록](../docs/domains/platform/HISTORY.md#2026-11-19--windows-진단의-createjobobject-typeerror와-fix3-준비)을 따릅니다.
+
+새 ZIP을 별도 폴더에 모두 풀어 실행하면, 저장된 실행기 경로가 이전 포터블 폴더의 `resources/personal-runtime`일 때 이 앱의 실행기로 자동으로 바꿔 저장합니다. 직접 고른 외부 실행기(개발 폴더의 `.venv` 등)는 그대로 둡니다. 기존 설정·로그인·사용자 자료를 삭제할 필요는 없습니다.
+
+Claude의 **AI 호출 확인**이 실패하면 **연결 설정 → AI 실행**의 **문제 상세**에서 오류 코드와 멈춘 메시지 종류를 볼 수 있습니다. Windows에서는 같은 곳의 **진단 보고서 만들기**가 Claude를 한 번 호출해 실행 단계·메시지 종류만 기록한 보고서를 앱 데이터의 `diagnostics` 폴더에 새 파일로 저장하고 엽니다. 경로·계정·응답 내용은 보고서에 없습니다.
+
+```sh
+npm run package:win:portable  # Windows x64: LLM Wiki.exe + 개인 실행기/Python/OCR
+npm run package:mac:portable  # macOS Apple Silicon: LLM Wiki.app
+npm run package:portable      # 현재 OS의 포터블 ZIP
+```
+
+기본 출력은 `release/portable/<버전>/windows-x64/` 또는 `mac-arm64/`입니다. 파일명에도 OS·CPU·`portable`을 넣어 기존 설치 파일과 구별합니다. 이미 있는 출력 폴더는 덮어쓰지 않으며 `-- --output-dir <새 경로>`로 새 차수를 만들 수 있습니다. 배포에는 ZIP을 사용하고 빌더가 함께 만든 압축 해제 폴더·진단 파일은 포함하지 않습니다. 포터블 명령은 게시하지 않으며 설치용 `latest*.yml`을 만들지 않습니다.
+
+- Windows: **압축을 모두 푼 뒤** `LLM Wiki.exe`를 실행합니다. EXE만 다른 폴더로 옮기거나 ZIP 안에서 바로 실행하지 않습니다. 포함된 Python·OCR은 설치 없이 사용하며 AI CLI의 별도 설치·로그인과 서버 연결은 계속 필요합니다.
+- macOS: ZIP을 풀고 `LLM Wiki.app`을 실행합니다. Applications에 복사할 필요는 없습니다. 포터블 앱의 내부 무결성을 위한 ad-hoc 서명을 적용하며 Developer ID 서명·공증은 아닙니다. 개인 Python 실행기·OCR·AI CLI는 기존 별도 환경을 사용하며, 같은 배포 차수의 개인 실행기 ZIP을 선택합니다.
+
+포터블도 운영체제의 미서명 실행 파일 검사를 받습니다. ZIP으로 바꾸는 것만으로 Mac의 Gatekeeper나 Windows의 보안 경고가 없어지지는 않습니다. Mac에서 출처를 확인한 앱의 실행 허용은 [Apple 안내](https://support.apple.com/ko-kr/102445)를 따르며, 조직 정책으로 차단된 PC의 실행 가능성을 보장하지 않습니다.
+
+같은 PC·사용자 계정의 기존 로그인·설정·복구 자료 경로를 사용하며 인증 정보를 USB나 배포 ZIP에 담지 않습니다. 앱 폴더를 다른 위치로 옮기면 저장된 개인 실행 환경 경로를 다시 선택해야 할 수 있습니다. 포터블에서는 자동 다운로드·재시작 설치를 실행하지 않습니다. 업데이트할 때는 작업 완료 또는 취소 후 앱을 종료하고 새 ZIP 전체를 별도 폴더에 풀어 실행합니다. 사용자 자료 폴더와 서버 자료는 지우지 않습니다.
+
+### 기존 설치 파일
+
 `config/electron-builder.json`은 기본 미서명 구성입니다. 위 패키징 명령은 게시하지 않으며, 공개 배포는 아래 `npm run release`를 사용합니다. 개발 실행 파일은 먼저 `npm run electron:install`로 준비합니다. 패키징은 지정한 OS·CPU용 공식 Electron을 받아 사용하며 개발 PC의 Electron 폴더를 다른 OS용으로 재사용하지 않습니다. 최초 대상 빌드에는 Electron과 electron-builder 도구의 공식 배포 서버에 접근해야 합니다. 산출물은 `app/release/`에 둡니다. DMG의 앱을 Applications에 복사한 뒤 실행합니다. 미서명 앱의 Gatekeeper 허용은 사용자가 출처를 확인한 뒤 OS에서 결정합니다. 검증 과정에서 격리 속성이나 Gatekeeper를 자동 해제하지 않습니다. Windows는 NSIS 설치 파일을 실행해 현재 사용자 계정으로 설치하며, 앱 자료 삭제 옵션은 사용하지 않습니다.
 
-Windows는 **설치 EXE 하나만 옮깁니다.** 설치 후 서버 주소·인증 정보를 설정하고 사용할 AI CLI를 직접 설치·로그인합니다. 개인 실행기 ZIP이나 시스템 Python·Tesseract 설치는 필요하지 않습니다. `resources/personal-runtime`에 앱 전용 Python 3.13.17, 고정 패키지 40개, Tesseract 5.5.3과 한국어·영어 데이터를 둡니다. 기존에 저장한 외부 실행 경로가 있으면 그 설정을 유지합니다. 기존 설정을 계속 사용하는 PC에는 포함된 실행 환경으로 자동 전환하지 않습니다.
+Windows는 **설치 EXE 하나만 옮깁니다.** 설치 후 서버 주소·인증 정보를 설정하고 사용할 AI CLI를 직접 설치·로그인합니다. 개인 실행기 ZIP이나 시스템 Python·Tesseract 설치는 필요하지 않습니다. `resources/personal-runtime`에 앱 전용 Python 3.13.17, 고정 패키지 40개, Tesseract 5.5.3과 한국어·영어 데이터를 둡니다. 기존에 저장한 외부 실행 경로가 있으면 그 설정을 유지합니다. 단, 저장된 경로가 다른 앱 사본(이전 포터블 등)에 들어 있던 실행기이면 이 앱의 실행기로 바꿔 저장합니다([D-144](../docs/domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)).
 
-`scripts/package-desktop.mjs`는 Windows 빌드마다 새 임시 폴더에서 실행기를 준비하고 asar 밖의 리소스로 포함합니다. `config/windows-runtime.lock.json`의 HTTPS URL·SHA256과 현재 `requirements.lock`을 대조하며 원문·위키·토큰·개인 설정을 포함하지 않습니다. Python·Tesseract·언어 데이터·wheel의 라이선스를 보존합니다. 최초 빌드는 해당 배포 서버에 접근해야 하며 검증된 캐시는 `release/windows-runtime-cache/`에 보관합니다. 빌드용 Python은 프로젝트 `.venv`, 시스템 Python 순서로 찾고 `WIKI_BUILD_PYTHON`으로 실행 파일을 지정할 수 있습니다. NSIS 추출을 지원하는 7-Zip은 electron-builder 도구를 사용하며 필요한 경우 `WIKI_BUILD_7ZIP`으로 지정합니다. 대상 PC에서 pip나 별도 설치 프로그램을 실행하지 않습니다. Python 배포 방식은 [공식 embeddable 안내](https://docs.python.org/3/using/windows.html#the-embeddable-package)를 따릅니다.
+`scripts/package-desktop.mjs`는 Windows 빌드마다 새 임시 폴더에서 실행기를 준비하고 asar 밖의 리소스로 포함합니다. `config/windows-runtime.lock.json`의 HTTPS URL·SHA256과 현재 `requirements.lock`을 대조하며 원문·위키·토큰·개인 설정을 포함하지 않습니다. Python·Tesseract·언어 데이터·wheel의 라이선스를 보존합니다. 최초 빌드는 해당 배포 서버에 접근해야 합니다. 일반 패키징의 재사용 캐시는 프로젝트 `.local/build-cache/windows-runtime/`에 보관하며, 릴리스 명령은 별도 임시 캐시를 사용한 뒤 정리합니다. 빌드용 Python은 프로젝트 `.venv`, 시스템 Python 순서로 찾고 `WIKI_BUILD_PYTHON`으로 실행 파일을 지정할 수 있습니다. NSIS 추출을 지원하는 7-Zip은 electron-builder 도구를 사용하며 필요한 경우 `WIKI_BUILD_7ZIP`으로 지정합니다. 대상 PC에서 pip나 별도 설치 프로그램을 실행하지 않습니다. Python 배포 방식은 [공식 embeddable 안내](https://docs.python.org/3/using/windows.html#the-embeddable-package)를 따릅니다.
 
 `llm-wiki-personal-runtime-0.1.0.zip`은 core/tools Python 소스, 규약 조립에 필요한 의미 지침 한 파일과 고정 requirements를 포함합니다. 압축을 풀고 `python3 -m tools.setup_runtime --role personal`을 실행한 뒤 앱에서 폴더와 `.venv` Python을 선택합니다. Windows는 `py -3.12 -m tools.setup_runtime --role personal`을 사용합니다. 원문·위키·히스토리·토큰·개인 설정·테스트·`.venv`는 포함하지 않습니다. 이 ZIP은 Python/OCR/계정의 설치 완료를 뜻하지 않습니다.
 
@@ -187,6 +222,12 @@ npm run release -- patch --mac --win  # 다음 패치 버전으로 올려 빌드
 ```
 
 명령은 앱 검사·빌드 후 릴리스 초안을 한 번 만들고 설치 파일과 `latest.yml`·`latest-mac.yml`·블록맵을 올립니다. Mac을 포함하면 기존 개인 실행기 포장 명령으로 같은 버전의 ZIP·SHA256도 준비해 공개 전에 첨부합니다. 지정한 플랫폼이 모두 성공해야 최신 정식 릴리스로 공개하며, 실패한 초안은 보존합니다. 배포 저장소에는 README 등 초기 커밋이 있어야 합니다. 인증은 `GH_TOKEN`, 저장소 루트의 무시된 `.github_token`, 기존 `gh` 로그인 순으로 사용하며 게시 대상의 쓰기 권한이 필요합니다. 이미 존재하는 같은 버전의 릴리스에는 다시 게시하지 않습니다. `--dry-run`은 빌드하되 업로드하지 않습니다.
+
+성공한 릴리스는 `app/release/<버전>/`에 배포 파일만 남깁니다. 압축 해제된 앱·Windows 실행기 준비·다운로드 캐시는 실행별 임시 폴더에서 처리하고 성공·일반 오류·SIGINT/SIGTERM 취소 시 정리합니다. 검증 가능한 이전 버전의 배포 파일은 새 버전 공개와 로컬 저장이 성공한 뒤 제거하며, 기존 같은 버전 폴더를 덮어쓰지 않습니다. 알 수 없는 기존 기록은 삭제하지 않고 프로젝트 `.local/releases/runs/<실행>/retained/`로 보존합니다.
+
+게시 전 실패하거나 취소하면 이전 배포 폴더를 유지합니다. 작업 상태와 builder 진단은 `.local/releases/runs/<실행>/`에 남기며, 공개 후 로컬 정리만 실패한 경우에는 GitHub 공개 완료를 별도로 표시합니다. `--dry-run`의 배포 파일은 이 기록 폴더의 `preview/`에 보관하고 현재 배포 폴더는 바꾸지 않습니다. 릴리스 동시 실행은 잠금으로 거부하고, 실행 중 다른 작업이 출력 폴더에 항목을 추가하면 그 자료를 옮기지 않고 중단합니다.
+
+이 경로와 정상·실패·취소 시 보존 동작은 외부 게시 없이 `npm run test:release`로 검사합니다. 일반 `package` 명령의 개발용 출력 경로와 OS/npm/Electron의 전역 캐시는 이 릴리스 정리 대상에 포함하지 않습니다.
 
 설치 앱은 시작할 때와 4시간마다 더 높은 버전을 확인해 자동으로 내려받고 재시작 설치를 안내합니다. `0.1.0`에서 같은 `0.1.0`은 업데이트로 인식하지 않습니다. 이전 주소를 내장한 설치본은 올바른 채널을 내장한 설치 파일로 한 번 수동 교체합니다. macOS 자동 설치에는 서명된 앱이 필요하며 현재 미서명 배포에서는 수동 설치를 사용합니다. 서명·공증 환경은 위 서명 절을 따릅니다. 실제 Windows의 업데이트 설치 성공은 별도 실기기 검증 대상입니다.
 

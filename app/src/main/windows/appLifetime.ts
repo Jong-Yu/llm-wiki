@@ -5,6 +5,14 @@ export type AppLifetimeOptions = {
   confirmQuit: (count: number) => Promise<boolean>;
   shutdown: () => Promise<void>;
 };
+
+/** 숨김·최소화 상태를 복원하고 기존 창에 초점을 돌립니다. */
+export function showAppWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 /** 창 숨김과 실제 종료를 구분하며 승인한 종료는 실행 정리 뒤 한 번만 완료합니다. */
 export function installAppLifetime(
   application: Pick<App, 'on' | 'quit'>,

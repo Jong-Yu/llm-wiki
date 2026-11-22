@@ -169,10 +169,12 @@ export async function verifyFileUi(): Promise<number> {
         content: '',
       }).success,
     );
+    const largeContent = '\ufeff' + '가'.repeat(350000) + '\r\n끝  \r\n';
+    assert(Buffer.byteLength(largeContent, 'utf8') > 1024 * 1024);
     assert(
-      !markdownExportRequestSchema.safeParse({
+      markdownExportRequestSchema.safeParse({
         title: '제목',
-        content: '가'.repeat(350000),
+        content: largeContent,
       }).success,
     );
     assert(
@@ -191,6 +193,17 @@ export async function verifyFileUi(): Promise<number> {
     );
     assert(!invalid.ok && invalid.error.code === 'invalid_input');
     assert.equal(exports.length, 1);
+    checks++;
+    assert.deepEqual(
+      await downloadArtifactMarkdown(
+        session,
+        { title: '큰 편집본', content: largeContent },
+        (): boolean => true,
+      ),
+      { ok: true, data: { started: true } },
+    );
+    assert.equal(exports.length, 2);
+    assert.equal(exports[1]?.content, largeContent);
     checks++;
     Object.defineProperty(globalThis, 'window', {
       value: { wiki: { connection: mock.wiki.connection } },

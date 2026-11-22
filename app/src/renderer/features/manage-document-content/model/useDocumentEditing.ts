@@ -525,7 +525,7 @@ export function useDocumentEditing({
     if (!next) {
       setError({
         code: 'document_too_large',
-        message: '재반영할 본문은 UTF-8 1 MiB 이내여야 합니다.',
+        message: '재반영할 본문을 확인해 주세요.',
       });
       return;
     }

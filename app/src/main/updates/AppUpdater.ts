@@ -1,5 +1,7 @@
 import { app, dialog } from 'electron';
 import type { BrowserWindow } from 'electron';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import electronUpdater from 'electron-updater';
 import type { UpdateStatus } from '@contracts/update.contract';
 
@@ -12,22 +14,41 @@ export type AppUpdater = {
   install: () => boolean;
 };
 
+/** 포터블은 설치 프로그램으로 바뀌지 않도록 패키지에 고정한 배포 종류를 확인합니다. */
+function supportsAutomaticUpdates(): boolean {
+  if (!app.isPackaged) return false;
+  try {
+    const metadata: unknown = JSON.parse(
+      readFileSync(join(app.getAppPath(), 'package.json'), 'utf8'),
+    );
+    return (
+      typeof metadata === 'object' &&
+      metadata !== null &&
+      !Array.isArray(metadata) &&
+      (!('llmWikiDistribution' in metadata) ||
+        metadata.llmWikiDistribution !== 'portable')
+    );
+  } catch (error: unknown) {
+    console.error('앱 배포 정보를 확인할 수 없습니다.', error);
+    return false;
+  }
+}
+
 /** 설치된 앱만 GitHub Release의 최신 버전을 확인해 내려받고, 재시작 시 설치합니다. */
 export function createAppUpdater(
   getWindow: () => BrowserWindow | null,
 ): AppUpdater {
-  const { autoUpdater } = electronUpdater;
   let status: UpdateStatus = { state: 'idle' };
 
   const install = (): boolean => {
     if (status.state !== 'ready') return false;
-    autoUpdater.quitAndInstall(true, true);
+    electronUpdater.autoUpdater.quitAndInstall(true, true);
     return true;
   };
 
   const start = (): void => {
-    // 개발 실행과 `--dir` 패키지는 업데이트 메타데이터가 없으므로 건너뜁니다.
-    if (!app.isPackaged) return;
+    if (!supportsAutomaticUpdates()) return;
+    const { autoUpdater } = electronUpdater;
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.on('error', (error: unknown): void => {

@@ -60,6 +60,7 @@ TOOL_TITLES = {
     "ontology_concept_find": "개념 찾기",
     "ontology_concept_query": "개념 지식 조회",
     "ontology_glossary_query": "용어 설명 조회",
+    "knowledge_lookup": "지식 한 번에 찾기",
     "knowledge_context_prepare": "답변 근거 준비",
     "analysis_registration_create": "원본 기본 등록",
     "analysis_job_list": "분석 작업 목록",

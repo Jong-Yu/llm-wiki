@@ -17,6 +17,7 @@ import type { ArtifactsBridge } from './artifacts.contract';
 import type { FileExportsBridge } from './fileExports.contract';
 import type { AttachmentBridge } from './attachments.contract';
 import type { UpdateBridge } from './update.contract';
+import type { TemplatesBridge } from './templates.contract';
 
 /** 공개 앱 정보와 제한된 연결 작업만 노출하는 IPC 계약입니다. */
 export const IPC_CHANNELS = { appGetInfo: 'app:get-info' } as const;
@@ -36,6 +37,7 @@ export type GetAppInfoResult =
     };
 
 export type WikiBridge = {
+  templates?: TemplatesBridge;
   knowledgeComparisons?: KnowledgeComparisonsBridge;
   aiSessions?: AiSessionsBridge;
   fileExports?: FileExportsBridge;

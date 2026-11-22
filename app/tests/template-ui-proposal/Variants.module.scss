@@ -1,0 +1,28 @@
+.stage {
+  display: flex;
+  flex-direction: column;
+  min-height: var(--variant-stage-height, 900px);
+  --variant-gutter: 24px;
+}
+.frame {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.stage .frame > :global(.wiki-theme) {
+  flex: 1;
+  min-height: 0;
+}
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  > span {
+    font-size: 12px;
+    font-weight: 400;
+  }
+}
+.chat {
+  padding-inline: max(0px, calc(var(--variant-gutter, 24px) - 24px));
+}

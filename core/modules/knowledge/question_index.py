@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from copy import deepcopy
+import math
 import re
 import unicodedata
 
@@ -12,9 +13,13 @@ from .concepts import ConceptStore
 from .ontology_exploration_index import observations, signature
 
 NAMESPACE = "question_grounding_v1"
-MAX_TERMS = 12000
+# 큰 문서의 본문 단어가 가나다순으로 잘리지 않게 문서당 단어·질문당 색인 행 상한을 넉넉히 둔다.
+MAX_TERMS = 60000
 MAX_QUERY_TERMS = 128
-MAX_POSTINGS = 2048
+MAX_POSTINGS = 16384
+# 그래프 점수 순위와 본문 드문 단어 순위를 번갈아 고른다(온톨로지가 없는 문서도 본문으로 찾는다).
+RANKING_POLICY = "graph_and_body_bm25_interleaved_v1"
+PROJECTION_VERSION = 2
 STOP_WORDS = frozenset("an the is are of to in for and or what how does do can this that please 알려줘 무엇 어떻게 그리고 대한 대해 설명 해줘".split())
 
 
@@ -28,15 +33,39 @@ def mentions(surface, question):
     return bool(name and re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", folded(question)))
 
 
+_WORD = re.compile(r"[a-z0-9]+(?:[-./][a-z0-9]+)*|[가-힣]+")
+
+
 def terms(value):
-    """저장된 문자만 사용하며 번역·별칭 생성이나 의미 판정을 하지 않는다."""
+    """저장된 문자만 사용하며 번역·별칭 생성이나 의미 판정을 하지 않는다.
+
+    돌려주는 모든 단어는 folded(value)의 부분 문자열이다(overlap이 이 성질을 쓴다).
+    """
     result = set()
-    for word in re.findall(r"[a-z0-9]+(?:[-./][a-z0-9]+)*|[가-힣]+", folded(value)):
+    for word in _WORD.findall(folded(value)):
         if word not in STOP_WORDS:
             result.add(word)
-        if re.fullmatch(r"[가-힣]+", word) and len(word) > 2:
-            result.update(word[i:i + 2] for i in range(len(word) - 1))
+        # _WORD의 두 갈래 중 한글 갈래인지 첫 글자로 구분한다.
+        if len(word) > 2 and "가" <= word[0] <= "힣":
+            result.update([word[i:i + 2] for i in range(len(word) - 1)])
     return result
+
+
+def overlap_counter(wanted):
+    """len(wanted & terms(value))와 같은 값을 세는 함수를 돌려준다.
+
+    wanted의 어느 단어도 folded(value)의 부분 문자열이 아니면 겹침이 없으므로 토큰화를 건너뛴다.
+    큰 문서의 단락 수천 개를 질문마다 다시 토큰화하지 않기 위한 것이다(2026-11-22 측정).
+    """
+    if not wanted:
+        return lambda value: 0
+    pattern = re.compile("|".join(map(re.escape, sorted(wanted, key=len, reverse=True))))
+
+    def count(value):
+        if pattern.search(folded(value)) is None:
+            return 0
+        return len(wanted & terms(value))
+    return count
 
 
 def without_evidence(value, *, strip_quotes=False):
@@ -122,8 +151,9 @@ def _project(owner, document):
             "weight": weights[word]}))
     omissions = [{"document": document, "code": item["reason"]} for item in capture.skipped]
     manifest = {"owner": document, "state": "manifest", "document_id": source.get("document_id"),
-        "projection_version": 1,
+        "projection_version": PROJECTION_VERSION,
         "ref": ref, "status": graph.get("status", "unavailable"), "attention": attention,
+        "term_count": min(len(ordered), MAX_TERMS),
         "skipped": omissions, "truncated": limited or capture.truncated, "row_count": len(rows) + 1}
     rows.append(("manifest", manifest))
     return rows, manifest
@@ -155,7 +185,7 @@ def ensure_locked(store, actor, index, *, should_stop=None):
         stamp = signature(files, document, before.get("document_id"), history=history[document])
         retry = any(s["code"] in {"read_error", "permission_denied", "not_found", "observation_failed"}
                     for s in before.get("skipped", []))
-        if old and old[0] == stamp and before.get("projection_version") == 1 and not retry:
+        if old and old[0] == stamp and before.get("projection_version") == PROJECTION_VERSION and not retry:
             continue
         rows, manifest = _project(owner, document)
         stamp = signature(files, document, manifest.get("document_id"), history=history[document])
@@ -165,6 +195,30 @@ def ensure_locked(store, actor, index, *, should_stop=None):
     if index.count(NAMESPACE, scope) != sum(m["row_count"] for _, m in manifests.values()):
         raise CanonicalIndexUnavailable("Question projection rows are incomplete", reason="corrupt")
     return observed, manifests
+
+
+def _body_scores(postings, term_counts, k1=1.2, b=0.3):
+    """질문 단어가 든 문서마다 BM25(출현 여부 기준)로 점수를 낸다. 가중치(본문·주장·개념)는 보지 않는다.
+
+    색인은 단어 출현 여부만 가지므로 빈도는 1로 보고, 문서 길이는 색인한 고유 단어 수로 보정한다.
+    드문 단어일수록, 어휘가 작은 문서일수록 한 단어의 몫이 커서 어휘가 많은 큰 문서가 단어 수만으로 앞서지 않는다.
+    출현 여부만 세므로 일반 BM25(b=0.75)보다 길이 보정을 약하게(b=0.3) 둬, 어휘가 아주 많은 MB 단위 문서도
+    드문 단어 하나로 상위에 올 수 있게 한다(실측: evals/2026-11-20-large-doc-lines/ranking-*.json).
+    그래프가 없는 문서도 본문 단어만으로 같은 기준의 점수를 받는다.
+    """
+    owners = defaultdict(set)
+    for _, row in postings:
+        owners[row["source_id"]].add(row["owner"])
+    count = max(len(term_counts), 1)
+    average = max(sum(term_counts.values()) / count, 1)
+    scores = defaultdict(float)
+    for token, documents in owners.items():
+        frequency = len(documents)
+        idf = math.log(1 + (count - frequency + 0.5) / (frequency + 0.5))
+        for document in documents:
+            norm = k1 * (1 - b + b * term_counts.get(document, average) / average)
+            scores[document] += idf * (k1 + 1) / (1 + norm)
+    return scores
 
 
 def discover(store, actor, question, documents, required_documents):
@@ -202,7 +256,15 @@ def discover(store, actor, question, documents, required_documents):
         attention = {m["owner"]: m["attention"] for _, m in manifests.values()}
         ranked = sorted(set(scores) | set(documents),
             key=lambda doc: (-scores[doc], -attention.get(doc, False), doc not in documents, doc))
-        chosen = list(dict.fromkeys([*anchors, *ranked]))[:8]
+        body = _body_scores(postings[:MAX_POSTINGS], {m["owner"]: m.get("term_count", 0) for _, m in manifests.values()})
+        body_ranked = sorted(set(scores) | set(documents),
+            key=lambda doc: (-body.get(doc, 0.0), doc not in documents, doc))
+        merged = []
+        for graph_doc, body_doc in zip(ranked, body_ranked):
+            for doc in (graph_doc, body_doc):
+                if doc not in merged:
+                    merged.append(doc)
+        chosen = list(dict.fromkeys([*anchors, *merged]))[:8]
         skipped = [*observed["skipped"], *(s for _, m in manifests.values() for s in m["skipped"])]
         limited = (len(query_terms) > MAX_QUERY_TERMS or len(postings) > MAX_POSTINGS
                    or relation_limited or len(set([*anchors, *ranked])) > 8
@@ -212,4 +274,4 @@ def discover(store, actor, question, documents, required_documents):
             "indexed_resources": "current_wiki_documents", "registered_originals": "explicit_selection_only",
             "truncated": limited, "skipped": skipped[:20], "matched_documents": len(scores),
             "selected_documents": chosen, "relation_lookup_rows": related_records,
-            "absence_proven": False, "policy": NAMESPACE}
+            "absence_proven": False, "policy": NAMESPACE, "ranking": RANKING_POLICY}

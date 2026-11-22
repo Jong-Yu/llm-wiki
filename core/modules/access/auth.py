@@ -18,7 +18,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from core.common.json_codec import canonical_json_bytes
 from core.modules.access.policy import (
-    AccessPolicy, PolicyError, MAX_POLICY_BYTES, _PERMISSIONS, _TOKEN, _id, _object,
+    AccessPolicy, PolicyError, MAX_POLICY_BYTES, _TOKEN, _id, _object,
     normalize_name,
 )
 from core.modules.documents.store import StorageBusyError
@@ -191,6 +191,7 @@ class AuthService:
                 or type(pending["base_revision"]) is not str):
             raise ValueError("Invalid pending signup")
         desired = pending["policy"]
+        # 새 가입은 공간을 만들지 않지만 구버전이 확정한 가입 의도는 원래 소속으로 복구한다.
         self.policy._validate_policy(desired, pending_tenants={"sdv-platform"} if pending["new_tenant"] else ())
         encoded = canonical_json_bytes(desired)
         if len(encoded) > MAX_POLICY_BYTES:
@@ -239,6 +240,7 @@ class AuthService:
             raise AuthError(422, "invalid_name", "Use a name of 1 to 80 visible characters.") from None
 
     def signup(self, name):
+        """계정만 만든다. 공간 소속과 업무 권한은 별도 관리 절차에서 부여한다."""
         name = self._name(name)
         with self._guard():
             self._recover()
@@ -249,28 +251,16 @@ class AuthService:
                 raise AuthError(409, "user_limit", "This PoC supports at most five users.")
             if self.pending.exists():
                 raise PolicyError()
-            tenant = "sdv-platform"
-            new_tenant = tenant not in policy["tenants"]
-            if new_tenant:
-                directory = self.policy._root / tenant
-                # 기존 자료를 새 workspace에 임의 편입하지 않는다.
-                if directory.exists() or directory.is_symlink():
-                    raise PolicyError()
-                policy["tenants"][tenant] = {"display_name": "SDV 플랫폼",
-                    "profiles": {"default": {"domain": None, "viewpoint": None}}}
-            profiles = sorted(policy["tenants"][tenant]["profiles"])
             user_id, token = "user-" + uuid4().hex, secrets.token_urlsafe(48)
             policy["users"][user_id] = {
                 "display_name": name, "token_sha256": sha256(token.encode("ascii")).hexdigest(),
-                "auth_generation": 0, "default_tenant": tenant,
-                "memberships": {tenant: {"permissions": sorted(_PERMISSIONS), "profiles": profiles,
-                    "default_profile": "default" if "default" in profiles else profiles[0]}},
+                "auth_generation": 0, "default_tenant": None, "memberships": {},
             }
-            self.policy._validate_policy(policy, pending_tenants={tenant} if new_tenant else ())
+            self.policy._validate_policy(policy)
             if len(canonical_json_bytes(policy)) > MAX_POLICY_BYTES:
                 raise PolicyError()
             pending = {"base_revision": revision, "policy": policy, "user_id": user_id,
-                       "credential": self._encrypt(user_id, token).decode("ascii"), "new_tenant": new_tenant}
+                       "credential": self._encrypt(user_id, token).decode("ascii"), "new_tenant": False}
             _publish(self.pending, canonical_json_bytes(pending))
             self._recover()
             return {"token": token, **self.policy.describe(token)}

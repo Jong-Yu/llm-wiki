@@ -22,6 +22,11 @@ export function documentTitleKey(path: string): string {
   return `document:${path}`;
 }
 
+/** 템플릿 상세와 편집이 같은 대상 이름을 알리는 키입니다. */
+export function templateTitleKey(templateId: string): string {
+  return `template:${templateId}`;
+}
+
 /** 원본 상세가 제목을 알리는 키입니다. */
 export function sourceTitleKey(sourceId: string): string {
   return `source:${sourceId}`;

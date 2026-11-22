@@ -1,0 +1,92 @@
+{
+  "passed": true,
+  "checks": [
+    "전역 이력 메뉴 제거, 제품 back/more SCSS와 같은 투명 아이콘 테두리·배경, 이름·hover·focus·Escape 유지",
+    "A: 상단 뒤로가기는 권한→공간 선택→실제 출발 목록 순서, 선택 검색·페이지와 권한 초안·출발 필터 보존",
+    "B: breadcrumb 상위 이동 뒤 하위 배정으로 순환하지 않음; 일반 메뉴는 작업 탐색 이력을 초기화",
+    "공간·사용자 상세 안의 이력과 범위 검색 유지, 정확한 추가·회수 확인, 작은 화면 줄바꿈에서 정보 보존 및 행 밀도 축소",
+    "결과 단계 뒤로가기·재진입은 미확인 결과를 보존, 영수증 확인은 쓰기 0, 완료 대상 재전송 0",
+    "선택한 화면 320/736/1280 밝음·어두움 가로넘침 없음, 터치 아이콘 44px, 브라우저 오류·외부 요청 없음"
+  ],
+  "metrics": {
+    "productBack": {
+      "border": "rgba(0, 0, 0, 0)",
+      "background": "rgba(0, 0, 0, 0)",
+      "width": 36,
+      "height": 36,
+      "outline": "none",
+      "outlineWidth": "3px",
+      "name": "제품 뒤로가기 기준"
+    },
+    "productMore": {
+      "border": "rgba(0, 0, 0, 0)",
+      "background": "rgba(0, 0, 0, 0)",
+      "width": 32,
+      "height": 32,
+      "outline": "none",
+      "outlineWidth": "3px",
+      "name": "제품 더보기 기준"
+    },
+    "adminIcon": {
+      "border": "rgba(0, 0, 0, 0)",
+      "background": "rgba(0, 0, 0, 0)",
+      "width": 32,
+      "height": 32,
+      "outline": "none",
+      "outlineWidth": "3px",
+      "name": "SDV 플랫폼 이름 편집"
+    },
+    "adminIconFocus": {
+      "border": "rgba(0, 0, 0, 0)",
+      "background": "rgba(245, 246, 247, 0.576)",
+      "width": 32,
+      "height": 32,
+      "outline": "solid",
+      "outlineWidth": "2px",
+      "name": "SDV 플랫폼 이름 편집"
+    },
+    "historyRows": [
+      {
+        "height": 58.984375,
+        "text": "권한 변경\n박지호\nSDV 플랫폼\n서버 운영자 · 11. 17. 22:49\n추가 대화 기록\n회수 원본 등록"
+      },
+      {
+        "height": 58.984375,
+        "text": "사용자 배정\n이하린\nSDV 플랫폼\n서버 운영자 · 11. 16. 09:20\n추가 자료 읽기"
+      },
+      {
+        "height": 58.984375,
+        "text": "권한 변경\n박지호\nSDV 플랫폼\n서버 운영자 · 11. 15. 14:05\n추가 원본 등록 · 위키 편집"
+      }
+    ],
+    "touchIcon": {
+      "border": "rgba(0, 0, 0, 0)",
+      "background": "rgba(0, 0, 0, 0)",
+      "width": 44,
+      "height": 44,
+      "outline": "none",
+      "outlineWidth": "3px",
+      "name": "SDV 플랫폼 이름 편집"
+    }
+  },
+  "screenshots": [
+    "workspaces-icons-light-1280.png",
+    "assignment-workspace-picker-light-1280.png",
+    "workspace-history-light-1280.png",
+    "history-light-1280.png",
+    "history-dark-1280.png",
+    "history-light-736.png",
+    "history-dark-736.png",
+    "history-light-320.png",
+    "history-dark-320.png",
+    "user-history-light-1280.png",
+    "workspaces-icons-light-320.png",
+    "workspaces-icons-dark-320.png"
+  ],
+  "errors": [],
+  "requests": [],
+  "verifiedAt": "2026-11-17T13:49:28.668Z",
+  "scope": "v5 세 피드백에 대한 모의 콘솔 기능·동선·시각 검증; 실제 관리자 API 또는 사용자 사용성 승인 아님",
+  "productReference": "제품 SCSS를 임시 기준 요소에 적용한 계산 스타일; 전체 제품 컴포넌트 렌더 아님",
+  "previousEvidence": "../admin-console-v4/"
+}

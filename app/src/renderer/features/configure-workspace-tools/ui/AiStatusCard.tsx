@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import type {
   RuntimeRequest,
   CliConnection,
+  DiagnosticReport,
 } from '@contracts/runtime.contract';
 import type { AiConnectionLevel } from '@renderer/shared/lib/useAiConnection';
 import {
@@ -24,6 +25,10 @@ type AiStatusCardProps = {
   onRequest: (request: RuntimeRequest) => Promise<void>;
   onChangePath: () => void;
   advancedId: string;
+  /** Windows의 Claude 호출 실패에서만 진단 보고서 버튼을 보입니다. */
+  canDiagnose: boolean;
+  diagnosing: boolean;
+  diagnosticReport?: DiagnosticReport;
 };
 const tones: Record<AiConnectionLevel, StatusNoticeProps['tone']> = {
   verified: 'success',
@@ -53,6 +58,9 @@ export function AiStatusCard({
   onRequest,
   onChangePath,
   advancedId,
+  canDiagnose,
+  diagnosing,
+  diagnosticReport,
 }: AiStatusCardProps): JSX.Element {
   const code = connection?.code;
   const callFailed = code?.startsWith('ai_') === true;
@@ -162,6 +170,49 @@ export function AiStatusCard({
         action={action}
       >
         {description}
+        {level === 'error' && code && (
+          <details>
+            <summary>문제 상세</summary>
+            <p className={styles.note}>
+              오류 코드: <code>{code}</code>
+            </p>
+            {connection?.event && (
+              <p className={styles.note}>
+                멈춘 메시지 종류: <code>{connection.event}</code>
+              </p>
+            )}
+            {canDiagnose && (
+              <>
+                <p className={styles.note}>
+                  진단 보고서는 Claude를 한 번 호출해 실행 단계와 메시지 종류만
+                  기록합니다. 경로·계정·응답 내용은 남기지 않습니다.
+                </p>
+                <Button
+                  variant="surface"
+                  type="button"
+                  className={`${styles.button} ${cardStyles.actionButton}`}
+                  disabled={busy}
+                  onClick={(): void => {
+                    void onRequest({ operation: 'diagnose-claude' });
+                  }}
+                >
+                  {diagnosing ? '진단하는 중…' : '진단 보고서 만들기'}
+                </Button>
+                {diagnosticReport && !diagnosing && (
+                  <p className={styles.note} role="status">
+                    {diagnosticReport.message}
+                    {diagnosticReport.path && (
+                      <>
+                        {' '}
+                        <code>{diagnosticReport.path}</code>
+                      </>
+                    )}
+                  </p>
+                )}
+              </>
+            )}
+          </details>
+        )}
       </StatusNotice>
       {(level === 'required' || level === 'unknown') && (
         <button

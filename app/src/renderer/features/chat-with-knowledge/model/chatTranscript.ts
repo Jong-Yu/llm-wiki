@@ -1,6 +1,6 @@
 import type { KnowledgeValue } from '@contracts/knowledge.contract';
 import type { QuestionAnswer } from '@contracts/questionRuns.contract';
-import type { ChatTurn } from './chatState';
+import type { ChatPending, ChatTurn } from './chatState';
 import { splitQuestion } from './externalMaterial';
 import type { QuestionContent } from './externalMaterial';
 
@@ -18,6 +18,30 @@ export type ChatMessage =
       questionTurnId: string | null;
       citations: KnowledgeValue[];
     };
+
+export type SubmittedChatQuestion = { id: string; content: string };
+export type SubmittedChatDraft = SubmittedChatQuestion & { threadId: string };
+
+/** 접수 중인 질문을 표시하고, 보호 복구 후에도 실제 저장된 질문과 중복하지 않습니다. */
+export function visibleSubmittedQuestion(
+  submitted: SubmittedChatDraft | null,
+  pending: ChatPending | null,
+  threadId: string,
+  turns: readonly ChatTurn[],
+): SubmittedChatQuestion | null {
+  const candidate =
+    submitted?.threadId === threadId
+      ? submitted
+      : pending?.threadId === threadId &&
+          pending.step === 'question' &&
+          pending.sentQuestion !== undefined
+        ? { id: pending.requestId, content: pending.sentQuestion }
+        : null;
+  return candidate &&
+    !turns.some((turn: ChatTurn): boolean => turn.id === candidate.id)
+    ? candidate
+    : null;
+}
 
 /** 질문·답변 대응과 인용 우선순위를 한 번 계산해 본문과 근거 패널이 같은 자료를 표시합니다. */
 export function buildChatTranscript(

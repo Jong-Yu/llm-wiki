@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { open, readFile, writeFile, rename, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { assignTestWorkspace } from './assignment';
 import { app, BrowserWindow } from 'electron';
 import { ConnectionService } from '@main/backend/ConnectionService';
 import type { AnalysisContext } from '@main/backend/ConnectionService';
@@ -114,6 +115,20 @@ async function capture(window: BrowserWindow, name: string): Promise<void> {
     );
 }
 
+/** 실제 렌더러가 비동기 IPC 상태를 반영할 때까지 지정 조건만 기다립니다. */
+async function waitForRenderer(
+  window: BrowserWindow,
+  condition: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await window.webContents.executeJavaScript(condition)) return;
+    await new Promise<void>((done: () => void): void => {
+      setTimeout(done, 100);
+    });
+  }
+  throw new Error(`Renderer condition not reached: ${condition}`);
+}
+
 async function verify(): Promise<void> {
   await app.whenReady();
   const cipher = createConnectionCipher();
@@ -131,6 +146,20 @@ async function verify(): Promise<void> {
         );
         assert.equal(restored.displayName, 'UI 검증 사용자');
         assert.equal(restored.selection?.tenant, 'sdv-platform');
+      },
+    );
+    await check(
+      'new Electron process discovers assignment of an OS protected waiting account',
+      async (): Promise<void> => {
+        const restored = connected(
+          await service('waiting-restart', cipher).initialize(),
+        );
+        assert.equal(restored.displayName, 'UI 재시작 대기');
+        assert.deepEqual(restored.selection, {
+          tenant: 'sdv-platform',
+          profile: 'default',
+        });
+        assert.equal(restored.protection?.remembered, true);
       },
     );
     await check(
@@ -154,17 +183,39 @@ async function verify(): Promise<void> {
   let registeredFixture: ImportRegistration | undefined;
   let jobFixture: AnalysisDetail | undefined;
   await check(
-    'real HTTP signup, default workspace and token never crosses public contract',
+    'real HTTP unassigned signup, protected restart, explicit assignment refresh and private token',
     async (): Promise<void> => {
-      const publicState = connected(
+      const waiting = connected(
         await connection.authenticate({
           name: 'UI 검증 사용자',
           serverUrl,
           mode: 'signup',
         }),
       );
+      assert.equal(waiting.selection, null);
+      assert.deepEqual(waiting.workspaces, []);
+      assert.equal(waiting.protection?.remembered, true);
+      assert.equal(connection.localContext(), null);
+      connection = service('protected', cipher);
+      const restoredWaiting = connected(await connection.initialize());
+      assert.equal(restoredWaiting.userId, waiting.userId);
+      assert.equal(restoredWaiting.selection, null);
+      assert.deepEqual(restoredWaiting.workspaces, []);
+      const blocked = await connection.listDocuments({
+        connectionId: restoredWaiting.connectionId,
+        cursor: null,
+        limit: 20,
+      });
+      assert.equal(blocked.ok, false);
+      await assignTestWorkspace(
+        join(appRoot, '..'),
+        join(root, 'server'),
+        waiting.userId,
+      );
+      const publicState = connected(await connection.refreshAccess());
+      assert.equal(publicState.connectionId, restoredWaiting.connectionId);
       assert.equal(publicState.selection?.tenant, 'sdv-platform');
-      assert.equal(publicState.workspaces[0]?.displayName, 'SDV 플랫폼');
+      assert.equal(publicState.workspaces[0]?.displayName, '테스트 작업 공간');
       assert.equal(publicState.protection?.remembered, true);
       const local = connection.localContext();
       assert.ok(local);
@@ -216,13 +267,21 @@ async function verify(): Promise<void> {
     async (): Promise<void> => {
       const active = connected(connection.getState());
       const other = service('other', cipher);
-      connected(
+      const waiting = connected(
         await other.authenticate({
           name: 'UI 두 번째',
           serverUrl,
           mode: 'signup',
         }),
       );
+      assert.equal(waiting.selection, null);
+      assert.deepEqual(waiting.workspaces, []);
+      await assignTestWorkspace(
+        join(appRoot, '..'),
+        join(root, 'server'),
+        waiting.userId,
+      );
+      connected(await other.refreshAccess());
       const current = await connection.analysisContext(active.connectionId);
       assert.ok(!('ok' in current));
       const fresh = await fetchOriginal(`${serverUrl}/api/v1/access-context`, {
@@ -850,8 +909,22 @@ async function verify(): Promise<void> {
       mode: 'login',
     }),
   );
+  const restartWaiting = connected(
+    await service('waiting-restart', cipher).authenticate({
+      name: 'UI 재시작 대기',
+      serverUrl,
+      mode: 'signup',
+    }),
+  );
+  assert.equal(restartWaiting.selection, null);
+  assert.equal(restartWaiting.protection?.remembered, true);
+  await assignTestWorkspace(
+    join(appRoot, '..'),
+    join(root, 'server'),
+    restartWaiting.userId,
+  );
   await check(
-    'actual Electron renderer/preload/main sign-in and logout',
+    'actual Electron renderer/preload/main login, unassigned signup, assignment refresh and logout',
     async (): Promise<void> => {
       const location = pathToFileURL(
         join(appRoot, 'out/renderer/index.html'),
@@ -1080,6 +1153,91 @@ async function verify(): Promise<void> {
         true,
         'Logout must unmount application navigation',
       );
+      const requestLog = join(root, 'server/test-request-paths.txt');
+      const previousRequests = (await readFile(requestLog, 'utf8'))
+        .trim()
+        .split('\n').length;
+      await window.webContents.executeJavaScript(
+        "document.querySelector('input[value=signup]').click()",
+      );
+      await waitForRenderer(
+        window,
+        "document.querySelector('input[name=name]') !== null",
+      );
+      await window.webContents.executeJavaScript(`(() => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        for (const [name, value] of Object.entries(${JSON.stringify({ name: 'UI 배정 대기', serverUrl })})) {
+          const input = document.querySelector('input[name="' + name + '"]');
+          setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      })()`);
+      await window.webContents.executeJavaScript(
+        "document.querySelector('form').requestSubmit()",
+      );
+      await waitForRenderer(
+        window,
+        "document.body.innerText.includes('워크스페이스 배정 대기')",
+      );
+      const waiting = connected(
+        parseConnectionResult(
+          await window.webContents.executeJavaScript(
+            'window.wiki.connection.getState()',
+          ),
+        ),
+      );
+      assert.equal(waiting.selection, null);
+      assert.deepEqual(waiting.workspaces, []);
+      assert.equal(waiting.protection?.remembered, true);
+      assert.equal(
+        await window.webContents.executeJavaScript(
+          "document.querySelector('header, aside, nav') === null",
+        ),
+        true,
+      );
+      await capture(window, 'assignment-waiting');
+      const waitingRequests = (await readFile(requestLog, 'utf8'))
+        .trim()
+        .split('\n')
+        .slice(previousRequests);
+      assert(waitingRequests.includes('/api/v1/auth/signup'));
+      assert(
+        waitingRequests.every((path: string): boolean =>
+          ['/api/v1/auth/signup', '/api/v1/access-context'].includes(path),
+        ),
+        'Waiting renderer must not request business endpoints',
+      );
+      await assignTestWorkspace(
+        join(appRoot, '..'),
+        join(root, 'server'),
+        waiting.userId,
+      );
+      await window.webContents.executeJavaScript(
+        'document.querySelector(\'button[aria-label="워크스페이스 배정 다시 확인"]\').click()',
+      );
+      await waitForRenderer(
+        window,
+        "document.querySelector('header') !== null && document.querySelector('aside') !== null",
+      );
+      const assigned = connected(
+        parseConnectionResult(
+          await window.webContents.executeJavaScript(
+            'window.wiki.connection.getState()',
+          ),
+        ),
+      );
+      assert.equal(assigned.connectionId, waiting.connectionId);
+      assert.deepEqual(assigned.selection, {
+        tenant: 'sdv-platform',
+        profile: 'default',
+      });
+      await window.webContents.executeJavaScript(
+        "location.hash = '#/document?path=ui-proof.md'",
+      );
+      await waitForRenderer(
+        window,
+        "document.body.innerText.includes('사람 수정')",
+      );
+      await capture(window, 'assignment-entered');
       window.destroy();
       window = null;
       await stop();

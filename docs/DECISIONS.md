@@ -8,6 +8,9 @@
 
 | 결정 | 소유 도메인 | 본문 |
 | --- | --- | --- |
+| D-131 | `knowledge` | [큰 등록 템플릿의 묶음 작성과 단일 산출물 저장](domains/knowledge/DECISIONS.md#d-131--큰-등록-템플릿의-묶음-작성과-단일-산출물-저장-2026-11-16) |
+| D-130 | `knowledge` | [등록 템플릿 질문의 전체 원문 선조회와 불완전 생성 차단](domains/knowledge/DECISIONS.md#d-130--등록-템플릿-질문의-전체-원문-선조회와-불완전-생성-차단-2026-11-15) |
+| D-129 | `platform` | [등록 템플릿의 불변 판본과 채팅 산출물 생성](domains/platform/DECISIONS.md#d-129--등록-템플릿의-불변-판본과-채팅-산출물-생성-2026-11-15) |
 | D-001 | `workflow` | [작업 위치와 파일 역할](domains/workflow/DECISIONS.md#d-001--작업-위치와-파일-역할) |
 | D-002 | `documents` | [전체 파일 버저닝](domains/documents/DECISIONS.md#d-002--전체-파일-버저닝) |
 | D-003 | `workflow` | [단계별 확장](domains/workflow/DECISIONS.md#d-003--단계별-확장) |
@@ -132,6 +135,20 @@
 | D-122 | `knowledge` | [첫 검색어 정밀 안내의 소규모 비교와 기본 도입 보류](domains/knowledge/DECISIONS.md#d-122--첫-검색어-정밀-안내의-소규모-비교와-기본-도입-보류-2026-11-08) |
 | D-123 | `knowledge` | [검색 후보를 보존하는 일치 구절 우선 페이지와 도입 보류](domains/knowledge/DECISIONS.md#d-123--검색-후보를-보존하는-일치-구절-우선-페이지와-도입-보류-2026-11-08) |
 | D-124 | `knowledge` | [기존 관계·판단 색인과 첫 답변 전 고정 근거 제공](domains/knowledge/DECISIONS.md#d-124--기존-관계판단-색인과-첫-답변-전-고정-근거-제공-2026-11-08) |
+| D-125 | `knowledge` | [현재 질문을 사용하는 웹 검색 토글](domains/knowledge/DECISIONS.md#d-125--현재-질문을-사용하는-웹-검색-토글-2026-11-10) |
+| D-126 | `ui` | [질문 즉시 표시와 질문별 실행 상태 보존](domains/ui/DECISIONS.md#d-126--질문-즉시-표시와-질문별-실행-상태-보존-2026-11-10) |
+| D-127 | `knowledge` | [질문별 판본 표식과 원래값 공개 후보의 기본 도입 보류](domains/knowledge/DECISIONS.md#d-127--질문별-판본-표식과-원래값-공개-후보의-기본-도입-보류-2026-11-10) |
+| D-128 | `knowledge` | [초기 인용문 참조화와 반복 일관성 미달로 기본 도입 보류](domains/knowledge/DECISIONS.md#d-128--초기-인용문-참조화와-반복-일관성-미달로-기본-도입-보류-2026-11-13) |
+| D-132 | `access` | [신규 가입과 관리자 워크스페이스 배정 분리](domains/access/DECISIONS.md#d-132--신규-가입과-관리자-워크스페이스-배정-분리-2026-11-17) |
 | D-133 | `analysis` | [공통·단계별 모델 지침과 출력 스키마 중복 분리](domains/analysis/DECISIONS.md#d-133--공통단계별-모델-지침과-출력-스키마-중복-분리-2026-11-18) |
 | D-134 | `platform` | [기능별 MCP 안내와 사용자 선택 프롬프트](domains/platform/DECISIONS.md#d-134--기능별-mcp-안내와-사용자-선택-프롬프트-2026-11-18) |
 | D-135 | `platform` | [역할별 MCP 도구 묶음과 읽기 본문 보기](domains/platform/DECISIONS.md#d-135--역할별-mcp-도구-묶음과-읽기-본문-보기-2026-11-19) |
+| D-136 | `analysis` | [추출 입력의 규약 우선 배치(실측 후 철회)](domains/analysis/DECISIONS.md#d-136--추출-입력의-규약-우선-배치-2026-11-19) |
+| D-137 | `knowledge` | [질문 한 번의 후보 탐색과 근거 준비 MCP 도구](domains/knowledge/DECISIONS.md#d-137--질문-한-번의-후보-탐색과-근거-준비-mcp-도구-2026-11-19) |
+| D-138 | `knowledge` | [질문 근거 read의 요청 줄 범위 한 번에 주기(앱 기본 적용)](domains/knowledge/DECISIONS.md#d-138--질문-근거-read의-요청-줄-범위-한-번에-주기-2026-11-19) |
+| D-139 | `knowledge` | [질문 한 번 조회의 결과를 질문에 맞는 단락·지식으로 줄이기](domains/knowledge/DECISIONS.md#d-139--질문-한-번-조회의-결과를-질문에-맞는-단락지식으로-줄이기-2026-11-20) |
+| D-140 | `knowledge` | [질문 조회 결과를 더 줄이고 줄 범위 읽기를 더하기](domains/knowledge/DECISIONS.md#d-140--질문-조회-결과를-더-줄이고-줄-범위-읽기를-더하기-2026-11-20) |
+| D-141 | `documents` | [문서당 크기 한도 없애기](domains/documents/DECISIONS.md#d-141--문서당-크기-한도-없애기-2026-11-20) |
+| D-142 | `knowledge` | [온톨로지가 없는 문서도 본문으로 질문 후보 순위에 넣기](domains/knowledge/DECISIONS.md#d-142--온톨로지가-없는-문서도-본문으로-질문-후보-순위에-넣기-2026-11-20) |
+| D-143 | `platform` | [Claude 상태 알림과 실행 환경 진단의 호환](domains/platform/DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22) |
+| D-144 | `platform` | [이전 앱 사본의 실행기 경로를 현재 앱 실행기로 바꾸기](domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22) |

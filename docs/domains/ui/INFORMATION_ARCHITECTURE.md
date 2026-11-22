@@ -168,6 +168,8 @@ Wiki 상세의 AI 작업에서 실제 지원하는 추출 준비·입력 확인�
 | 화면 | 주소 예 |
 | --- | --- |
 | 문서·원본 목록 / 등록 | `/documents`, `/register` |
+| 템플릿 목록 / 등록 / 상세·편집 | `/templates`, `/templates?mode=register`, `/templates?templateId=…`와 `mode=edit`. 대상·모드별 초안 보존 |
+| 등록 템플릿으로 질문 시작 | `/chat?templateId=…` → 현재 채팅의 템플릿 선택만 적용하고 대화 주소로 정규화. 자동 전송 없음 |
 | 원본 상세 / Wiki 상세 | `/source?sourceId=…&version=…`, `/document?path=…` |
 | Wiki 편집 / 이력 | `/document?path=…&mode=edit`, `/document?path=…&tab=history&historyId=…` |
 | 전체 온톨로지 / 문서별 온톨로지 | `/ontology`, `/ontology?path=…` |

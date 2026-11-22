@@ -67,11 +67,17 @@ export type QuestionSearchTermsRequest = z.infer<
 >;
 /** 실패·취소·시간 초과는 오류가 아니라 빈 목록으로, 호출자는 기존 검색만으로 계속합니다. */
 export type QuestionSearchTermsResult = { terms: string[] };
-/** 명시한 공개 검색어만 웹 조사에 전달합니다. 위키·첨부·대화는 받지 않습니다. */
-export const questionWebSearchSchema = questionSessionSchema.extend({
-  query: z.string().trim().min(1).max(200),
-});
+/** 현재 질문 또는 기존 공개 검색어 하나만 받습니다. 위키·첨부·이전 대화는 받지 않습니다. */
+export const questionWebSearchSchema = z.union([
+  questionSessionSchema.extend({ query: z.string().trim().min(1).max(200) }),
+  questionSessionSchema.extend({
+    question: z.string().trim().min(1).max(16000),
+  }),
+]);
 export type QuestionWebSearchRequest = z.infer<typeof questionWebSearchSchema>;
+export type QuestionWebSearchInput =
+  | { query: string; question?: never }
+  | { question: string; query?: never };
 const questionWebSearchResultSchema = z.strictObject({
   web: webEvidenceInputSchema,
 });

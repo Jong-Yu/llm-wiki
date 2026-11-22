@@ -4,8 +4,10 @@
 새 개체 동일성·승인·부재를 확정하거나 원문·검토 원장을 변경하지 않는다.
 """
 
+from collections import OrderedDict
 from copy import deepcopy
 import re
+from threading import Lock
 import unicodedata
 
 from core.common.json_codec import canonical_json_bytes, canonical_json_hash
@@ -18,6 +20,8 @@ MAX_PASSAGE_CHARACTERS = 3000
 MAX_RESULTS = 20
 MAX_READ_LINES = 100
 RANKED_SEARCH_POLICY = "coverage-tiers-v1"
+# 요청한 원문 줄 창(최대 MAX_READ_LINES)을 단락 수가 아니라 응답 바이트 한도로만 나눠 한 번에 준다.
+WHOLE_WINDOW_READ_POLICY = "whole-window-v1"
 _MATERIAL = re.compile(r"([dow])([1-9][0-9]{0,2})\Z")
 _SPAN = re.compile(r"([sow])([1-9][0-9]{0,2}):([1-9][0-9]{0,6}):([1-9][0-9]{0,6})\Z")
 _RECORD = re.compile(r"([chp])([1-9][0-9]{0,2}):([1-9][0-9]{0,6})\Z")
@@ -101,7 +105,15 @@ def _search_tiers(candidates, query, selected):
             + [item for index, item in enumerate(candidates) if index not in primary], len(primary))
 
 
-def _lines(content):
+# 같은 조회에서 한 문서 본문을 수백 번 줄로 나누므로 최근 본문의 결과를 재사용한다(2026-11-22 측정).
+# 본문 문자열 자체가 키라 판본이 바뀌면 새 항목이 된다. 가장 최근 항목은 한도를 넘어도 남긴다.
+_LINE_CACHE = OrderedDict()
+_LINE_CACHE_LOCK = Lock()
+_LINE_CACHE_ENTRIES = 16
+_LINE_CACHE_CHARACTERS = 64 * 1024 * 1024
+
+
+def _split_lines(content):
     """CR/LF만 줄 경계로 사용해 원문의 Unicode 구분자를 새 줄로 만들지 않는다."""
     if not isinstance(content, str):
         raise ValueError("Frozen material content must be text")
@@ -109,6 +121,36 @@ def _lines(content):
     if starts[-1] == len(content):
         starts.pop()
     return [content[start:end] for start, end in zip(starts, [*starts[1:], len(content)])]
+
+
+def _line_number(content, offset):
+    """offset 글자가 놓인 1부터 센 줄 번호. content[:offset]를 _split_lines로 나눈 결과와 같다.
+
+    앞부분을 복사해 나누지 않고 줄바꿈(\r\n·\r·\n) 수만 센다. offset 바로 앞이 \r이고 그 자리가 \n이면
+    잘린 앞부분에서처럼 \r 하나를 줄바꿈으로 센다.
+    """
+    return (content.count("\n", 0, offset) + content.count("\r", 0, offset)
+            - content.count("\r\n", 0, offset) + 1)
+
+
+def _lines(content):
+    """_split_lines와 같은 줄을 바꿀 수 없는 tuple로 돌려준다. 같은 본문은 다시 나누지 않는다."""
+    if not isinstance(content, str):
+        raise ValueError("Frozen material content must be text")
+    with _LINE_CACHE_LOCK:
+        cached = _LINE_CACHE.get(content)
+        if cached is not None:
+            _LINE_CACHE.move_to_end(content)
+            return cached
+    lines = tuple(_split_lines(content))
+    with _LINE_CACHE_LOCK:
+        _LINE_CACHE[content] = lines
+        _LINE_CACHE.move_to_end(content)
+        total = sum(len(key) for key in _LINE_CACHE)
+        while len(_LINE_CACHE) > 1 and (len(_LINE_CACHE) > _LINE_CACHE_ENTRIES or total > _LINE_CACHE_CHARACTERS):
+            removed, _ = _LINE_CACHE.popitem(last=False)
+            total -= len(removed)
+    return lines
 
 
 def _materials(basis):
@@ -384,10 +426,37 @@ def _history_items(identifier, material):
             for index, (ledger, event) in enumerate(_events(knowledge), 1)]
 
 
-def read_evidence(basis, query, *, ranked_search=False):
-    """검색·원문 범위·현재 주장·검토 이력을 고정 근거 안에서만 제한해 제공한다."""
+# 축약 검토 이벤트에 남기는 필드. 판단 전후 값은 같은 묶음의 claim 항목(source_value)과 겹치므로 뺀다.
+_COMPACT_EVENT_KEYS = ("id", "action", "collection", "claim_id", "timestamp", "reason", "undo_of", "kind", "scope", "value")
+
+
+def _compact_review(item):
+    """검토 이벤트를 판단 ID·종류·이유·시각·상태 번호로 줄인다.
+
+    수용·반려·보류는 판단 뒤 값이 claim의 원래 값과 같으므로 전후 값을 뺀다. 정정·되돌림 등 다른
+    종류는 바뀐 값(after)을 남긴다. 판단 주체는 user_id·profile_id만 남기며, 전체 이벤트는
+    ontology_review_query가 그대로 제공한다.
+    """
+    event = item["event"]
+    compact = {key: deepcopy(event[key]) for key in _COMPACT_EVENT_KEYS if key in event}
+    if event.get("action") not in {"accept", "reject", "defer"} and "after" in event:
+        compact["after"] = deepcopy(event["after"])
+    actor = event.get("actor")
+    if isinstance(actor, dict):
+        compact["actor"] = {key: actor[key] for key in ("user_id", "profile_id") if key in actor}
+    return {**item, "event": compact, "event_detail": "compact"}
+
+
+def read_evidence(basis, query, *, ranked_search=False, whole_window=False):
+    """검색·원문 범위·현재 주장·검토 이력을 고정 근거 안에서만 제한해 제공한다.
+
+    whole_window는 read의 요청 줄 창을 limit 단락에서 끊지 않는다. 응답 바이트 한도와
+    next_offset 이어읽기는 그대로라서, 짧은 단락이 많은 원문을 여러 모델 왕복으로 나눠 받지 않는다.
+    """
     if type(ranked_search) is not bool:
         raise ValueError("ranked_search must be a boolean")
+    if type(whole_window) is not bool:
+        raise ValueError("whole_window must be a boolean")
     if not isinstance(query, dict) or set(query) - _QUERY_KEYS:
         raise ValueError("Invalid evidence query fields")
     action = query.get("action")
@@ -399,11 +468,15 @@ def read_evidence(basis, query, *, ranked_search=False):
     identifier = query.get("material_id")
     if identifier is not None and not isinstance(identifier, str):
         raise ValueError("Invalid material ID")
-    if action != "search" and identifier is None:
+    if action == "read" and identifier is None:
         raise ValueError("This evidence action needs a material ID")
     selected = _selected_materials(basis, identifier)
-    if action in {"claims", "history"} and not identifier.startswith("d"):
-        raise ValueError("Claims and history belong to Wiki documents")
+    if action in {"claims", "history"}:
+        if identifier is not None and not identifier.startswith("d"):
+            raise ValueError("Claims and history belong to Wiki documents")
+        # null은 현재 질문에 고정된 Wiki 문서 전체다. 원래 dN/인용 번호와
+        # 단일 전역 offset을 유지하며 원본·웹 자료를 판단 원장으로 읽지 않는다.
+        selected = [(key, value) for key, value in selected if key.startswith("d")]
     offset = _integer(query.get("offset"), "offset", 0, 0, 1000000)
     limit = _integer(query.get("limit"), "limit", 5, 1, MAX_RESULTS)
     candidates, skipped, window = [], [], None
@@ -440,6 +513,8 @@ def read_evidence(basis, query, *, ranked_search=False):
     cursor = offset
     if window is not None:
         result["read_window"] = _read_window(*window, candidates, cursor, result["items"], skipped)
+    if whole_window and action == "read":
+        limit = max(limit, len(candidates))
     while cursor < len(candidates) and len(result["items"]) < limit:
         if cursor == tier_boundary and result["items"]:
             break
@@ -481,12 +556,49 @@ def read_evidence(basis, query, *, ranked_search=False):
     return result
 
 
-def initial_evidence(basis, question):
-    """고정 근거의 관계·판단·원문을 묶어 첫 호출에 제공한다. 모델은 호출하지 않는다."""
-    from .question_index import folded, mentions, terms, searchable, without_evidence
+def _append_initial_group(basis, result, group, seen):
+    candidate = deepcopy(result)
+    pending = set()
+    for item in group["items"]:
+        identifier = item.get("evidence_id", item.get("item_id"))
+        item_key = item.get("item_id", identifier)
+        if item_key in seen or item_key in pending:
+            continue
+        pending.add(item_key)
+        item = deepcopy(item)
+        try:
+            citation = resolve_evidence_ids(basis, [identifier])[0]
+        except ValueError:
+            citation = None
+            item["citation_status"] = "no_exact_source_or_applicable_event"
+        if citation is not None and identifier not in candidate["evidence_ids"]:
+            item["evidence_id"] = identifier
+            candidate["evidence_ids"].append(identifier)
+            candidate["citations"].append({"evidence_id": identifier, "citation": citation})
+        candidate["items"].append(item)
+    return candidate, seen | pending
+
+
+def initial_evidence(basis, question, *, compact_citations=False, max_bytes=None, body_passages=True,
+                     compact_reviews=False):
+    """고정 근거의 관계·판단·원문을 묶어 첫 호출에 제공한다. 모델은 호출하지 않는다.
+
+    max_bytes(None이면 응답 한도)·body_passages·compact_reviews의 기본값은 앱 첫 근거와 같다. MCP 질문 조회는
+    원문 단락을 따로 고르므로 본문 단락 없이 더 작은 한도로 지식 묶음만 받고, 검토 이벤트는 판단 식별·이유만
+    남긴 축약형(_compact_review)으로 받아 같은 한도에 더 많은 판단을 담는다.
+    """
+    from .question_index import folded, mentions, overlap_counter, terms, searchable, without_evidence
     from collections import defaultdict
 
+    if type(compact_citations) is not bool or type(body_passages) is not bool or type(compact_reviews) is not bool:
+        raise ValueError("compact_citations, body_passages and compact_reviews must be booleans")
+    review_item = _compact_review if compact_reviews else (lambda item: item)
+    if max_bytes is None:
+        max_bytes = MAX_RESPONSE_BYTES
+    elif type(max_bytes) is not int or not 8 * 1024 <= max_bytes <= MAX_RESPONSE_BYTES:
+        raise ValueError("max_bytes must be from 8 KiB to the response limit")
     wanted = terms(question)
+    overlap = overlap_counter(wanted)
     groups = {}
     omissions = []
     scanned = 0
@@ -526,7 +638,7 @@ def initial_evidence(basis, question):
             # 동일 표면 이름은 함께 포장하되 문서별 ID/맥락은 유지하며 동일성으로 승격하지 않는다.
             key = ("relation", labels) if "object" in value else ("attribute", labels, value.get("property"))
             local[key].append(item)
-            score = 10 * len(endpoints & matched) + len(wanted & terms(searchable(item)))
+            score = 10 * len(endpoints & matched) + overlap(searchable(item))
             local_scores[key] = max(local_scores[key], score)
         for key, items in local.items():
             if not local_scores[key]:
@@ -546,8 +658,9 @@ def initial_evidence(basis, question):
                     if not quote or quote not in material["content"]:
                         continue
                     offset = material["content"].find(quote)
-                    first = len(_lines(material["content"][:offset])) + (0 if offset and material["content"][offset - 1] not in "\r\n" else 1)
-                    last = first + len(_lines(quote)) - 1
+                    first = _line_number(material["content"], offset)
+                    # 인용문은 한 번만 쓰는 문자열이라 줄 캐시에 넣지 않는다.
+                    last = first + len(_split_lines(quote)) - 1
                     try:
                         passage = _span_item(material_id, material, first, last)
                         # 같은 인용문이 여러 번 등장해도 실제 제공한 전체파일 위치만 사용한다.
@@ -567,21 +680,21 @@ def initial_evidence(basis, question):
                                 or h["is_current_judgment"] or h["pending"]
                                 or h["event"].get("action") in {"policy_undo", "relation_undo"})
                     if relevant:
-                        group["items"].append(without_evidence(h))
+                        group["items"].append(review_item(without_evidence(h)))
                 # 적용 정책의 실제 Action log도 함께 제공한다.
                 for event_id in (raw.get("value", {}).get("event_id"), raw.get("value", {}).get("decision_event_id")):
                     if event_id in histories:
-                        group["items"].append(without_evidence(histories[event_id]))
+                        group["items"].append(review_item(without_evidence(histories[event_id])))
         if scanned > max_records:
             omissions.append({"material_id": material_id, "code": "initial_record_limit"})
             break
 
     # 추출되지 않은 자료와 정의/설명도 원문 단락에서 찾는다. 이 검색은 의미상 완전성을 증명하지 않는다.
-    for material_id, material in _materials(basis):
+    for material_id, material in (_materials(basis) if body_passages else []):
         lines = _lines(material["content"])
         passages, skipped = _passages(material_id, material, 1, len(lines))
         omissions.extend({"material_id": material_id, **s} for s in skipped[:4])
-        ranked = sorted(((len(wanted & terms(p["text"])), p) for p in passages), key=lambda row: -row[0])
+        ranked = sorted(((overlap(p["text"]), p) for p in passages), key=lambda row: -row[0])
         for score, passage in ranked[:2]:
             if score:
                 groups[("passage", material_id, passage["start_line"])] = {"items": [passage], "score": score}
@@ -594,36 +707,45 @@ def initial_evidence(basis, question):
                   "identity": "document_local_no_automatic_merge", "semantic_completeness": "not_proven"},
         "total_matches": len(groups), "complete": False, "truncated": False, "skipped": [],
         "next_offset": None, "scanned_records": min(scanned, max_records)}
-    seen = set()
+    empty = deepcopy(result)
+    seen, selected, omitted_groups = set(), set(), {}
     ordered = sorted(groups.items(), key=lambda entry: (-entry[1]["score"], str(entry[0])))
     for number, (key, group) in enumerate(ordered):
         if number >= 64:
             omissions.append({"code": "initial_group_count_limit"})
             break
-        candidate = deepcopy(result)
-        pending = set()
-        for item in group["items"]:
-            identifier = item.get("evidence_id", item.get("item_id"))
-            item_key = item.get("item_id", identifier)
-            if item_key in seen or item_key in pending:
-                continue
-            pending.add(item_key)
-            item = deepcopy(item)
-            try:
-                citation = resolve_evidence_ids(basis, [identifier])[0]
-            except ValueError:
-                citation = None
-                item["citation_status"] = "no_exact_source_or_applicable_event"
-            if citation is not None and identifier not in candidate["evidence_ids"]:
-                item["evidence_id"] = identifier
-                candidate["evidence_ids"].append(identifier)
-                candidate["citations"].append({"evidence_id": identifier, "citation": citation})
-            candidate["items"].append(item)
-        if len(canonical_json_bytes(candidate)) > MAX_RESPONSE_BYTES - 4096:
-            omissions.append({"code": "initial_group_byte_limit", "group": canonical_json_hash(key),
-                              "material_ids": sorted({i["material_id"] for i in group["items"]})})
+        candidate, candidate_seen = _append_initial_group(basis, result, group, seen)
+        if len(canonical_json_bytes(candidate)) > max_bytes - 4096:
+            omission = {"code": "initial_group_byte_limit", "group": canonical_json_hash(key),
+                        "material_ids": sorted({i["material_id"] for i in group["items"]})}
+            omissions.append(omission)
+            omitted_groups[number] = omission
             continue
-        result, seen = candidate, seen | pending
+        result, seen = candidate, candidate_seen
+        selected.add(number)
+    if compact_citations:
+        from core.common.evidence_transport import compact_initial_citations
+        # Preserve every group the legacy budget admitted. A new earlier group
+        # must not displace an existing later group merely because it now fits.
+        retained_items = {item.get("item_id", item.get("evidence_id")): deepcopy(item) for item in result["items"]}
+        retained_citations = {row["evidence_id"]: deepcopy(row) for row in result["citations"]}
+        result = compact_initial_citations(result)
+        for number, omission in omitted_groups.items():
+            candidate, candidate_seen = deepcopy(empty), set()
+            for index in sorted(selected | {number}):
+                candidate, candidate_seen = _append_initial_group(basis, candidate, ordered[index][1], candidate_seen)
+            # One source ID may first occur in a new claim group rather than
+            # its old passage group. Keep the entire retained item, including
+            # context_limited, instead of inheriting the new group's metadata.
+            candidate["items"] = [deepcopy(retained_items.get(item.get("item_id", item.get("evidence_id")), item))
+                                  for item in candidate["items"]]
+            candidate["citations"] = [deepcopy(retained_citations.get(row["evidence_id"], row))
+                                      for row in candidate["citations"]]
+            candidate = compact_initial_citations(candidate)
+            if len(canonical_json_bytes(candidate)) <= max_bytes - 4096:
+                result = candidate
+                selected.add(number)
+                omissions.remove(omission)
     # 결과를 작게 유지하되 누락 건수와 추가 조회 경로를 숨기지 않는다.
     result["skipped"] = omissions[:12]
     result["omitted_count"] = len(omissions)
@@ -631,6 +753,70 @@ def initial_evidence(basis, question):
     limited = bool(omissions) or not retrieval.get("complete", True)
     result.update(truncated=limited, complete=not limited and bool(basis.get("complete")))
     result["scope"]["follow_up"] = "Use claims/history/read on the frozen materials; prepare a new scope for outside documents."
-    if len(canonical_json_bytes(result)) > MAX_RESPONSE_BYTES:
+    if len(canonical_json_bytes(result)) > max_bytes:
         raise ValueError("Initial evidence metadata exceeds its byte limit")
     return result
+
+
+LOOKUP_EVIDENCE_POLICY = "passages-first-v2"
+LOOKUP_PASSAGE_BYTES = 20 * 1024
+LOOKUP_KNOWLEDGE_BYTES = 12 * 1024
+
+
+def lookup_evidence(basis, question):
+    """MCP 질문 한 번 조회의 근거: 질문과 겹치는 원문 단락을 먼저, 맞는 현재 지식은 작은 별도 한도로 담는다.
+
+    단락 경계는 read와 같다(최대 100줄·3,000자). 질문 단어가 더 많이 겹치는 단락부터 고르고, 같은 점수는
+    문서 순위·줄 순서를 따른다. 결과는 문서 순서·줄 순서로 보여 준다. 고르지 않은 단락 수와 줄이
+    너무 길어 뺀 단락을 남기며, 부분 결과는 부재나 의미상 완전성을 증명하지 않는다.
+    """
+    from .question_index import overlap_counter, terms
+
+    wanted = terms(question)
+    overlap = overlap_counter(wanted)
+    ranked, skipped, unmatched = [], [], 0
+    order = {}
+    for position, (material_id, material) in enumerate(_materials(basis)):
+        if not material_id.startswith("d"):
+            continue
+        order[material_id] = position
+        passages, limited = _passages(material_id, material, 1, len(_lines(material["content"])))
+        skipped.extend({"document": material["document"], "start_line": item["start_line"],
+                        "end_line": item["end_line"], "code": item["code"]} for item in limited)
+        for passage in passages:
+            score = overlap(passage["text"])
+            if not score:
+                unmatched += 1
+                continue
+            ranked.append((-score, position, passage["start_line"], passage))
+    ranked.sort(key=lambda row: row[:3])
+    chosen, used, omitted = [], 0, 0
+    for _, position, _, passage in ranked:
+        item = {"document": passage["document"], "start_line": passage["start_line"],
+                "end_line": passage["end_line"], "text": passage["text"],
+                "context_limited": passage["context_limited"]}
+        size = len(canonical_json_bytes(item))
+        if used + size > LOOKUP_PASSAGE_BYTES:
+            omitted += 1
+            continue
+        used += size
+        chosen.append((position, item))
+    chosen.sort(key=lambda row: (row[0], row[1]["start_line"]))
+    knowledge = initial_evidence(basis, question, compact_citations=True, max_bytes=LOOKUP_KNOWLEDGE_BYTES,
+                                 body_passages=False, compact_reviews=True)
+    # 조회 결과의 retrieval과 같은 값이라 지식 묶음 안에서는 반복하지 않는다.
+    knowledge["scope"].pop("retrieval", None)
+    knowledge["scope"]["follow_up"] = ("Read nearby lines with wiki_read(document, view='lines', start_line, end_line); "
+                                       "call knowledge_lookup again with documents pinned and more specific wording; "
+                                       "use ontology_review_query for full review events and knowledge_context_prepare "
+                                       "for full current knowledge.")
+    knowledge["scope"]["review_events"] = "compact: before/after values omitted for accept/reject/defer (same as the claim), actor reduced; other actions keep after"
+    partial = bool(omitted or unmatched or skipped)
+    return {"kind": "lookup_evidence", "policy": LOOKUP_EVIDENCE_POLICY,
+            "passages": [item for _, item in chosen],
+            "passage_scope": {"selection": "question_term_overlap", "passage_bytes_limit": LOOKUP_PASSAGE_BYTES,
+                              "omitted_matching_passages": omitted, "unmatched_passages": unmatched,
+                              "skipped": skipped[:8], "skipped_count": len(skipped),
+                              "absence_proven": False, "semantic_completeness": "not_proven"},
+            "knowledge": knowledge,
+            "complete": not partial and knowledge["complete"], "truncated": partial or knowledge["truncated"]}

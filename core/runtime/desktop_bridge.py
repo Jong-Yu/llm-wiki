@@ -39,7 +39,8 @@ async def _probe_process_tree():
     import win32api, win32con, win32event
     script = (
         "import json,os,subprocess,sys,time; "
-        "child=subprocess.Popen([sys.executable,'-B','-c','import time; time.sleep(60)']); "
+        "child=subprocess.Popen([sys.executable,'-B','-c','import time; time.sleep(60)'],"
+        "creationflags=subprocess.CREATE_NO_WINDOW); "
         "print(json.dumps([os.getpid(),child.pid]),flush=True); time.sleep(60)"
     )
     process = await start_owned_process(

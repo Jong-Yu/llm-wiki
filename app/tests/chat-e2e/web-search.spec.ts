@@ -10,15 +10,13 @@ import {
 } from './chat';
 import type { Page } from '@playwright/test';
 
-/** 작은 지구본 설정에서 공개 검색어를 확인한 뒤에만 이번 질문에 적용합니다. */
-async function includeWeb(page: Page, query: string): Promise<void> {
+/** 지구본을 켜면 현재 질문을 바탕으로 검색하며 별도 입력 화면을 열지 않습니다. */
+async function includeWeb(page: Page): Promise<void> {
   await page.getByRole('button', { name: '웹 검색', exact: true }).click();
-  await page.getByRole('textbox', { name: '외부 검색어' }).fill(query);
-  await page.getByRole('button', { name: '적용', exact: true }).click();
 }
 
 test.describe('선택한 외부 웹 근거', () => {
-  test('기본은 해제이며 검색어를 적어야 웹 포함 질문을 보낼 수 있다', async ({
+  test('기본은 해제이며 지구본만 눌러 웹 검색을 켜고 끈다', async ({
     launch,
     openChat,
     shot,
@@ -35,41 +33,32 @@ test.describe('선택한 외부 웹 근거', () => {
       (await composer(page).locator('..').boundingBox())?.height ?? 0;
     await shot(page, '작은-웹-버튼');
     await toggle.click();
-    const query = page.getByRole('textbox', { name: '외부 검색어' });
-    await query.fill('   ');
-    await page.getByRole('button', { name: '적용', exact: true }).click();
-    await expect(page.getByRole('alert')).toContainText('검색어를 입력');
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    await query.fill('공개 센서 운영 지침');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
     await expect(
-      page.getByText('이 검색어만 외부로 보내요.', { exact: false }),
-    ).toBeVisible();
-    await shot(page, '웹-검색어-입력');
-    await query.press('Escape');
+      page.getByRole('dialog', { name: '웹 검색 설정' }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('textbox', { name: '외부 검색어' }),
+    ).toHaveCount(0);
     await expect(toggle).toBeFocused();
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await expect(composer(page)).toHaveValue(
       '내부 정책과 외부 의견을 비교해 줘',
     );
-    await toggle.click();
-    await expect(query).toHaveValue('공개 센서 운영 지침');
-    await page.getByRole('button', { name: '적용', exact: true }).click();
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await expect(query).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: '질문 보내기' }),
+    ).toBeEnabled();
     expect((await composer(page).locator('..').boundingBox())?.height).toBe(
       originalHeight,
     );
-    await shot(page, '웹-적용-입력창');
+    await shot(page, '웹-토글-입력창');
     await toggle.click();
-    await page.getByRole('button', { name: '사용 안 함', exact: true }).click();
-    await expect(query).toHaveCount(0);
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await expect(
       page.getByRole('button', { name: '질문 보내기' }),
     ).toBeEnabled();
   });
 
-  test('웹 자료만으로도 답변 근거를 보관하고 다음 질문은 웹 해제로 돌아간다', async ({
+  test('웹 근거를 보관하고 켜진 대화의 다음 질문도 검색하며 끄면 검색하지 않는다', async ({
     launch,
     app,
     openChat,
@@ -97,18 +86,28 @@ test.describe('선택한 외부 웹 근거', () => {
       ipcMain.removeHandler('question-runs:web-search');
       ipcMain.handle('question-runs:web-search', (_event, request) => {
         if (
-          request.query !== fixture.query ||
-          'question' in request ||
+          typeof request.question !== 'string' ||
+          'query' in request ||
           'documents' in request ||
           'attachments' in request
         )
-          throw new Error(
-            '웹 검색에는 별도로 입력한 검색어만 전달해야 합니다.',
-          );
+          throw new Error('웹 검색에는 현재 질문만 전달해야 합니다.');
+        const previous: unknown = JSON.parse(
+          process.env.WIKI_TEST_WEB_QUESTIONS ?? '[]',
+        );
+        if (
+          !Array.isArray(previous) ||
+          previous.some((value: unknown): boolean => typeof value !== 'string')
+        )
+          throw new Error('웹 검색 시험 기록을 읽을 수 없습니다.');
+        process.env.WIKI_TEST_WEB_QUESTIONS = JSON.stringify([
+          ...previous,
+          request.question,
+        ]);
         return { web: fixture };
       });
     }, web);
-    await includeWeb(page, web.query);
+    await includeWeb(page);
     await ask(page, '위키에 없는 주제의 외부 의견도 확인해 줘 #근거');
     const answer = await answered(page);
     await expect(answer).toContainText('외부 웹 자료 1개 확인');
@@ -117,7 +116,7 @@ test.describe('선택한 외부 웹 근거', () => {
     ).toBeVisible();
     await expect(
       page.getByRole('button', { name: '웹 검색', exact: true }),
-    ).toHaveAttribute('aria-pressed', 'false');
+    ).toHaveAttribute('aria-pressed', 'true');
     await answer.getByRole('button', { name: /근거 1 확인 · 웹/ }).click();
     const panel = page.getByRole('complementary', { name: '답변 근거' });
     await expect(panel).toContainText(web.sources[0]?.title ?? '');
@@ -144,17 +143,26 @@ test.describe('선택한 외부 웹 근거', () => {
     await panel
       .getByRole('button', { name: /답변 근거 닫기|대화로 돌아가기/ })
       .click();
-    await ask(page, '이번에는 내부 근거만 확인해 줘 #후속');
+    await ask(page, '다른 외부 의견도 비교해 줘 #후속');
     await expect(page).not.toHaveURL(/questionRunId=/u);
     await expect(
       conversation(page).getByRole('article').filter({ hasText: '답변' }),
     ).toHaveCount(2);
     await expect(
-      conversation(page)
-        .getByRole('article')
-        .filter({ hasText: '답변' })
-        .last(),
-    ).toContainText('워크스페이스 근거만 사용');
+      page.getByRole('button', { name: '웹 검색', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '웹 검색', exact: true }).click();
+    await ask(page, '이번에는 내부 근거만 확인해 줘 #후속');
+    await expect(
+      conversation(page).getByRole('article').filter({ hasText: '답변' }),
+    ).toHaveCount(3);
+    const requested = await app().evaluate((): unknown =>
+      JSON.parse(process.env.WIKI_TEST_WEB_QUESTIONS ?? '[]'),
+    );
+    expect(requested).toEqual([
+      '위키에 없는 주제의 외부 의견도 확인해 줘 #근거',
+      '다른 외부 의견도 비교해 줘 #후속',
+    ]);
   });
 
   test('웹 조회 실패를 보관하고 내부 근거로 답변을 계속한다', async ({
@@ -169,22 +177,34 @@ test.describe('선택한 외부 웹 근거', () => {
     await seedWiki();
     await app().evaluate(({ ipcMain }) => {
       ipcMain.removeHandler('question-runs:web-search');
-      ipcMain.handle('question-runs:web-search', (_event, request) => ({
+      ipcMain.handle('question-runs:web-search', () => ({
         web: {
-          query: request.query,
+          query: '질문 기반 웹 검색 (검색어 미확인)',
           status: 'unavailable',
           sources: [],
           warnings: ['web_search_failed'],
         },
       }));
     });
-    await includeWeb(page, '공개 센서 운영 지침');
+    await includeWeb(page);
     await ask(page, '센서 경고 온도 조건은? #근거');
     const answer = await answered(page);
     await expect(answer).toContainText('외부 웹 검색 · 조회하지 못함');
+    // 한 문서의 여러 구절을 인용해도 내부 문서 세 개의 출처는 모두 유지해야 합니다.
+    await expect
+      .poll(async (): Promise<string[]> =>
+        [
+          ...new Set(
+            await answer
+              .getByRole('button', { name: /근거 \d 확인/ })
+              .allTextContents(),
+          ),
+        ].sort(),
+      )
+      .toEqual(['경고-온도', '센서-경고', '운전-모드']);
     await expect(
-      answer.getByRole('button', { name: /근거 \d 확인/ }),
-    ).toHaveCount(3);
+      answer.getByRole('button', { name: /근거 \d 확인 · 웹/ }),
+    ).toHaveCount(0);
     await shot(page, '웹-실패-내부-답변');
   });
 
@@ -220,7 +240,7 @@ test.describe('선택한 외부 웹 근거', () => {
     await shot(page, '간결한-대화-목록');
   });
 
-  test('작은 창의 어두운 테마에서도 웹 설정이 화면 안에 열린다', async ({
+  test('작은 창의 어두운 테마에서도 웹 토글을 바로 켜고 끈다', async ({
     launch,
     app,
     openChat,
@@ -237,10 +257,13 @@ test.describe('선택한 외부 웹 근거', () => {
       'data-wiki-theme',
       'dark',
     );
-    await page.getByRole('button', { name: '웹 검색', exact: true }).click();
-    const popup = page.getByRole('dialog', { name: '웹 검색 설정' });
-    await expect(popup).toBeVisible();
-    const box = await popup.boundingBox();
+    const toggle = page.getByRole('button', { name: '웹 검색', exact: true });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(
+      page.getByRole('dialog', { name: '웹 검색 설정' }),
+    ).toHaveCount(0);
+    const box = await toggle.boundingBox();
     const inner = await page.evaluate(() => ({
       width: window.innerWidth,
       height: window.innerHeight,
@@ -252,6 +275,8 @@ test.describe('선택한 외부 웹 근거', () => {
     expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(
       inner.height,
     );
-    await shot(page, '작은창-웹-설정');
+    await shot(page, '작은창-웹-토글');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   });
 });

@@ -26,6 +26,7 @@ from core.modules.ontology.store import OntologyStore
 from core.runtime.application import create_application
 from core.runtime.client_platform import private_directory, write_new
 from core.runtime.extraction_schema import build_submission_schema
+from core.tests.poc_access.fixtures import grant_test_membership
 
 
 class DraftAdapter:
@@ -119,6 +120,7 @@ class DraftWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.policy = AccessPolicy(config, self.root / "data")
         auth = initialize_auth(self.policy)
         self.user = auth.signup("수정 검증 사용자")
+        self.user = grant_test_membership(self.policy, self.user)
         self.tenant = self.user["default_tenant"]
         schema = build_submission_schema()
         publish(self.root / "rules", tenant_root=self.root / "data", ruleset_id="common", ruleset_version="v1",

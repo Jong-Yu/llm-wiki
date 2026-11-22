@@ -241,8 +241,27 @@ class StoreCase(unittest.TestCase):
             self.store.save('a.md', 'next', expected_revision=self.store.read('a.md').revision)
         self.assertEqual(self.snapshot_files(), before)
 
+    def test_large_documents_have_no_size_limit_and_keep_history(self):
+        # 문서 크기 한도는 없다(D-141). 1 MiB를 넘는 문서도 그대로 저장·읽기·이력 보존된다.
+        first = '한' * 400000 + '\n'
+        saved = self.store.save('large.md', first, expected_revision=None)
+        snapshot = self.store.read('large.md')
+        self.assertGreater(len(snapshot.content.encode('utf-8')), 1024 * 1024)
+        self.assertEqual(snapshot.content, first)
+        self.assertEqual(snapshot.revision, saved.revision)
+        second = first + '둘째 판\n'
+        self.store.save('large.md', second, expected_revision=saved.revision)
+        self.assertEqual(self.store.read('large.md').content, second)
+        archived = [path for path in (self.store.data_dir / '_history').rglob('*') if path.is_file()
+                    and path.read_bytes() == first.encode('utf-8')]
+        self.assertTrue(archived)
+        self.assertIsNotNone(DocumentTooLargeError)
+
     def test_size_guard_and_concurrent_compare_and_swap(self):
-        with self.assertRaises(DocumentTooLargeError): self.store.save('large.md', '한' * 400000, expected_revision=None)
+        from unittest.mock import patch
+        from core.modules.documents import store as store_module
+        with patch.object(store_module, 'MAX_DOCUMENT_BYTES', 1024), self.assertRaises(DocumentTooLargeError):
+            self.store.save('limited.md', '한' * 400, expected_revision=None)
         a = self.store.save('a.md', 'old', expected_revision=None)
         def save(value):
             try: return self.store.save('a.md', value, expected_revision=a.revision).changed

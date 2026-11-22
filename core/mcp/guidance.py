@@ -53,8 +53,9 @@ TASKS = (
          "Use wiki_search, then wiki_read relevant full documents. Cite exact source text and report incomplete search results.",
          ("wiki_search", "wiki_read")),
     Task("answer", "근거로 질문 답하기", "Answer a question with current reviewed knowledge and traceable evidence.",
-         ("wiki_search", "wiki_read", "knowledge_context_prepare", "ontology_review_query", "ontology_concept_find", "ontology_concept_query"),
-         "Find relevant documents with wiki_search and prepare "
+         ("knowledge_lookup", "wiki_search", "wiki_read", "knowledge_context_prepare", "ontology_review_query", "ontology_concept_find", "ontology_concept_query"),
+         "Start with knowledge_lookup(question): one call ranks the workspace and returns the source passages and current knowledge that best match the question. "
+         "If it misses evidence, read nearby lines with wiki_read view=lines instead of whole documents, call it again with other wording or pinned documents, or find documents with wiki_search and prepare "
          "selected current evidence with knowledge_context_prepare, or call ontology_review_query for every selected document. For concept questions use ontology_concept_find, explicitly select a "
          "versioned target, then ontology_concept_query. Use effective_graph and policies; cite expert decisions with event_id and state_revision. "
          "Never fabricate source quotations. Keep pending/other-scope decisions and uncertainty visible. "

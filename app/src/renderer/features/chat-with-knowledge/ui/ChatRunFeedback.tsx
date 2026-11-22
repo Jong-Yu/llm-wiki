@@ -4,6 +4,8 @@ import { Link } from 'react-router';
 import { Icon } from '@renderer/shared/ui/Icon';
 import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
 import type { KnowledgeChatModel } from '../model/useKnowledgeChat';
+import type { ChatRunNotice as ChatRunNoticeValue } from '../model/chatState';
+import { chatRunFailure } from '../model/chatRunFeedback';
 import { AssistantMessage } from './AssistantMessage';
 import { ChatAnswer } from './ChatAnswer';
 import styles from './KnowledgeChat.module.scss';
@@ -15,6 +17,16 @@ type Problem =
   | 'recovery'
   | 'failed'
   | 'other';
+/** 앱을 다시 열어 실행 상세의 로컬 오류가 없어도 보호 저장한 같은 실행의 분류를 씁니다. */
+function currentRunErrorCode(model: KnowledgeChatModel): string | null {
+  return (
+    model.run?.local.errorCode ??
+    model.thread.runNotices.find(
+      (notice: ChatRunNoticeValue): boolean => notice.runId === model.run?.id,
+    )?.errorCode ??
+    null
+  );
+}
 /** 저장 결과를 먼저 확인해야 할 때에는 새 실행이나 연결 안내보다 우선한다. */
 export function chatProblem(
   model: KnowledgeChatModel,
@@ -25,7 +37,12 @@ export function chatProblem(
   if (model.pending) return 'pending';
   if (uncertain) return 'uncertain';
   if (model.recoveryNotice) return 'recovery';
-  if (failed) return unavailable ? 'connection' : 'failed';
+  if (failed) {
+    const code = currentRunErrorCode(model);
+    return chatRunFailure(code).connection || (!code && unavailable)
+      ? 'connection'
+      : 'failed';
+  }
   return model.error ? 'other' : null;
 }
 type FeedbackProps = {
@@ -55,23 +72,22 @@ const failureActions = {
   connect: { label: 'AI 연결하기', to: '/settings?section=ai' },
   diagnose: { label: '연결 다시 확인', command: 'diagnose' },
   retry: { label: '다시 시도', command: 'retry' },
-  checkConnection: { label: 'AI 연결 확인', to: '/settings?section=ai' },
   refresh: { label: '저장 상태 다시 확인', command: 'refresh' },
   retryAnswer: { label: '답변 다시 시도', command: 'retry' },
 } satisfies Record<string, FailureAction>;
 type FailureActionId = keyof typeof failureActions;
-type FailureProps = Pick<
-  FeedbackProps,
-  'model' | 'disabled' | 'provider' | 'showRetry'
-> & { problem: Problem };
+type FailureProps = Pick<FeedbackProps, 'model' | 'disabled' | 'showRetry'> & {
+  problem: Problem;
+};
 /** 오류 설명과 복구 동작을 제공하며 불확실한 저장을 자동 재시도하지 않는다. */
 function FailureNotice({
   model,
   problem,
   disabled,
-  provider,
   showRetry,
 }: FailureProps): JSX.Element {
+  const errorCode = currentRunErrorCode(model);
+  const failure = chatRunFailure(errorCode);
   const reasons = {
     pending:
       '이전 요청의 응답을 확인하지 못했어요. 같은 요청의 저장 상태를 먼저 확인해 주세요.',
@@ -80,7 +96,7 @@ function FailureNotice({
       model.runtime?.cliConnection?.message ||
       'AI 설정에서 연결 상태를 확인해 주세요.',
     recovery: model.recoveryNotice,
-    failed: `${provider}가 응답하지 않았어요. 질문은 그대로 남아 있어요.`,
+    failed: failure.message,
     other: model.error,
   };
   const fallback: FailureActionId[] = showRetry
@@ -90,7 +106,7 @@ function FailureNotice({
   const actions: Record<Problem, FailureActionId[]> = {
     pending: ['confirm'],
     connection: ['connect', 'diagnose'],
-    failed: showRetry ? ['retry', 'checkConnection'] : fallback,
+    failed: showRetry ? ['retry'] : fallback,
     uncertain: fallback,
     recovery: fallback,
     other: fallback,
@@ -100,14 +116,16 @@ function FailureNotice({
     secondary: styles.button,
   };
   return (
-    <div role="alert">
+    <div role="alert" data-chat-run-failure>
       <StatusNotice
         role="presentation"
         variant="box"
         tone="error"
-        title={titles[problem]}
+        title={problem === 'failed' ? failure.title : titles[problem]}
       >
-        {model.error || reasons[problem]}
+        {problem === 'failed' || (problem === 'connection' && errorCode)
+          ? failure.message
+          : model.error || reasons[problem]}
       </StatusNotice>
       <div className={styles.answerActions}>
         {actions[problem].map(
@@ -137,6 +155,18 @@ function FailureNotice({
         )}
       </div>
     </div>
+  );
+}
+type ChatRunNoticeProps = { notice: ChatRunNoticeValue };
+/** 과거 실패·중단을 AI 답변으로 만들지 않고 해당 질문의 실행 상태로 읽습니다. */
+export function ChatRunNotice({ notice }: ChatRunNoticeProps): JSX.Element {
+  if (notice.status === 'cancelled')
+    return <StatusNotice tone="info" title="응답을 중단했습니다" />;
+  const failure = chatRunFailure(notice.errorCode);
+  return (
+    <StatusNotice tone="warning" title={failure.title}>
+      {failure.message}
+    </StatusNotice>
   );
 }
 type ProgressProps = { count: number | null; phase: string; provider: string };
@@ -171,7 +201,7 @@ function AnswerProgress({
     </ul>
   );
 }
-/** 미리보기와 실행 상태는 같은 AI 메시지 한 곳에서 읽는다. 별개인 저장·정리 문제는 보존한다. */
+/** 생성 중 미리보기와 클라이언트의 오류·저장 상태를 구분해 표시합니다. */
 export function ChatRunFeedback({
   model,
   working,
@@ -191,7 +221,7 @@ export function ChatRunFeedback({
       : model.foundCount;
   return (
     <>
-      {(working || preview || problem) && (
+      {(working || preview) && (
         <AssistantMessage>
           {working && (
             <AnswerProgress
@@ -204,22 +234,23 @@ export function ChatRunFeedback({
             <>
               {!working && (
                 <small className={styles.previewStatus}>
-                  응답 일부 · 저장 미확인
+                  {run?.status === 'cancelled'
+                    ? '중단 전 생성된 내용'
+                    : '응답 일부 · 저장 미확인'}
                 </small>
               )}
               <ChatAnswer content={preview} />
             </>
           )}
-          {!working && problem && (
-            <FailureNotice
-              model={model}
-              problem={problem}
-              disabled={disabled}
-              provider={provider}
-              showRetry={showRetry}
-            />
-          )}
         </AssistantMessage>
+      )}
+      {!working && problem && (
+        <FailureNotice
+          model={model}
+          problem={problem}
+          disabled={disabled}
+          showRetry={showRetry}
+        />
       )}
       {run?.answerReadError && (
         <StatusNotice variant="box" tone="warning">

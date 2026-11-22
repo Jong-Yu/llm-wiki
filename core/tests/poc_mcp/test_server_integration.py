@@ -22,6 +22,7 @@ from core.api.dependencies import access_value, scope_key
 from core.modules.access.policy import AccessPolicy, PolicyError
 from core.modules.documents.metadata import parse_document
 from core.runtime.application import create_application
+from core.tests.poc_access.fixtures import grant_test_membership
 from tools.initialize_server import initialize_new_server
 
 
@@ -35,6 +36,8 @@ class ServerFixture(unittest.TestCase):
         self.paths = initialize_new_server(self.base / "server")
         self.config = Path(self.paths["access_config"])
         self.root = Path(self.paths["tenant_root"])
+        self.assertEqual(json.loads(self.config.read_text())["tenants"], {})
+        self.assertEqual(list(self.root.iterdir()), [])
         self.policy = AccessPolicy(self.config, self.root)
         self.app = create_application(self.policy)
         self.client = self.enterContext(TestClient(self.app, base_url="http://127.0.0.1:8766"))
@@ -46,7 +49,11 @@ class ServerFixture(unittest.TestCase):
         response = self.client.post("/api/v1/auth/signup", json={"name": name})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
-        return response.json()["data"]
+        user = response.json()["data"]
+        self.assertEqual(user["memberships"], {})
+        self.assertIsNone(user["default_tenant"])
+        # 가입 응답과 업무 시험의 명시 소속 준비를 구분한다.
+        return grant_test_membership(self.policy, user)
 
     def headers(self, token=None):
         return {"Authorization": "Bearer " + (token or self.token)}

@@ -1,0 +1,354 @@
+.editor,
+.preview {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 20px;
+
+  p,
+  h4 {
+    margin: 0;
+  }
+  :where(button, input, textarea, select):focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+  }
+}
+.editor {
+  container-type: inline-size;
+}
+.entryActions,
+.examples,
+.identity,
+.previewHeading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.entryActions button {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+}
+.examples > span,
+.identity > span,
+.previewHeading > span,
+.hint {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.examples button[aria-pressed='true'] {
+  color: var(--wiki-color-action-primary);
+  background: var(--wiki-color-action-surface);
+}
+.identity {
+  justify-content: space-between;
+}
+.identity strong {
+  overflow-wrap: anywhere;
+}
+.fileInput {
+  display: none;
+}
+.linkEntry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+.linkEntry > p {
+  grid-column: 1 / -1;
+}
+.notice {
+  padding-left: 12px;
+  border-left: 2px solid var(--wiki-color-border-control);
+}
+.configuration {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.preview {
+  gap: 8px;
+}
+.previewHeading {
+  justify-content: space-between;
+}
+.slide,
+.document,
+.sheet,
+.reference {
+  border: 1px solid var(--wiki-color-border-control);
+  background: var(--wiki-color-surface-canvas);
+  border-radius: 4px;
+  min-width: 0;
+}
+.slide,
+.document {
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+.slide header,
+.document header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.slide header > span,
+.document header > span {
+  color: var(--wiki-color-text-secondary);
+  font-size: 11px;
+}
+.slide header > button {
+  flex: 1;
+  max-width: 65%;
+}
+.slide footer,
+.document footer {
+  padding-top: 6px;
+  border-top: 1px solid var(--wiki-color-border-default);
+  text-align: right;
+  color: var(--wiki-color-text-secondary);
+  font-size: 11px;
+}
+.slideBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.wireframe {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--wiki-color-border-default);
+  padding: 8px;
+}
+.wireframe > div:first-child {
+  border-bottom: 1px solid var(--wiki-color-border-default);
+  padding-bottom: 6px;
+  font-size: 11px;
+}
+.wireframeBody {
+  display: flex;
+  min-height: 70px;
+  gap: 8px;
+}
+.wireframeBody > span {
+  font-size: 11px;
+  color: var(--wiki-color-text-secondary);
+}
+.wireframeBody > button {
+  flex: 1;
+}
+.wireframe small {
+  color: var(--wiki-color-text-secondary);
+}
+.preview table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.preview th,
+.preview td {
+  border: 1px solid var(--wiki-color-border-default);
+  text-align: left;
+  vertical-align: middle;
+  padding: 5px;
+  overflow-wrap: anywhere;
+}
+.preview th {
+  font-weight: 600;
+}
+.preview caption {
+  text-align: left;
+  padding-bottom: 6px;
+  font-weight: 600;
+}
+.slide th:first-child {
+  width: 42px;
+}
+.region {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  display: block;
+  border: 1px dashed var(--wiki-color-border-control);
+  border-radius: 3px;
+  padding: 5px;
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: normal;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.region[aria-pressed='true'] {
+  border-color: var(--wiki-color-action-primary);
+  border-style: solid;
+  color: var(--wiki-color-action-primary);
+  background: var(--wiki-color-action-surface);
+}
+.region:hover {
+  box-shadow: inset 0 0 0 1px var(--wiki-color-border-control);
+}
+.document {
+  max-width: 440px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-inline: auto;
+}
+.document h4 {
+  font-size: 16px;
+}
+.document p {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+}
+.document th:first-child {
+  width: 30%;
+}
+.sheet {
+  padding: 8px;
+}
+.sheet th:first-child {
+  width: 20px;
+  text-align: center;
+}
+.sheet thead th {
+  text-align: center;
+}
+.formula {
+  color: var(--wiki-color-text-secondary);
+  font-size: 11px;
+}
+.formula small {
+  display: block;
+  font-family: inherit;
+}
+.reference {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px;
+  align-items: center;
+}
+.reference > div:last-child {
+  display: grid;
+  gap: 8px;
+}
+.reference p,
+.reference span {
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+}
+.referencePage {
+  border: 1px solid var(--wiki-color-border-control);
+  padding: 10px;
+  display: grid;
+  gap: 9px;
+  font-size: 11px;
+}
+.referenceLine {
+  height: 4px;
+  background: var(--wiki-color-border-default);
+}
+.referenceLine:nth-child(3) {
+  width: 70%;
+}
+.referenceBox {
+  border: 1px solid var(--wiki-color-border-default);
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+}
+.previewOptions {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.previewOptions label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 32px;
+  padding-top: 6px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.previewOptions input {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--wiki-color-action-primary);
+}
+.compact .slide,
+.compact .document {
+  gap: 8px;
+  padding: 10px;
+}
+.compact .wireframeBody {
+  min-height: 42px;
+}
+.compact .slide footer,
+.compact .document p {
+  display: none;
+}
+@container (max-width: 460px) {
+  .configuration,
+  .slideBody,
+  .linkEntry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reference {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px;
+  }
+  .referencePage {
+    max-width: 140px;
+  }
+  .slide header,
+  .document header {
+    flex-wrap: wrap;
+  }
+  .slide header > button {
+    max-width: none;
+  }
+  .entryActions > button {
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 480px) {
+  .slideBody,
+  .reference {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .slide,
+  .document {
+    padding: 8px;
+  }
+  .preview th,
+  .preview td {
+    padding: 3px;
+    font-size: 11px;
+  }
+  .sheet {
+    padding: 4px;
+  }
+  .sheet th:first-child {
+    width: 12px;
+  }
+  .sheet .region {
+    padding: 3px;
+    font-size: 11px;
+  }
+}

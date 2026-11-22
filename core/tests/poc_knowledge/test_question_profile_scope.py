@@ -74,6 +74,31 @@ class ScopeTests(unittest.IsolatedAsyncioTestCase):
         await self.call(self.owner(), adapter)
         self.assertIs(adapter.calls[0]["question_profile"], True)
 
+    async def test_template_profile_uses_fixed_ref_only_for_codex_v5_v6(self):
+        for provider, contract in (("codex", "personal-question-v5"), ("codex", "personal-question-v6"),
+                                   ("codex", "personal-question-v4"), ("claude", "personal-question-v6"),
+                                   (None, "personal-question-v6")):
+            with self.subTest(provider=provider, contract=contract):
+                adapter, owner = KeywordAdapter(), self.owner(provider=provider, contract=contract)
+                owner.state["record"]["data"]["template_ref"] = {"id": "a" * 32, "revision": "b" * 64}
+                await self.call(owner, adapter)
+                self.assertEqual(adapter.calls[0].get("template_profile"),
+                    True if provider == "codex" and contract in {"personal-question-v5", "personal-question-v6"} else None)
+
+    async def test_template_marker_or_invalid_ref_does_not_enable_effort_override(self):
+        for ref in (None, {}, "template", {"id": "a" * 32}, {"id": "a" * 32, "revision": "bad"}):
+            with self.subTest(ref=ref):
+                adapter, owner = KeywordAdapter(), self.owner()
+                owner.state["record"]["data"]["template_ref"] = ref
+                await owner.guarded_model(adapter, "[등록 템플릿 v1]", {}, allow_preview=False)
+                self.assertNotIn("template_profile", adapter.calls[0])
+
+    async def test_template_ref_does_not_break_old_injected_optional_adapter(self):
+        adapter, owner = ExplicitAdapter(), self.owner()
+        owner.state["record"]["data"]["template_ref"] = {"id": "a" * 32, "revision": "b" * 64}
+        await self.call(owner, adapter)
+        self.assertEqual(adapter.flags, [True])
+
     async def test_explicit_run_keyword_is_supported(self):
         adapter = ExplicitAdapter()
         await self.call(self.owner(), adapter)

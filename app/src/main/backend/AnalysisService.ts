@@ -37,6 +37,7 @@ import {
 } from './processRecovery';
 import type { ProcessRecovery } from './processRecovery';
 import type { RecoveryEntry } from '@contracts/recovery.contract';
+import { isAiRuntimePreparationFailure } from '@contracts/runtime.contract';
 import {
   assertPersonalRuntime,
   createPrivateExecution,
@@ -842,6 +843,9 @@ export class AnalysisService {
             )
               message =
                 '선택한 개인 AI CLI를 찾거나 실행할 수 없습니다. 설치 경로와 로그인 상태를 확인해 주세요.';
+            else if (isAiRuntimePreparationFailure(failure.error.code))
+              message =
+                '개인 AI CLI 설치·로그인 문제가 아니라 이 PC에서 실행을 준비하는 단계(프로세스·작업 폴더 보호)에서 멈췄습니다. 이미 저장된 결과와 실패 단계를 확인해 주세요.';
             else if (
               [
                 'analysis_job_changed',

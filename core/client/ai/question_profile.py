@@ -19,3 +19,9 @@ SETTINGS = (
     "include_environment_context",
     "include_environment_context_time",
 )
+
+# Large registered-template responses share output capacity with reasoning.
+# This explicit request is observable; it does not assert a provider default
+# change, a larger token allowance, or that the provider honored the request.
+TEMPLATE_VERSION = "template-writing-v1"
+TEMPLATE_SETTINGS = {"model_reasoning_effort": "low"}

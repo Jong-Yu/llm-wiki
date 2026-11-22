@@ -139,7 +139,7 @@ ANSWERS = {
     "근거": "근거 문서를 확인했습니다. 센서 경고는 온도 이탈 시 발생합니다.",
     "긴답변": "\n\n".join(f"## 항목 {n}\n\n" + "긴 답변을 확인하기 위한 문단입니다. " * 20 for n in range(1, 13)),
     "마크다운": "# 제목\n\n**굵게**와 *기울임*, `코드`\n\n1. 첫째\n2. 둘째\n\n| 열A | 열B |\n| --- | --- |\n| 1 | 2 |\n\n```python\nprint('안녕')\n```\n\n> 인용문",
-    "스크립트": "<script>window.__injected = true</script><img src=x onerror=\"window.__injected = true\"> 위 태그는 문자로만 보여야 합니다.",
+    "스크립트": "HTML 태그가 포함된 답변은 태그를 실행하지 않고 텍스트로 표시해야 합니다. 아래는 script 태그와 이미지 오류 이벤트가 실행되지 않는지 확인하는 예시입니다.\n\n```html\n<script>window.__injected = true</script><img src=x onerror=\"window.__injected = true\">\n```\n\n<script>window.__injected = true</script><img src=x onerror=\"window.__injected = true\">\n\n이 예시는 문자로만 보여야 하며, 스크립트 실행이나 이미지 요청이 발생해서는 안 됩니다.",
     "한글영문": "Sensor alarm 조건: threshold 초과 시 ALARM. 이모지 확인 ✅ 😀",
     "후속": "이전 질문을 이어서 답합니다.",
 }
@@ -149,6 +149,9 @@ def main():
     arguments = sys.argv[1:]
     if arguments == ["--version"]:
         print("codex-cli 0.0.0-fake")
+        return 0
+    if arguments == ["features", "list"]:
+        print("omit_skill_descriptions experimental false")
         return 0
     if arguments[:2] == ["exec", "--help"]:
         print(HELP)
@@ -198,6 +201,14 @@ def main():
     elif scenario == "인용위조":
         value = {"content": "존재하지 않는 근거를 인용합니다.", "citations": [
             {"kind": "document", "document": "없는/문서.md", "source_revision": "0" * 64, "quote": "없음"}]}
+    elif scenario in {"템플릿", "템플릿오류"}:
+        snapshot = json.loads(question.split("\n\n[등록 템플릿 v1]\n", 1)[1].split("\n[템플릿 생성 계약]\n", 1)[0])
+        field = snapshot["generation"]["fields"][0]
+        plan = {"version": 1, "replacements": [{"id": field["id"] if scenario == "템플릿" else "unknown-field",
+                                                "text": "템플릿 검증 산출물: " + snapshot["template"]["instructions"]}]}
+        value = {"content": "선택한 지침으로 내용을 작성했습니다.\n\n```wiki-template-result\n" + json.dumps(plan, ensure_ascii=False) + "\n```", "citations": []}
+    elif scenario == "템플릿질문":
+        value = {"content": "잠긴 문서에 적용할 편집 권한을 확인해 주세요. 검토자 예외를 이번 설계에 적용할까요?", "citations": []}
     else:
         key = "후속" if resumed and scenario == "정상" else scenario
         text = ANSWERS.get(key, ANSWERS["정상"])

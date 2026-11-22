@@ -4,6 +4,47 @@
     <meta charset="utf-8" />
     <title>AI 채팅 상태별 화면 · 모의 자료</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      .preview-toolbar {
+        position: fixed;
+        inset: 0 0 auto;
+        height: 48px;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 16px;
+        color: var(--wiki-color-text-primary);
+        background: var(--wiki-color-surface-panel);
+        border-bottom: 1px solid var(--wiki-color-border-default);
+        font: 13px/20px var(--wiki-font-family-ui);
+      }
+      .preview-toolbar label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .preview-toolbar select {
+        max-width: 220px;
+        font: inherit;
+      }
+      .preview-app > .wiki-theme {
+        top: 48px;
+      }
+      @media (max-width: 600px) {
+        .preview-toolbar {
+          padding-inline: 8px;
+        }
+        .preview-toolbar > span {
+          display: none;
+        }
+        .preview-toolbar label,
+        .preview-toolbar select {
+          flex: 1;
+        }
+      }
+    </style>
   </head>
   <body data-wiki-theme="light" style="margin: 0; height: 100vh">
     <div id="root" style="height: 100%"></div>

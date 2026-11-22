@@ -161,6 +161,7 @@ TypeScript는 `strict`를 기본으로 하고 외부 입력은 `unknown`에서 �
 | `knowledge` | `Concept`, `Entity`, `Claim`(관계/속성), `RelationCandidate`, `QualifierSet`, `ClaimContext`, `Identifier`, `ClaimProvenance`, `ClaimRef`, `GraphSnapshot`, `ClaimEvidenceRef`; `ClaimSummary`, `EvidenceExcerpt`, `ClaimInspector`, `ClaimEditForm`, `QualifierFields` | 기계 추출·유효 그래프의 주장/출처/한정어 표현과 서버가 반환한 현재성·부분 범위. 검토 결정/정책 이벤트를 새로 만들거나 승인·조건 충족을 계산하지 않음 |
 | `review` | `SourceReviewDecision`, `ReviewState`, `ExpertPolicy`, `PolicyScope`, `ReviewEvent`, `PolicyEvent`, `CorrespondenceDecision`; `ReviewStateBadge`, 검토/정책의 이벤트 표시 | 원문 인용 검토·인용 없는 업무 판단·문서 간 대응 판단을 별도 종류로 유지. Claim 자체는 knowledge, 전체 비교/수정 초안은 해당 feature |
 | `sources` | `SourceRecord`, `SourceRef`, `OriginalFile`, `OriginalVersion`, `SourceBodySubmission`, `SourceLineage`; `SourceRecordHeader`, `SourceLineagePanel` | 원본 파일 바이트의 메타데이터/판본·변환 본문 제출·원본 1:N Wiki 계보. 파일 바이트의 실제 보관/전송은 서버/main, Wiki 본문 revision은 documents |
+| `templates` | 등록 템플릿의 목록·고정 판본·생성 지원 범위와 읽기 query | 지식/분석 원본과 구분. 서버 저장·렌더는 D-129, 관리 초안은 manage-templates, 요청 스냅샷/결과 파일은 chat-with-knowledge |
 | `analysis` | `AnalysisJob`, `AnalysisRun`, `StageReceipt`, `AnalysisResultRef`, `InputBasis`; `ProcessingTimeline`, `InputBasisDetails` | 서버 작업·단계·확인된 결과/규약/bundle 참조. CLI 터미널 문구나 PTY 생존을 작업 완료/저장 영수증으로 해석하지 않음 |
 | `access` | `PrincipalSummary`, `Membership`, `AllowedProfile`, `AllowedActions`, `WorkspaceScope`; `MembershipPanel`, `AllowedActions` | 서버가 확인한 연결·주체·tenant·관점/정책 기준의 표시 모델. 인증 비밀·실제 인가 정책·보호 저장/CLI 설정·토큰 발급을 소유하지 않음 |
 

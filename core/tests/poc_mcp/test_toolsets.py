@@ -13,6 +13,7 @@ from mcp.shared.exceptions import MCPError
 from core.mcp.guidance import GUIDANCE_TOOL, catalog
 from core.mcp.tenant import create_tenant_server
 from core.mcp import toolsets
+from core.mcp.tools.documents import MAX_READ_LINES
 from core.runtime.personal_launcher import LauncherError, prepare_launch
 from core.tests.poc_mcp.test_server_integration import ServerFixture
 
@@ -39,7 +40,7 @@ class ToolsetHTTP(ServerFixture):
         default_tools = self.rpc("tools/list", {})["result"]["tools"]
         explicit_all = self.rpc("tools/list", {}, "all")["result"]["tools"]
         self.assertEqual(default_tools, explicit_all)
-        self.assertEqual(len(default_tools), 57)  # Existing 56 tools + workflow guidance
+        self.assertEqual(len(default_tools), 58)  # 57 + knowledge_lookup
         self.assertEqual(self.initialize()["result"]["instructions"], self.initialize("all")["result"]["instructions"])
         self.assertEqual({item["name"] for item in self.rpc("prompts/list", {})["result"]["prompts"]},
                          {"wiki_" + name for name in catalog(True)})
@@ -129,6 +130,55 @@ class ToolsetHTTP(ServerFixture):
         self.assertEqual(explicit["content"], content)
         self.assertEqual(self.call("wiki_read", {"tenant": self.tenant, "document": "example.md", "view": "body"}),
                          body)
+
+    def test_lookup_passage_lines_read_the_same_text_with_unicode_separators(self):
+        # FF·Unicode 구분자는 원문의 글자이며 지식 조회의 CR/LF 좌표를 바꾸지 않는다.
+        written = self.write("소개\f중간\u2028같은 줄\u0085내용\n\nTarget marker contains answer 42.\n")
+        self.assertTrue(written["ok"], written)
+        found = self.call("knowledge_lookup", {"tenant": self.tenant,
+            "question": "Target marker answer", "documents": ["example.md"]}, "ask")
+        self.assertTrue(found["ok"], found)
+        passage = next(item for item in found["evidence"]["passages"] if "answer 42" in item["text"])
+        self.assertEqual(passage["text"], "Target marker contains answer 42.")
+        read = self.call("wiki_read", {"tenant": self.tenant, "document": passage["document"],
+            "view": "lines", "start_line": passage["start_line"], "end_line": passage["end_line"]}, "ask")
+        self.assertTrue(read["ok"], read)
+        self.assertEqual(read["text"], "Target marker contains answer 42.\n")
+        self.assertEqual(read["line_count"], found["documents"][0]["line_count"])
+        self.assertEqual(read["revision"], found["documents"][0]["source_revision"])
+
+    def test_lines_view_returns_exact_full_file_lines(self):
+        written = self.write("".join(f"line {n}\n" for n in range(1, 451)))
+        self.assertTrue(written["ok"], written)
+        full = self.call("wiki_read", {"tenant": self.tenant, "document": "example.md"})
+        lines = full["content"].splitlines(keepends=True)
+        start = full["body_start_line"] + 9
+        part = self.call("wiki_read", {"tenant": self.tenant, "document": "example.md", "view": "lines",
+                                       "start_line": start, "end_line": start + 4}, "ask")
+        self.assertTrue(part["ok"], part)
+        self.assertEqual(part["text"], "".join(lines[start - 1:start + 4]))
+        self.assertEqual((part["start_line"], part["end_line"]), (start, start + 4))
+        self.assertEqual(part["revision"], full["revision"])
+        self.assertEqual(part["line_count"], len(lines))
+        self.assertEqual(part["next_start_line"], start + 5)
+        for key in ("content", "body", "metadata"):
+            self.assertNotIn(key, part)
+        # view를 빼고 줄 번호만 주면 ask 묶음에서도 줄 범위 보기다. 한 번에 최대 MAX_READ_LINES줄이다.
+        inferred = self.call("wiki_read", {"tenant": self.tenant, "document": "example.md", "start_line": 1}, "ask")
+        self.assertEqual(inferred["view"], "lines")
+        self.assertEqual(inferred["end_line"], MAX_READ_LINES)
+        self.assertEqual(inferred["text"], "".join(lines[:MAX_READ_LINES]))
+        tail = self.call("wiki_read", {"tenant": self.tenant, "document": "example.md", "view": "lines",
+                                       "start_line": len(lines) - 1, "end_line": len(lines) + 50})
+        self.assertEqual(tail["end_line"], len(lines))
+        self.assertIsNone(tail["next_start_line"])
+        for invalid in ({"view": "lines"}, {"view": "lines", "start_line": 5, "end_line": 4},
+                        {"view": "lines", "start_line": len(lines) + 1}, {"view": "body", "start_line": 2},
+                        {"view": "lines", "start_line": 0}):
+            with self.subTest(arguments=invalid):
+                result = self.call("wiki_read", {"tenant": self.tenant, "document": "example.md", **invalid})
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["error"]["code"], "invalid_argument")
 
     def test_guidance_catalog_and_tasks_follow_role(self):
         listed = self.call(GUIDANCE_TOOL, {"task": "catalog"}, "write")

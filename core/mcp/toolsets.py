@@ -34,6 +34,8 @@ TOOLSETS = {
     "ask": Toolset(
         "ask", "질문·조회",
         "Answer questions and look up values from current wiki knowledge. Read-only: it cannot save, review or run jobs.",
+        "Every tool round trip resends the whole conversation, so start a question with one knowledge_lookup call "
+        "(tenant may be omitted) instead of access_context, search and read calls; repeat it with other wording if needed. "
         "Spend tokens on evidence, not breadth: choose documents from wiki_search snippets before reading; wiki_read "
         "returns the body view here (pass view=full only when the raw front matter text matters); prepare "
         "knowledge_context_prepare or ontology_review_query only for documents you will cite; for one term prefer "

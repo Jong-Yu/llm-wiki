@@ -62,14 +62,8 @@ const undoInput = z.strictObject({
   expected_state_revision: revision,
   reason: z.string().min(1).max(1000),
 });
-const content = z
-  .string()
-  .max(1024 * 1024)
-  .refine(
-    (value: string): boolean =>
-      new TextEncoder().encode(value).byteLength <= 1024 * 1024,
-    '본문은 UTF-8 1 MiB 이내여야 합니다.',
-  );
+/** 문서 크기 한도는 없습니다(D-141). 요청 크기 한도는 전송 계층이 따로 적용합니다. */
+const content = z.string();
 
 const claimSelection = z.strictObject({
   document,
@@ -605,12 +599,14 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
         status: z.enum(['complete', 'failed']).optional(),
         context_request: questionContextInput.nullable().optional(),
         reply_to: id.nullable().optional(),
+        template_ref: z.strictObject({ id, revision }).nullable().optional(),
       })
       .refine(
         (value: {
           role: 'user' | 'assistant';
           context_request?: unknown;
           reply_to?: string | null;
+          template_ref?: { id: string; revision: string } | null;
           status?: 'complete' | 'failed';
           content: string;
         }): boolean =>
@@ -621,6 +617,7 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
               value.content.length > 0
             : value.reply_to != null &&
               value.context_request == null &&
+              value.template_ref == null &&
               (value.content.length > 0 || value.status === 'failed'),
         '질문은 명시 맥락, 답변은 저장된 질문 참조가 필요합니다.',
       ),

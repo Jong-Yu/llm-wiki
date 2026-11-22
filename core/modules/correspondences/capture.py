@@ -54,11 +54,12 @@ class _Capture:
                 raise corrupt("Dependency must be a regular file")
             with os.fdopen(descriptor, "rb") as stream:
                 descriptor = None
-                raw = stream.read(min(limit, self.byte_limit - self.total_bytes) + 1)
+                budget = self.byte_limit - self.total_bytes
+                raw = stream.read((budget if limit is None else min(limit, budget)) + 1)
         finally:
             if descriptor is not None:
                 os.close(descriptor)
-        if len(raw) > limit:
+        if limit is not None and len(raw) > limit:
             raise corrupt("Stored component exceeds its byte limit")
         if self.total_bytes + len(raw) > self.byte_limit:
             raise CorrespondenceLimitError("Dependency capture exceeds its byte budget")

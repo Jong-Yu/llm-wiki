@@ -12,6 +12,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { AI_NETWORK_ENVIRONMENT } from '../settings/aiNetworkEnvironment';
 
 export type PersonalRuntime = { projectRoot: string; python: string };
 export type PrivateExecution = {
@@ -149,6 +150,7 @@ export function personalEnvironment(): NodeJS.ProcessEnv {
     'COMSPEC',
     'PATHEXT',
     'TESSDATA_PREFIX',
+    ...AI_NETWORK_ENVIRONMENT.map((name: string): string => name.toUpperCase()),
   ]);
   for (const [name, value] of Object.entries(process.env))
     if (allowed.has(name.toUpperCase()) && value !== undefined)

@@ -1,0 +1,27 @@
+.preview {
+  color-scheme: light dark;
+  width: 100%;
+  min-width: 0;
+  // 호스트 링크 색만 차단하며 제품의 위치 경로·메뉴 링크 색을 우선합니다.
+  :where(a) {
+    color: inherit;
+  }
+  .frame > :global(.wiki-theme) {
+    position: relative;
+    inset: auto;
+    height: 900px;
+  }
+}
+.workspace {
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  color: var(--wiki-color-text-primary);
+  [hidden] {
+    display: none !important;
+  }
+  > [data-workspace-route] {
+    height: 100%;
+    overflow: auto;
+  }
+}

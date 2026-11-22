@@ -8,6 +8,7 @@ from core.api.v1.access.router import router as access
 from core.api.v1.documents.router import router as documents
 from core.api.v1.knowledge.router import router as knowledge
 from core.api.v1.sources.router import router as sources
+from core.api.v1.templates.router import router as templates
 from core.api.v1.analysis_jobs.router import router as analysis_jobs
 from core.api.v1.reviews.router import router as reviews
 from core.api.v1.reviews.cleanup_router import router as cleanup
@@ -27,6 +28,7 @@ router.include_router(access)
 router.include_router(documents, prefix="/tenants/{tenant}")
 router.include_router(knowledge, prefix="/tenants/{tenant}")
 router.include_router(sources, prefix="/tenants/{tenant}")
+router.include_router(templates, prefix="/tenants/{tenant}")
 router.include_router(analysis_jobs, prefix="/tenants/{tenant}")
 router.include_router(reviews, prefix="/tenants/{tenant}")
 router.include_router(correspondences, prefix="/tenants/{tenant}")

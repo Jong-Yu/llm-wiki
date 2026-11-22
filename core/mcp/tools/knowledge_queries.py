@@ -5,22 +5,36 @@ from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field, StrictInt, StrictStr, ValidationError
 
 from core.api.v1.knowledge.schemas import (
-    ClaimSelection, HistoryRequest, QuestionContextRequest, QuestionSource,
+    ClaimSelection, HistoryRequest, ProfileRequest, QuestionContextRequest, QuestionSource,
     ReviewQueueRequest,
 )
 from core.api.v1.knowledge.glossary_schemas import GlossaryRequest
 from core.common.access import access_dict
 from core.modules.access.policy import AccessDenied
-from core.modules.knowledge.aggregation import history_query, prepare_question, review_queue
+from core.modules.knowledge.aggregation import (
+    MAX_LOOKUP_DOCUMENTS, history_query, lookup_question, prepare_question, review_queue,
+)
 from core.modules.knowledge.concepts import ConceptStore
 from core.mcp.request_context import _authorized_scope
 from core.mcp.results import _invoke
 
 KNOWLEDGE_QUERY_TOOLS = {
     "knowledge_context_prepare", "ontology_review_queue", "wiki_history_query",
-    "ontology_glossary_query",
+    "ontology_glossary_query", "knowledge_lookup",
 }
+# tenant를 생략하면 인증 사용자의 기본 작업 공간을 쓰는 도구. 권한 검사는 같다.
+DEFAULT_TENANT_TOOLS = frozenset({"knowledge_lookup"})
+
+
+class KnowledgeLookupRequest(ProfileRequest):
+    """질문 하나로 후보를 찾아 상위 문서만 준비한다. 사용자·tenant 권한은 서버가 정한다."""
+    question: str = Field(min_length=1, max_length=4000)
+    documents: list[str] = Field(default_factory=list, max_length=8)
+    max_documents: int = Field(3, ge=1, le=MAX_LOOKUP_DOCUMENTS)
+
+
 _MODELS = {
+    "knowledge_lookup": KnowledgeLookupRequest,
     "knowledge_context_prepare": QuestionContextRequest,
     "ontology_review_queue": ReviewQueueRequest,
     "wiki_history_query": HistoryRequest,
@@ -66,6 +80,29 @@ def _register_knowledge_query_tools(server, get_store):
         body = _MODELS[name].model_validate(fields)
         return _invoke(store, name, lambda: action(
             store, access_dict(scope), **body.model_dump(exclude={"profile"})))
+
+    @server.tool(annotations=read, structured_output=False)
+    def knowledge_lookup(
+        question: Annotated[StrictStr, Field(min_length=1, max_length=4000)],
+        documents: Selection = [],
+        max_documents: Annotated[StrictInt, Field(ge=1, le=MAX_LOOKUP_DOCUMENTS)] = 3,
+    ) -> CallToolResult:
+        """Start a wiki question here: one call finds relevant documents and returns focused evidence.
+
+        Ranks the authorized workspace's current wiki documents for the question and prepares the top
+        max_documents. Returns each prepared document's path, revisions, line_count and claim decision
+        counts, plus evidence: the source passages that best match the question (exact lines and text to
+        cite) and the matching claims, judgments and policies. It does not return whole documents.
+        tenant may be omitted to use your default workspace; access shows the applied tenant/profile,
+        so a separate access_context call is unnecessary. documents pins known paths first.
+        If evidence is partial, read around a passage with wiki_read(document, view="lines", start_line,
+        end_line) instead of the whole document, or call again with more specific wording or documents=[path];
+        knowledge_context_prepare gives a document's full text and knowledge.
+        retrieval lists candidates_not_prepared, truncated and skipped; an empty or partial result never
+        proves absence. Read-only; never runs AI or saves.
+        """
+        return invoke("knowledge_lookup", lookup_question, question=question, documents=documents,
+                      max_documents=max_documents)
 
     @server.tool(annotations=read, structured_output=False)
     def knowledge_context_prepare(

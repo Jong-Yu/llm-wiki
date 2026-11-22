@@ -62,6 +62,48 @@ class QuestionEvidenceTests(unittest.TestCase):
     def setUp(self):
         self.basis = basis_fixture()
 
+    def test_global_claims_and_history_preserve_document_ids_and_cross_document_pages(self):
+        other = deepcopy(self.basis["documents"][0])
+        other["document"] = "second.md"
+        self.basis["documents"].append(other)
+        for action in ("claims", "history"):
+            singles = [read_evidence(self.basis, {"action": action, "material_id": f"d{i}", "limit": 20})
+                       for i in (1, 2)]
+            expected = [item for result in singles for item in result["items"]]
+            offset, delivered, ids = 0, [], []
+            while True:
+                page = read_evidence(self.basis, {"action": action, "material_id": None, "offset": offset, "limit": 3})
+                self.assertEqual(page["scope"]["material_ids"], ["d1", "d2"])
+                self.assertEqual(page["scope"]["completion_scope"], "matching_records")
+                self.assertEqual(page["total_matches"], len(expected))
+                self.assertEqual([row["citation"] for row in page["citations"]],
+                                 resolve_evidence_ids(self.basis, page["evidence_ids"]))
+                delivered.extend(page["items"])
+                ids.extend(page["evidence_ids"])
+                if page["next_offset"] is None:
+                    self.assertTrue(page["complete"])
+                    break
+                self.assertGreater(page["next_offset"], offset)
+                offset = page["next_offset"]
+            self.assertEqual(delivered, expected)
+            self.assertTrue(any(item["material_id"] == "d2" for item in delivered))
+            self.assertEqual(len(ids), len(set(ids)))
+
+    def test_global_judgments_ignore_original_and_web_but_explicit_non_wiki_is_rejected(self):
+        self.basis["documents"] = []
+        for action in ("claims", "history"):
+            result = read_evidence(self.basis, {"action": action, "material_id": None})
+            self.assertEqual(result["items"], [])
+            self.assertEqual(result["scope"]["material_ids"], [])
+            self.assertEqual(result["total_matches"], 0)
+            self.assertTrue(result["complete"])
+            self.assertFalse(result["scope"]["absence_proven"])
+            for material in ("o1", "w1"):
+                with self.assertRaises(ValueError):
+                    read_evidence(self.basis, {"action": action, "material_id": material})
+        with self.assertRaises(ValueError):
+            read_evidence(self.basis, {"action": "read", "material_id": None})
+
     def test_read_preserves_crlf_and_exact_source_positions(self):
         result = read_evidence(self.basis, {"action": "read", "material_id": "d1", "start_line": 2, "line_count": 2})
         self.assertEqual(result["evidence_ids"], ["s1:2:3"])
@@ -443,6 +485,45 @@ class QuestionEvidenceTests(unittest.TestCase):
                       {"action": "search", "query": "x" * 201}, {"action": "search", "offset": 99999}]:
             with self.subTest(query=query), self.assertRaises(ValueError):
                 read_evidence(self.basis, query)
+
+
+class EvidenceSpeedEquivalenceTests(unittest.TestCase):
+    """속도용 계산(줄 캐시·줄 번호·단어 겹침)이 원래 계산과 같은 값을 낸다."""
+
+    SAMPLES = ["", "a", "\n", "\r", "\r\n", "a\r\nb\rc\nd", "a\r", "\r\n\r\n", "가\u2028나\x85다\n",
+               "x\r\r\ny\n\rz", "끝줄\n"]
+
+    def test_line_number_matches_splitting_the_prefix(self):
+        from core.modules.knowledge.question_evidence import _line_number, _split_lines
+        for content in self.SAMPLES:
+            for offset in range(len(content) + 1):
+                expected = (len(_split_lines(content[:offset]))
+                            + (0 if offset and content[offset - 1] not in "\r\n" else 1))
+                self.assertEqual(_line_number(content, offset), expected, (content, offset))
+
+    def test_cached_lines_are_the_same_immutable_lines(self):
+        from core.modules.knowledge import question_evidence
+        for content in self.SAMPLES:
+            first = question_evidence._lines(content)
+            self.assertEqual(list(first), question_evidence._split_lines(content))
+            self.assertIs(question_evidence._lines(content), first)
+            self.assertIsInstance(first, tuple)
+        # 같은 내용의 다른 문자열 객체도 같은 줄을 받고, 한도를 넘으면 오래된 항목부터 지운다.
+        self.assertEqual(question_evidence._lines("".join(["a\n", "b"])), ("a\n", "b"))
+        for index in range(question_evidence._LINE_CACHE_ENTRIES + 4):
+            question_evidence._lines(f"line {index}\n")
+        self.assertLessEqual(len(question_evidence._LINE_CACHE), question_evidence._LINE_CACHE_ENTRIES)
+        with self.assertRaises(ValueError):
+            question_evidence._lines(None)
+
+    def test_overlap_counter_matches_term_intersection(self):
+        from core.modules.knowledge.question_index import overlap_counter, terms
+        texts = ["원격 유지보수 세션은 최대 4시간", "UR E26 사이버 복원력", "SBOM 형식 비교표", "", "the of",
+                 "ＫＳＶ-40호 통합 항해", "a.b-c/d 1.2.3"]
+        for question in ["KSV-40호 원격 유지보수 세션 시간", "UR E26과 E27", "sbom 비교", "", "the"]:
+            wanted, count = terms(question), overlap_counter(terms(question))
+            for text in texts:
+                self.assertEqual(count(text), len(wanted & terms(text)), (question, text))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -17,13 +18,26 @@ from uuid import UUID
 from jsonschema import Draft202012Validator
 
 from core.common.json_codec import canonical_json_bytes
-from core.runtime.client_platform import private_directory, is_windows, ClientPlatformError
+from core.runtime.client_platform import private_directory, is_windows, ClientPlatformError, platform_error_code
 from core.runtime.client_process import cli_command
-from .codex import CodexAdapter, _ENVIRONMENT as _CODEX_ENVIRONMENT, _execute, _object, _write_new
+from .codex import CodexAdapter, _ENVIRONMENT as _CODEX_ENVIRONMENT, _execute, _object, _web_search_queries, _write_new
 from .contracts import AIAdapterError, MAX_PROMPT_BYTES, MAX_RESULT_BYTES, MAX_SCHEMA_BYTES
 
 
-_ENVIRONMENT = tuple(name for name in _CODEX_ENVIRONMENT if name != "CODEX_HOME") + ("CLAUDE_CONFIG_DIR",)
+# 회사 프록시·보안 인증서·Git Bash 위치는 터미널의 claude와 같은 연결 조건이다(D-143). 인증 정보는 넣지 않는다.
+NETWORK_ENVIRONMENT = ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+                       "NODE_EXTRA_CA_CERTS", "CLAUDE_CODE_GIT_BASH_PATH")
+_ENVIRONMENT = (tuple(name for name in _CODEX_ENVIRONMENT if name != "CODEX_HOME") + ("CLAUDE_CONFIG_DIR",)
+                + NETWORK_ENVIRONMENT)
+# Claude Code의 system 메시지 중 격리가 깨졌음을 뜻하는 종류만 거부한다(D-143). 진행·상태·안내 메시지는
+# 답이나 도구 실행이 아니며, 도구 금지는 tool_use·tool_result·permission_denials 검사가 지킨다.
+REJECTED_SYSTEM_SUBTYPES = frozenset((
+    "hook_started", "hook_progress", "hook_response", "stop_hook_summary",
+    "task_started", "task_progress", "task_notification", "task_updated", "background_tasks_changed",
+    "local_command_output", "permission_denied", "elicitation_complete", "plugin_install",
+    "files_persisted", "memory_recall"))
+_REJECTED_PREFIXES = ("hook_", "task_")
+_EVENT_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 # Claude's documented stdin limit is 10 MB. Never truncate a larger fixed input.
 _MAX_STDIN_BYTES = 10_000_000
 _REQUIRED_FLAGS = ("--print", "--output-format", "--json-schema", "--safe-mode", "--tools",
@@ -42,6 +56,11 @@ def environment():
 def _json(raw):
     return json.loads(raw, object_pairs_hook=_object,
         parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+
+
+def _event_name(value):
+    """CLI가 보낸 메시지 종류 이름을 기록용으로만 정리한다. 형식이 다르면 other로 둔다."""
+    return value if isinstance(value, str) and _EVENT_NAME.fullmatch(value) else "other"
 
 
 def _check_argument_size(arguments, env):
@@ -68,6 +87,8 @@ class _Events:
         self.session_id = None
         self.web_search = web_search
         self.web_tool_ids, self.web_completed_ids = set(), set()
+        self.web_inputs, self.web_queries = {}, []
+        self.web_queries_complete = True
 
     def __call__(self, line, callback):
         if not line.strip():
@@ -75,8 +96,10 @@ class _Events:
         try:
             event = _json(line)
             kind = event["type"]
-            if self.result is not None or kind not in {"system", "assistant", "user", "result", "rate_limit_event"}:
+            if self.result is not None:
                 raise AIAdapterError("ai_invalid_events")
+            if kind not in {"system", "assistant", "user", "result", "rate_limit_event"}:
+                raise AIAdapterError("ai_cli_event_rejected", event="type:" + _event_name(kind))
             self.trace.append({"type": kind})
             if event.get("session_id") is not None:
                 observed_id = str(UUID(event["session_id"]))
@@ -84,10 +107,13 @@ class _Events:
                     raise AIAdapterError("ai_session_mismatch")
                 self.session_id = observed_id
             if kind == "system":
-                # Hooks are not part of a frozen-input analysis. Do not accept their output as an answer.
-                # thinking_tokens는 추론 토큰 수 추정치만 담은 진행 알림이며 답변이나 도구 출력이 아니다.
-                if event.get("subtype") not in {"init", "status", "api_retry", "compact_boundary", "thinking_tokens"}:
-                    raise AIAdapterError("ai_unexpected_tool_activity")
+                # 훅·하위 작업·명령 실행 등은 고정 입력 분석에 끼어든 것이므로 거부한다. 진행을 멈추라는
+                # 표시가 붙은 메시지도 거부한다. 그 밖의 안내(새 종류 포함)는 이름만 기록하고 통과시킨다.
+                subtype = _event_name(event.get("subtype"))
+                self.trace[-1]["subtype"] = subtype
+                if (subtype == "other" or subtype in REJECTED_SYSTEM_SUBTYPES
+                        or subtype.startswith(_REJECTED_PREFIXES) or event.get("prevent_continuation") is True):
+                    raise AIAdapterError("ai_cli_event_rejected", event="system:" + subtype)
                 if isinstance(event.get("model"), str):
                     self.model = event["model"][:200]
             elif kind == "assistant":
@@ -117,6 +143,7 @@ class _Events:
                         if not isinstance(block.get("id"), str) or not isinstance(block.get("input"), dict):
                             raise AIAdapterError("ai_invalid_events")
                         self.web_tool_ids.add(block["id"])
+                        self.web_inputs[block["id"]] = _web_search_queries(block["input"])
                     elif block["type"] not in {"thinking", "redacted_thinking"}:
                         raise AIAdapterError("ai_unexpected_tool_activity")
             elif kind == "user":
@@ -127,6 +154,9 @@ class _Events:
                         if block.get("is_error"):
                             raise AIAdapterError("ai_web_search_failed")
                         self.web_completed_ids.add(block["tool_use_id"])
+                        queries, known = self.web_inputs[block["tool_use_id"]]
+                        self.web_queries.extend(query for query in queries if query not in self.web_queries)
+                        self.web_queries_complete = self.web_queries_complete and known
                     elif block["type"] != "tool_result" or block.get("tool_use_id") not in self.structured_ids:
                         raise AIAdapterError("ai_unexpected_tool_activity")
             elif kind == "result":
@@ -172,7 +202,8 @@ class ClaudeAdapter(CodexAdapter):
         except ImportError as error:
             raise AIAdapterError("ai_windows_dependency_missing") from error
         except (OSError, TimeoutError) as error:
-            raise AIAdapterError("ai_cli_unavailable") from error
+            # 앱의 실행 준비 실패는 CLI 설치 문제로 바꾸지 않고 고정 코드를 유지한다.
+            raise AIAdapterError(platform_error_code(error) or "ai_cli_unavailable") from error
         return {"provider": "claude", "cli_version": version, "requested_model": self.model,
                 "capabilities_checked": True, "login_checked": False}
 
@@ -236,6 +267,8 @@ class ClaudeAdapter(CodexAdapter):
                 raise AIAdapterError("ai_incomplete_turn")
             if web_search:
                 metadata["web_search_completed"] = len(events.web_completed_ids)
+                metadata["web_search_queries"] = events.web_queries
+                metadata["web_search_queries_complete"] = bool(events.web_completed_ids) and events.web_queries_complete
                 if not metadata["web_search_completed"]:
                     raise AIAdapterError("ai_web_search_not_used")
             if self.persist_session or session_id is not None:
@@ -262,10 +295,14 @@ class ClaudeAdapter(CodexAdapter):
             raise
         except AIAdapterError as error:
             metadata["error_code"] = error.code
+            if error.event is not None:
+                metadata["rejected_event"] = error.event
             raise
         except (OSError, ValueError, TypeError, UnicodeError) as error:
-            metadata["error_code"] = "ai_invalid_result"
-            raise AIAdapterError("ai_invalid_result") from error
+            # 실행 준비(Job·비공개 파일) 실패를 결과 형식 오류로 바꿔 보고하지 않는다.
+            code = platform_error_code(error) or "ai_invalid_result"
+            metadata["error_code"] = code
+            raise AIAdapterError(code) from error
         finally:
             metadata["duration_seconds"] = round(time.monotonic() - started, 3)
             _write_new(directory / "trace.jsonl", b"".join(canonical_json_bytes(event) for event in events.trace))

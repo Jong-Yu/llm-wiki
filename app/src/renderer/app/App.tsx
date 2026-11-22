@@ -17,6 +17,7 @@ import { AnalysisJobPage } from '@renderer/pages/jobs/AnalysisJobPage';
 import { ReviewQueuePage } from '@renderer/pages/review/ReviewQueuePage';
 import { UserGuidePage } from '@renderer/pages/guide/UserGuidePage';
 import { WorkspacePage } from '@renderer/shared/ui/WorkspacePage';
+import { TemplatesPage } from '@renderer/pages/templates/TemplatesPage';
 import { AppShell } from './AppShell';
 import { RetainedWorkspace } from './RetainedWorkspace';
 
@@ -65,6 +66,7 @@ function renderWorkspaceRoutes(location: Location): JSX.Element {
       <Route path="/renewal/*" element={<LegacyRouteRedirect />} />
       <Route path="/documents" element={<DocumentLibraryPage />} />
       <Route path="/register" element={<RegisterDocumentPage />} />
+      <Route path="/templates" element={<TemplatesPage />} />
       <Route path="/document" element={<DocumentDetailPage />} />
       <Route path="/source" element={<SourceDetailPage />} />
       <Route path="/ontology" element={<OntologyMapPage />} />

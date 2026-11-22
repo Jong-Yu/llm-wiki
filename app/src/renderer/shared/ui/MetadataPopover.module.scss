@@ -1,0 +1,83 @@
+/* 기존 문서 속성 칩의 표현을 중립 공용 컴포넌트로 유지합니다. */
+.chip {
+  box-sizing: border-box;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 12px;
+  border: 1px solid var(--wiki-color-border-control);
+  /* 50%는 가로로 긴 칩을 타원으로 만들어 알약 모양(끝이 반원)으로 둡니다. */
+  border-radius: 999px;
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: var(--wiki-font-size-13) / 18px var(--wiki-font-family-ui);
+  text-decoration: none;
+  cursor: pointer;
+  &:hover:not(:disabled) {
+    background: var(--wiki-color-surface-hover);
+  }
+  // 다른 화면으로 가는 링크와 열어 볼 이력이 있는 칩은 옅은 파란색으로 구별합니다.
+  &[data-kind='link'],
+  &[data-accent='true'] {
+    border-color: color-mix(
+      in srgb,
+      var(--wiki-color-action-primary) 35%,
+      transparent
+    );
+    background: var(--wiki-color-action-surface);
+    color: var(--wiki-color-action-primary);
+  }
+  &[data-active='true'] {
+    border-color: var(--wiki-color-action-primary);
+    background: var(--wiki-color-action-surface);
+    color: var(--wiki-color-action-primary);
+  }
+  &:disabled,
+  &[aria-disabled='true'] {
+    opacity: 0.5;
+    cursor: default;
+  }
+  &:focus-visible {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+  }
+}
+.chevron {
+  transition: transform 0.12s ease;
+  [aria-expanded='true'] > & {
+    transform: rotate(180deg);
+  }
+}
+.popoverRoot {
+  position: relative;
+}
+.popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  box-sizing: border-box;
+  width: min(400px, calc(100vw - 48px));
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-canvas);
+  box-shadow: var(--wiki-shadow-overlay);
+  dl {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 6px 12px;
+    margin: 0;
+  }
+  dt {
+    color: var(--wiki-color-text-secondary);
+  }
+  dd {
+    margin: 0;
+    min-width: 0;
+  }
+}

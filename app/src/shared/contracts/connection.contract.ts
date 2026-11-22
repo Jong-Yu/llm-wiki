@@ -2,6 +2,7 @@ export const CONNECTION_CHANNELS = {
   connect: 'connection:connect',
   authenticate: 'connection:authenticate',
   getState: 'connection:get-state',
+  refreshAccess: 'connection:refresh-access',
   selectWorkspace: 'connection:select-workspace',
   disconnect: 'connection:disconnect',
   restoreSaved: 'connection:restore-saved',
@@ -109,6 +110,7 @@ export type ConnectionBridge = {
   authenticate: (request: AccountRequest) => Promise<ConnectionResult>;
   connect: (request: ConnectRequest) => Promise<ConnectionResult>;
   getState: () => Promise<ConnectionResult>;
+  refreshAccess: () => Promise<ConnectionResult>;
   selectWorkspace: (
     request: SelectWorkspaceRequest,
   ) => Promise<ConnectionResult>;

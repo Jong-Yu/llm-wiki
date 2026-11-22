@@ -45,6 +45,7 @@
 }
 .list h3 {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--wiki-space-8);
   margin: 0 0 var(--wiki-space-4);
@@ -60,6 +61,17 @@
   margin: 0;
   color: var(--wiki-color-text-secondary);
   font-size: var(--wiki-font-size-12);
+}
+.rowTitle,
+.rowTarget {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowTitle {
+  flex: 1;
 }
 .rowState {
   display: grid;
@@ -261,6 +273,52 @@
 .actions a:hover,
 .rowActions a:hover {
   background-color: var(--wiki-color-surface-hover);
+}
+.root .moreAction {
+  flex-shrink: 0;
+  width: var(--wiki-component-control-height-small);
+  height: var(--wiki-component-control-height-small);
+  min-height: var(--wiki-component-control-height-small);
+  padding: 0;
+  margin-inline-start: var(--wiki-space-8);
+  border-color: transparent;
+  background: transparent;
+  color: var(--wiki-color-text-secondary);
+  &:hover:not(:disabled) {
+    color: var(--wiki-color-text-primary);
+  }
+}
+.sessionPopover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  box-sizing: border-box;
+  width: 192px;
+  max-width: calc(100vw - 16px);
+  padding: var(--wiki-space-4);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  background: var(--wiki-color-surface-panel);
+  color: var(--wiki-color-text-primary);
+  box-shadow: var(--wiki-shadow-overlay);
+}
+.root .dismissItem {
+  width: 100%;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+}
+.root .dismissNote {
+  margin: 0;
+  padding: var(--wiki-space-4) var(--wiki-space-12) var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+@media (pointer: coarse) {
+  .root .moreAction {
+    width: var(--wiki-component-control-height-touch);
+    height: var(--wiki-component-control-height-touch);
+  }
 }
 .root .primaryAction {
   color: var(--wiki-color-button-primary-foreground);

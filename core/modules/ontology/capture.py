@@ -60,7 +60,7 @@ def capture_bytes(ontology, path: Path, remaining: list, document: str, componen
         limit = (MAX_DOCUMENT_BYTES if component == "source" else constants.MAX_ONTOLOGY_BYTES) if max_bytes is None else max_bytes
 
         def check_size(size):
-            if size > limit:
+            if limit is not None and size > limit:
                 if component == "source":
                     raise DocumentTooLargeError(document, size)
                 raise OntologyCorruptError("Captured input exceeds its byte limit")

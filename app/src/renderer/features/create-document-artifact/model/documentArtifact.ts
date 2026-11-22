@@ -67,13 +67,8 @@ export const artifactFormSchema = z.object({
     .trim()
     .min(1, '제목을 입력해 주세요.')
     .max(200, '제목은 200자 이내로 입력해 주세요.'),
-  content: z
-    .string()
-    .refine(
-      (value: string): boolean =>
-        new TextEncoder().encode(value).byteLength <= 1024 * 1024,
-      '본문은 UTF-8 1 MiB 이내로 입력해 주세요.',
-    ),
+  /** 문서 크기 한도는 없습니다(D-141). */
+  content: z.string(),
 });
 export type ArtifactForm = z.infer<typeof artifactFormSchema>;
 const record = z.object({

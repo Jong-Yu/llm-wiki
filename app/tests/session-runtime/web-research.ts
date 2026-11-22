@@ -15,11 +15,16 @@ await writeFile(join(project, 'tools/__init__.py'), '');
 await writeFile(
   join(project, 'tools/web_search_cli.py'),
   `
-import argparse, hashlib, json, os, time
+import argparse, hashlib, json, os, sys, time
 from pathlib import Path
 p=argparse.ArgumentParser()
-p.add_argument('--query-file'); args, _=p.parse_known_args()
-query=Path(args.query_file).read_text(encoding='utf-8')
+p.add_argument('--query-file'); p.add_argument('--question-file'); args, _=p.parse_known_args()
+if bool(args.query_file)==bool(args.question_file): raise ValueError('one input required')
+text=Path(args.question_file or args.query_file).read_text(encoding='utf-8')
+if args.question_file and text=='question-fail': sys.exit(1)
+if args.question_file and text.startswith('long-question:') and not text.endswith(':last-condition'):
+ raise ValueError('question truncated')
+query='질문에서 뽑은 검색어' if args.question_file else text
 if query=='waiting': time.sleep(30)
 content='공개 문서에서 실제 읽은 한글과 이모지 😀입니다.'
 if query=='unicode-limit': content='😀'*12000
@@ -53,6 +58,24 @@ const unicode = await researchPublicWeb(
 );
 assert.equal(unicode.web.status, 'complete');
 assert.equal(Array.from(unicode.web.sources[0]?.content ?? '').length, 12000);
+const questionResult = await researchPublicWeb(
+  runtime,
+  { question: `long-question:${'조건'.repeat(3000)}:last-condition` },
+  new AbortController().signal,
+);
+assert.equal(questionResult.web.status, 'complete');
+assert.equal(questionResult.web.query, '질문에서 뽑은 검색어');
+const failedQuestion = await researchPublicWeb(
+  runtime,
+  { question: 'question-fail' },
+  new AbortController().signal,
+);
+assert.equal(failedQuestion.web.status, 'unavailable');
+assert.equal(failedQuestion.web.query, '질문 기반 웹 검색 (검색어 미확인)');
+assert.deepEqual(failedQuestion.web.warnings, [
+  'web_search_failed',
+  'search_query_unavailable',
+]);
 for (const query of ['corrupt', 'private', 'mismatch', 'duplicate']) {
   const rejected = await researchPublicWeb(
     runtime,
@@ -148,6 +171,25 @@ assert.equal(
     .success,
   false,
 );
+const { query: _query, ...session } = searchRequest;
+assert.equal(
+  questionWebSearchSchema.safeParse({
+    ...session,
+    question: '질문'.repeat(8000),
+  }).success,
+  true,
+);
+for (const extra of [
+  {},
+  { question: '' },
+  { question: 'x'.repeat(16001) },
+  { question: 'question', documents: ['private.md'] },
+  { question: 'question', attachments: [] },
+])
+  assert.equal(
+    questionWebSearchSchema.safeParse({ ...session, ...extra }).success,
+    false,
+  );
 console.log(
   'PASS web research: real child boundary, Unicode, tampering, public URLs, cancellation and private cleanup',
 );

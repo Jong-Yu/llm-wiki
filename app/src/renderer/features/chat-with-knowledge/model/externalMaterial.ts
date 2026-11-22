@@ -8,6 +8,8 @@ import {
 } from './attachments';
 import type { ChatAttachment } from './attachments';
 import { OUTPUT_INTENT_MARKER } from './outputIntent';
+import { splitTemplateSnapshot, templatePrompt } from './templateSnapshot';
+import type { TemplateSnapshot } from './templateSnapshot';
 
 // 이전 버전(자료 한 덩어리)으로 저장된 대화를 읽기 위한 표지입니다. 새 질문에는 쓰지 않습니다.
 const LEGACY_MATERIAL_MARKER =
@@ -36,13 +38,16 @@ export function composeQuestion(
   template: AnswerTemplate | null = null,
   noEvidence: boolean = false,
   webEnabled: boolean = false,
+  registeredTemplate: TemplateSnapshot | null = null,
 ): string {
   return (
     question +
     (noEvidence ? (webEnabled ? WEB_NO_WIKI_MARKER : NO_EVIDENCE_MARKER) : '') +
-    (template
-      ? `\n\n[출력 양식 #${template.id}]\n${template.instruction}`
-      : OUTPUT_INTENT_MARKER) +
+    (registeredTemplate
+      ? templatePrompt(registeredTemplate)
+      : template
+        ? `\n\n[출력 양식 #${template.id}]\n${template.instruction}`
+        : OUTPUT_INTENT_MARKER) +
     composeAttachments(attachments)
   );
 }
@@ -52,6 +57,7 @@ export type QuestionContent = {
   attachments: ChatAttachment[];
   template: { id: string; name: string | null } | null;
   noEvidence: boolean;
+  registeredTemplate?: TemplateSnapshot;
 };
 
 /** 저장된 질문을 화면에 보여 줄 때 질문 문장, 근거 없음, 출력 양식, 첨부 자료로 나눕니다. */
@@ -78,6 +84,8 @@ export function splitQuestion(content: string): QuestionContent {
       },
     ];
   }
+  const registered = splitTemplateSnapshot(head);
+  head = registered.head;
   // 형식 안내는 항상 첨부 바로 앞에 붙으므로 끝에 있을 때만 떼어 냅니다.
   if (head.endsWith(OUTPUT_INTENT_MARKER))
     head = head.slice(0, head.length - OUTPUT_INTENT_MARKER.length);
@@ -93,6 +101,17 @@ export function splitQuestion(content: string): QuestionContent {
   const question = noEvidence
     ? beforeTemplate.slice(0, evidenceAt)
     : beforeTemplate;
+  if (registered.snapshot)
+    return {
+      question,
+      attachments,
+      noEvidence,
+      registeredTemplate: registered.snapshot,
+      template: {
+        id: `tpl-${registered.snapshot.template.id}`,
+        name: registered.snapshot.template.name,
+      },
+    };
   if (!found || found[1] === undefined)
     return { question, attachments, template: null, noEvidence };
   return {

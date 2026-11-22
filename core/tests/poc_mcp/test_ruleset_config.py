@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from core.runtime import http_cli
 from core.runtime.rulesets import configured_ruleset_paths
+from core.tests.poc_mcp.test_mac_launcher import free_port
 
 
 class RulesetConfigTests(unittest.TestCase):
@@ -139,6 +140,7 @@ class MacLauncherRulesetTests(unittest.TestCase):
             tunnel.write_text("#!/bin/bash\nexit 99\n")
             tunnel.chmod(0o700)
             config = root / ".local/server-rulesets.json"
+            port = str(free_port())
             for mode in ["absent", "file", "broken-link"]:
                 with self.subTest(mode=mode):
                     if mode == "file":
@@ -146,14 +148,14 @@ class MacLauncherRulesetTests(unittest.TestCase):
                     elif mode == "broken-link":
                         config.unlink()
                         config.symlink_to(root / "absent.json")
-                    process = subprocess.run(["/bin/bash", str(launcher), "8767"], cwd="/",
+                    process = subprocess.run(["/bin/bash", str(launcher), port], cwd="/",
                         text=True, capture_output=True, timeout=15)
                     self.assertNotEqual(process.returncode, 0)
                     args = (root / "http-argv").read_text().splitlines()
                     self.assertEqual(args[:4], ["-B", "-m", "core.runtime.http_cli", "--access-config"])
                     expected = [] if mode == "absent" else ["--ruleset-config", str(config)]
                     self.assertEqual(args[4:], [".local/tenancy/access.json", "--tenant-root", "data",
-                        "--port", "8767", "--tracked-read-index", "--read-metrics", *expected])
+                        "--port", port, "--tracked-read-index", "--read-metrics", *expected])
 
 
 if __name__ == "__main__":

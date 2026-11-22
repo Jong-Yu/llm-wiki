@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "checks": [
+    "로그인 하단에서 키보드로 독립 관리자 인증 진입, 일반 가입·소속 요구 없음, 잘못된 키 거부와 제출 후 입력 비움",
+    "미설정·연결 실패·권한 거부 상태 표시, 진행 중 취소 후 늦은 인증 성공 차단, 재진입 키 비움·관리 종료의 원 로그인 복귀",
+    "설정 서버·계정의 서버 관리 행에서 독립 인증, 취소·관리 종료 뒤 원 이름·서버·소속과 일반 연결 스냅샷 보존",
+    "무소속 배정 대기에서도 관리자 인증 가능, 관리 종료 후 일반 계정은 소속 배정 없이 계속 대기",
+    "호스트 상태 복원·외부 상태 이벤트·관리 주소와 위조 세션 필드로 인증 우회 불가, 인증 전 관리 메뉴·자료 DOM 없음",
+    "가상시계로 실제 15분 절대 만료와 활동 시 연장 없음 확인, 관리 DOM 제거 및 재인증 뒤 같은 이름 편집·초안 복원·저장",
+    "핵심 인증·설정·대기 화면 320/736/1280에서 진입·취소 조작 노출과 가로 넘침 없음, 키보드 진입·입력·취소와 종료 후 원 진입점 focus 복원 확인",
+    "호스트 상태에 관리자 키·인증 세션 없음, 저장 크기 제한 유지, 브라우저 오류·외부 요청 없음"
+  ],
+  "screenshots": [
+    "login-entry-light-1280.png",
+    "admin-auth-light-1280.png",
+    "admin-invalid-key-light-1280.png",
+    "settings-admin-entry-light-1280.png",
+    "waiting-admin-entry-light-1280.png",
+    "admin-expired-light-1280.png",
+    "admin-auth-light-736.png",
+    "admin-auth-light-320.png",
+    "waiting-admin-entry-light-736.png",
+    "waiting-admin-entry-light-320.png",
+    "settings-admin-entry-light-736.png",
+    "settings-admin-entry-light-320.png"
+  ],
+  "errors": [],
+  "requests": [],
+  "verifiedAt": "2026-11-18T11:14:36.480Z",
+  "scope": "v6 관리자 진입·독립 인증의 모의 화면 검증; 실제 관리자 API·인증 보안 검증 완료 아님",
+  "previousEvidence": "../admin-console-v5/"
+}

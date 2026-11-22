@@ -2,9 +2,12 @@
 from copy import deepcopy
 
 from core.common.json_codec import canonical_json_bytes, canonical_json_hash
-from core.modules.knowledge.question_evidence import RANKED_SEARCH_POLICY, read_evidence, resolve_evidence_ids
+from core.common.evidence_transport import expand_initial_citations, initial_citation_encoding
+from core.modules.knowledge.question_evidence import (RANKED_SEARCH_POLICY, WHOLE_WINDOW_READ_POLICY,
+                                                     read_evidence, resolve_evidence_ids)
 from .question_basis import QuestionBasisStore, is_basis_reference
 from .store import PersonalConflictError, PersonalLimitError
+from .template_grounding import TEMPLATE_MAX_EVIDENCE_READS
 
 CONTRACT = "personal-question-v5"
 PREFETCH_CONTRACT = "personal-question-v6"
@@ -112,6 +115,19 @@ class QuestionGrounding:
     def _full_basis(self, basis):
         return QuestionBasisStore(self.scope).load(basis) if is_basis_reference(basis) else basis
 
+    def _check_initial_transport(self, record, result):
+        encoding = initial_citation_encoding(record["data"])
+        if encoding is not None and record["data"]["input_contract_version"] != PREFETCH_CONTRACT:
+            raise ValueError("Initial citation encoding requires the prefetch contract")
+        expanded = expand_initial_citations(result, expected_encoding=encoding)
+        if encoding is not None:
+            basis = self._full_basis(record["data"]["basis"])
+            if ([row["evidence_id"] for row in expanded["citations"]] != expanded["evidence_ids"]
+                    or any(row["citation"] != resolve_evidence_ids(basis, [row["evidence_id"]])[0]
+                           for row in expanded["citations"])):
+                raise ValueError("Transported citations disagree with the frozen source")
+        return expanded
+
     def _dialogue(self, record, query):
         data = record["data"]
         conversation = self.personal._read("conversations", data["conversation_id"])
@@ -166,26 +182,32 @@ class QuestionGrounding:
             if payload["expected_state_revision"] != self._state_version(runtime):
                 raise PersonalConflictError()
             events = [e for e in record["events"] if e.get("operation") == "evidence" and e.get("run_id") == payload["run_id"]]
-            if len(events) >= MAX_EVIDENCE_READS:
+            maximum = TEMPLATE_MAX_EVIDENCE_READS if record["data"].get("template_ref") else MAX_EVIDENCE_READS
+            if len(events) >= maximum:
                 raise PersonalLimitError("The question evidence read limit was reached")
             query = payload["query"]
             full_basis = self._full_basis(record["data"]["basis"])
             source_query = {key: value for key, value in query.items() if key not in {"start_character", "character_count"}}
             policy = record["data"].get("evidence_search_policy")
+            initial_citation_encoding(record["data"])
             if policy is not None and policy != RANKED_SEARCH_POLICY:
                 raise ValueError("Unknown frozen evidence search policy")
+            read_policy = record["data"].get("evidence_read_policy")
+            if read_policy is not None and read_policy != WHOLE_WINDOW_READ_POLICY:
+                raise ValueError("Unknown frozen evidence read policy")
+            whole_window = read_policy == WHOLE_WINDOW_READ_POLICY
             if query["action"] == "initial":
                 if record["data"]["input_contract_version"] != PREFETCH_CONTRACT:
                     raise ValueError("Initial evidence requires the prefetch question contract")
                 result = deepcopy(record["data"]["initial_evidence"])
                 if canonical_json_hash(result) != record["data"]["initial_evidence_sha256"]:
                     raise ValueError("The frozen initial evidence is inconsistent")
+                self._check_initial_transport(record, result)
             elif query["action"] == "dialogue":
                 result = self._dialogue(record, query)
-            elif policy == RANKED_SEARCH_POLICY:
-                result = read_evidence(full_basis, source_query, ranked_search=True)
             else:
-                result = read_evidence(full_basis, source_query)
+                result = read_evidence(full_basis, source_query, ranked_search=policy == RANKED_SEARCH_POLICY,
+                                       whole_window=whole_window)
             event = {"operation": "evidence", "run_id": payload["run_id"], "runtime": runtime, "query": query,
                      "evidence": result, "evidence_sha256": canonical_json_hash(result)}
             def final_guard():
@@ -201,6 +223,9 @@ class QuestionGrounding:
             raise FileNotFoundError("Evidence request not found")
         if canonical_json_hash(event["evidence"]) != event["evidence_sha256"]:
             raise ValueError("The retained evidence response is inconsistent")
+        initial_citation_encoding(record["data"])
+        if event["query"]["action"] == "initial":
+            self._check_initial_transport(record, event["evidence"])
         return {**self._project(record), "request_id": request_id, "replayed": replayed,
                 "evidence_run_id": event["run_id"],
                 "evidence": deepcopy(event["evidence"]), "evidence_sha256": event["evidence_sha256"]}
@@ -219,6 +244,13 @@ class QuestionGrounding:
         ids = payload.get("evidence_ids")
         if not isinstance(ids, list) or len(ids) > 64 or len(ids) != len(set(ids)):
             raise ValueError("Use unique evidence IDs returned by this question's reads")
+        initial_citation_encoding(record["data"])
+        for event in record["events"]:
+            if (event.get("operation") == "evidence" and event.get("run_id") == payload["run_id"]
+                    and event["query"]["action"] == "initial"):
+                if canonical_json_hash(event["evidence"]) != event["evidence_sha256"]:
+                    raise ValueError("The retained evidence response is inconsistent")
+                self._check_initial_transport(record, event["evidence"])
         served = {value for event in record["events"] if event.get("operation") == "evidence" and event.get("run_id") == payload["run_id"]
                   for value in event["evidence"]["evidence_ids"]}
         if not set(ids).issubset(served):

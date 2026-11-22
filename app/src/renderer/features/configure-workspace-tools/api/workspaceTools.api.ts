@@ -15,6 +15,11 @@ export function readToolsConnection(): Promise<ConnectionResult> {
   return connectionGateway.getState();
 }
 
+/** 현재 인증 토큰으로 서버의 최신 소속을 명시적으로 재확인합니다. */
+export function refreshToolsAccess(): Promise<ConnectionResult> {
+  return connectionGateway.refreshAccess();
+}
+
 /** 이름 인증과 기본 공간 선택은 main에서 처리합니다. */
 export function connectToolsServer(
   request: AccountRequest,

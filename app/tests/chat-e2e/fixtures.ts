@@ -6,6 +6,7 @@ import type { ChildProcess } from 'node:child_process';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assignTestWorkspace } from '../poc-ui/assignment';
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const projectRoot = resolve(appRoot, '..');
@@ -29,7 +30,7 @@ type Fixture = {
   app: () => ElectronApplication;
   /** 실제 앱의 계정 인증으로 격리 서버에 연결하고 AI 채팅 화면까지 이동합니다. */
   openChat: (page: Page, name?: string) => Promise<void>;
-  /** 서버 위키에 테스트 문서를 넣습니다. 가입 후(작업 공간 폴더 생성 후)에 호출합니다. */
+  /** 서버 위키에 테스트 문서를 넣습니다. 시험 소속을 명시 배정한 openChat 이후에 호출합니다. */
   seedWiki: () => Promise<void>;
 };
 
@@ -130,18 +131,22 @@ export const test = base.extend<Fixture & { server: { url: string; root: string;
         .filter((call: FakeAiCall): boolean => !call.searching);
     });
   },
-  openChat: async ({ serverUrl }, use): Promise<void> => {
+  openChat: async ({ serverUrl, server }, use): Promise<void> => {
     await use(async (page: Page, name?: string): Promise<void> => {
       await expect(page.getByRole('textbox', { name: '계정 이름' })).toBeVisible();
       // 채팅 검사의 준비 단계입니다. 제품 인증 IPC의 실제 가입 결과를 한 번 확인한 뒤
       // 화면이 main의 연결 상태를 다시 읽게 하므로 폼 전환이나 재가입 추측에 의존하지 않습니다.
-      const status = await page.evaluate(async (account: { name: string; serverUrl: string }): Promise<string> => {
+      const waiting = await page.evaluate(async (account: { name: string; serverUrl: string }): Promise<{ userId: string; unassigned: boolean }> => {
         const result = await window.wiki?.connection.authenticate({ ...account, mode: 'signup' });
         if (!result?.ok) throw new Error(result?.error.code ?? 'connection_bridge_missing');
-        return result.data.status;
+        if (result.data.status !== 'connected') throw new Error('signup_not_connected');
+        return { userId: result.data.userId, unassigned: result.data.selection === null && result.data.workspaces.length === 0 };
       }, { name: name ?? `검증${randomBytes(8).toString('hex')}`, serverUrl });
-      expect(status).toBe('connected');
+      expect(waiting.unassigned).toBe(true);
       await page.reload();
+      await expect(page.getByRole('heading', { name: '워크스페이스 배정 대기' })).toBeVisible();
+      await assignTestWorkspace(projectRoot, join(server.root, 'server'), waiting.userId);
+      await page.getByRole('button', { name: '워크스페이스 배정 다시 확인' }).click();
       await page.getByRole('link', { name: 'AI 채팅' }).click();
       await expect(page.getByPlaceholder('문서에 대해 질문하세요')).toBeEnabled();
     });

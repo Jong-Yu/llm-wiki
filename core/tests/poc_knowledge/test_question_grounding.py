@@ -429,7 +429,8 @@ class QuestionGroundingHTTPTests(ServerFixture):
             "conversation_id": conversation["record"]["id"], "turn_id": conversation["record"]["events"][-1]["id"]}, 201)
         draft = self.post("/result-drafts", {"request_id": uuid4().hex, "saved_result_id": saved["record"]["id"]}, 201)
         rendered = self.get(f"/result-drafts/{draft['record']['id']}")
-        self.assertFalse(rendered["can_apply_size"])
+        # 문서 크기 한도가 없으므로(D-141) 1 MiB를 넘는 초안도 크기 때문에 적용이 막히지 않는다.
+        self.assertTrue(rendered["can_apply_size"])
         self.assertIn("bounded source data", rendered["rendered_content"])
         self.assertGreater(rendered["rendered_size_bytes"], 1024 * 1024)
 

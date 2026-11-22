@@ -94,9 +94,11 @@ def _validate_binding(query, catalog):
         if type(total) is not int or not 1 <= start <= total:
             _invalid()
     elif action in ("claims", "history"):
+        if material_id is None:
+            return
         document_matches = [item for item in documents
                             if isinstance(item, dict) and item.get("id") == material_id]
-        if (material_id is None or not material_id.startswith("d")
+        if (not material_id.startswith("d")
                 or len(document_matches) != 1 or len(matches) != 1):
             _invalid()
     elif action == "search" and material_id is not None and len(matches) != 1:

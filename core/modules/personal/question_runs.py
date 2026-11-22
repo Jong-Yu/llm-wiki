@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from hashlib import sha256
 from uuid import uuid4
 from core.common.json_codec import canonical_json_hash
+from core.common.evidence_transport import INITIAL_CITATION_ENCODING, initial_citation_encoding
 from core.modules.sources import files
 from core.modules.personal.store import PersonalStore, PersonalConflictError
 from core.modules.documents.store import StorageBusyError
@@ -16,9 +17,11 @@ from core.modules.access.policy import AccessDenied, PolicyError
 from . import workflow_io
 from .web_evidence import WEB_SOURCE_FIELDS
 from .question_basis import is_basis_reference
+from .template_grounding import source_prefetch_contract, TEMPLATE_MAX_EVIDENCE_READS
 from .question_grounding import (QuestionGrounding, CONTRACT, PREFETCH_CONTRACT, GROUNDED_CONTRACTS,
     PREFETCH_INSTRUCTIONS, INSTRUCTIONS, MAX_EVIDENCE_READS,
                                  RANKED_SEARCH_POLICY, USER_DIALOGUE_INSTRUCTIONS, dialogue_context)
+from core.modules.knowledge.question_evidence import WHOLE_WINDOW_READ_POLICY
 
 LEASE_SECONDS = 300
 INPUT_CONTRACT_VERSION = "personal-question-v3"
@@ -92,13 +95,20 @@ def _live(runtime):
 class QuestionRunStore(QuestionGrounding):
     """현재 인증 사용자의 질문 실행을 기존 개인 원장과 동일 잠금에 연결한다."""
 
-    def __init__(self, scope, *, user_dialogue=False, ranked_search=False):
+    def __init__(self, scope, *, user_dialogue=False, ranked_search=False, compact_initial_citations=False,
+                 whole_window_reads=False):
         if type(user_dialogue) is not bool:
             raise ValueError("user_dialogue must be a boolean")
         if type(ranked_search) is not bool:
             raise ValueError("ranked_search must be a boolean")
+        if type(compact_initial_citations) is not bool:
+            raise ValueError("compact_initial_citations must be a boolean")
+        if type(whole_window_reads) is not bool:
+            raise ValueError("whole_window_reads must be a boolean")
         self.user_dialogue = user_dialogue
         self.ranked_search = ranked_search
+        self.whole_window_reads = whole_window_reads
+        self.compact_initial_citations = compact_initial_citations
         self.scope, self.personal = scope, PersonalStore(scope)
         self.actor = {key: getattr(scope, key) for key in ("user_id", "tenant", "profile_id", "domain", "viewpoint", "policy_revision")}
         if getattr(scope, "access_revision", None):
@@ -126,8 +136,16 @@ class QuestionRunStore(QuestionGrounding):
         # 과거 v2 작업의 고정 입력은 그대로 두고 새 작업에만 대화 문맥을 포함한다.
         if "conversation_context" in data:
             value["conversation_context"] = deepcopy(data["conversation_context"])
+        for key in ("template_ref", "source_prefetch"):
+            if key in data:
+                value[key] = deepcopy(data[key])
         if data["input_contract_version"] == PREFETCH_CONTRACT:
             value["initial_evidence"] = {"action": "initial", "sha256": data["initial_evidence_sha256"]}
+            encoding = initial_citation_encoding(data)
+            if encoding is not None:
+                value["initial_evidence"]["citation_encoding"] = encoding
+        elif initial_citation_encoding(data) is not None:
+            raise ValueError("Initial citation encoding requires the prefetch contract")
         return {**value, "input_sha256": canonical_json_hash(value)}
 
     def _fresh(self, record, *, wiki_locked=False):
@@ -172,6 +190,8 @@ class QuestionRunStore(QuestionGrounding):
             "output_contract": ({**deepcopy(OUTPUT_CONTRACT), "citation_references": _citation_references(question["basis"])}
                                 if not is_basis_reference(question["basis"]) else {}),
             "origin": "client_reported", "human_approval": False}
+        if "template_ref" in question:
+            data["template_ref"] = deepcopy(question["template_ref"])
         if is_basis_reference(question["basis"]):
             data.update(input_contract_version=CONTRACT, input_instructions=INSTRUCTIONS,
                 output_contract={"content": "UTF-8 answer", "citations": "Only evidence IDs returned by this run's evidence reads",
@@ -180,20 +200,30 @@ class QuestionRunStore(QuestionGrounding):
                     expected_conversation_revision, user_dialogue=self.user_dialogue))
             if self.user_dialogue:
                 data["input_instructions"] += " " + USER_DIALOGUE_INSTRUCTIONS
+            if "template_ref" in data:
+                data["output_contract"]["max_evidence_reads"] = TEMPLATE_MAX_EVIDENCE_READS
+                data["source_prefetch"] = source_prefetch_contract(self._full_basis(question["basis"]))
             if self.ranked_search:
                 data["evidence_search_policy"] = RANKED_SEARCH_POLICY
+            if self.whole_window_reads:
+                # 접수 때 고정해 배포가 바뀌어도 같은 작업의 조회 방식이 달라지지 않는다.
+                data["evidence_read_policy"] = WHOLE_WINDOW_READ_POLICY
             if "retrieval" in question["basis"]:
                 from core.modules.knowledge.question_evidence import initial_evidence
                 basis = self._full_basis(question["basis"])
                 if basis["retrieval"]["question_sha256"] != sha256(data["question"].encode()).hexdigest():
                     raise PersonalConflictError()
                 query = data["question"][:basis["retrieval"]["query_prefix_length"]]
-                initial = initial_evidence(basis, query)
+                initial = initial_evidence(basis, query, compact_citations=self.compact_initial_citations)
                 data.update(input_contract_version=PREFETCH_CONTRACT,
                     input_instructions=PREFETCH_INSTRUCTIONS + INSTRUCTIONS,
                     initial_evidence=initial, initial_evidence_sha256=canonical_json_hash(initial))
+                if self.compact_initial_citations:
+                    data["initial_citation_encoding"] = INITIAL_CITATION_ENCODING
                 if self.user_dialogue:
                     data["input_instructions"] += " " + USER_DIALOGUE_INSTRUCTIONS
+        if self.compact_initial_citations and data["input_contract_version"] != PREFETCH_CONTRACT:
+            raise ValueError("Initial citation encoding requires the prefetch contract")
         def guard():
             before_commit()
             current = self.personal._read("conversations", conversation_id)

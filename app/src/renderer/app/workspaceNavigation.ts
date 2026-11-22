@@ -2,12 +2,15 @@ import {
   artifactTitleKey,
   documentTitleKey,
   sourceTitleKey,
+  templateTitleKey,
 } from '@renderer/shared/lib/routeTitle';
 
 /** 실제 업무 화면만 보존하며 대상이 다른 문서의 초안을 같은 인스턴스에 섞지 않습니다. */
 export function workspacePageKey(pathname: string, search: string): string {
   const query = new URLSearchParams(search);
   switch (pathname) {
+    case '/templates':
+      return `templates:${query.get('templateId') ?? ''}:${query.get('mode') ?? ''}`;
     case '/document':
       return `document:${query.get('path') ?? ''}`;
     case '/source':
@@ -39,6 +42,10 @@ export function workspaceParentLocation(
 ): string {
   const query = new URLSearchParams(search);
   const document = query.get('path') ?? query.get('document');
+  if (pathname === '/templates')
+    return query.get('templateId') && query.get('mode') === 'edit'
+      ? `/templates?templateId=${encodeURIComponent(query.get('templateId') ?? '')}`
+      : '/templates';
   if (pathname === '/ontology')
     return document
       ? `/ontology?path=${encodeURIComponent(document)}`
@@ -77,6 +84,18 @@ export function workspaceBreadcrumb(
   const query = new URLSearchParams(search);
   const documents: WorkspaceCrumb = { label: '문서', to: '/documents' };
   switch (pathname) {
+    case '/templates': {
+      const templateId = query.get('templateId');
+      const templates: WorkspaceCrumb = { label: '템플릿', to: '/templates' };
+      if (query.get('mode') === 'register')
+        return [templates, { label: '템플릿 등록' }];
+      return templateId
+        ? [
+            templates,
+            { label: titleOf(templateTitleKey(templateId)) ?? '템플릿 상세' },
+          ]
+        : [{ label: '템플릿' }];
+    }
     case '/register':
       return [documents, { label: '문서 등록' }];
     case '/document':

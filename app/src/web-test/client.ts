@@ -18,6 +18,7 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
     channel === CONNECTION_CHANNELS.connect ||
     channel === CONNECTION_CHANNELS.disconnect ||
     channel === CONNECTION_CHANNELS.selectWorkspace ||
+    channel === CONNECTION_CHANNELS.refreshAccess ||
     channel === CONNECTION_CHANNELS.restoreSaved ||
     channel === CONNECTION_CHANNELS.forgetSaved
   )

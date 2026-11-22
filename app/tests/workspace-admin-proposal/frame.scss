@@ -1,0 +1,22 @@
+#workspace-admin-preview {
+  color-scheme: light dark;
+  width: 100%;
+  min-width: 0;
+}
+#workspace-admin-preview .workspace-preview-frame > .wiki-theme {
+  position: relative;
+  inset: auto;
+  min-height: 720px;
+  grid-template-rows: auto 26px;
+  overflow: visible;
+}
+#workspace-admin-preview [data-workspace-container] {
+  overflow: visible;
+}
+#workspace-admin-preview
+  .workspace-preview-frame
+  > .wiki-theme
+  > a[href$='app-content']:not(:focus) {
+  clip-path: inset(50%);
+  transform: none;
+}

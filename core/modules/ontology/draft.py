@@ -262,10 +262,10 @@ def validate_draft(source, submission, *, document, expected_revision, schema, m
             raise ValueError(f"max_errors must be an integer from 1 to {MAX_ERRORS}")
         if type(document) is not str or not document or len(document) > 1024:
             raise ValueError("document must be a nonempty bounded string")
-        if type(source) is not str or len(source) > MAX_DOCUMENT_BYTES:
+        if type(source) is not str or (MAX_DOCUMENT_BYTES is not None and len(source) > MAX_DOCUMENT_BYTES):
             raise _BudgetExceeded("Source exceeds the UTF-8 byte budget or is not text")
         raw = source.encode("utf-8")
-        if len(raw) > MAX_DOCUMENT_BYTES:
+        if MAX_DOCUMENT_BYTES is not None and len(raw) > MAX_DOCUMENT_BYTES:
             raise _BudgetExceeded("Source exceeds the UTF-8 byte budget")
         result["source_revision"] = sha256(raw).hexdigest()
         _revision(expected_revision)

@@ -11,7 +11,6 @@ export const DOCUMENT_CHANNELS: {
 };
 
 const textSchema = z.string().min(1).max(4096);
-const MAX_DOCUMENT_BYTES = 1024 * 1024;
 /** 저장소와 같은 상대 Markdown 경로만 허용하고 경로 정규화로 다른 문서를 선택하지 않습니다. */
 export function isDocumentPath(document: string): boolean {
   return (
@@ -27,13 +26,8 @@ export function isDocumentPath(document: string): boolean {
   );
 }
 const documentPathSchema = textSchema.refine(isDocumentPath);
-const contentBodySchema = z
-  .string()
-  .max(MAX_DOCUMENT_BYTES)
-  .refine(
-    (content: string): boolean =>
-      new TextEncoder().encode(content).byteLength <= MAX_DOCUMENT_BYTES,
-  );
+/** 문서 크기 한도는 없습니다(D-141). 요청·응답 크기 한도는 전송 계층이 따로 적용합니다. */
+const contentBodySchema = z.string();
 const countSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const traceSchema = z.string().regex(/^[a-f0-9]{32}$/);
 const errorSchema = z.object({
@@ -388,8 +382,6 @@ export function parseDocumentContentResponse(
   if (!parsed.success)
     throw new Error('문서 본문 응답 형식을 확인할 수 없습니다.');
   const { data, meta } = parsed.data;
-  if (!contentBodySchema.safeParse(data.content).success)
-    throw new Error('document_too_large');
   return {
     connectionId,
     document: data.document,

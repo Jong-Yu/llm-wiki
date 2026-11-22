@@ -13,6 +13,7 @@ import {
   connectToolsServer,
   disconnectToolsServer,
   readToolsConnection,
+  refreshToolsAccess,
   requestToolsRuntime,
   restoreToolsConnection,
   selectToolsWorkspace,
@@ -23,6 +24,7 @@ import type { ToolsFailure } from './workspaceToolsState';
 
 type ConnectionOperation =
   | 'read'
+  | 'refresh'
   | 'connect'
   | 'select'
   | 'restore'
@@ -60,6 +62,7 @@ export function useWorkspaceTools(
   const [runtimeError, setRuntimeError] = useState<ToolsFailure | null>(null);
   const generation = useRef(0);
   const connectionBusy = useRef(true);
+  const connectionRequestVersion = useRef(0);
   const runtimeBusy = useRef(true);
   const runtimeRequestVersion = useRef(0);
   const loginStatus = runtime?.cliConnection?.status;
@@ -68,15 +71,18 @@ export function useWorkspaceTools(
   useEffect((): (() => void) => {
     const request = ++generation.current;
     const current = (): boolean => generation.current === request;
+    const connectionVersion = connectionRequestVersion.current;
+    const connectionCurrent = (): boolean =>
+      current() && connectionVersion === connectionRequestVersion.current;
     void readToolsConnection()
       .then(
         (result: ConnectionResult): void => {
-          if (!current()) return;
+          if (!connectionCurrent()) return;
           if (result.ok) setConnection(result.data);
           else setConnectionError(describeToolsConnectionFailure(result.error));
         },
         (): void => {
-          if (current())
+          if (connectionCurrent())
             setConnectionError({
               title: '연결 상태를 읽지 못했습니다',
               detail: '데스크톱 앱의 연결 상태를 다시 확인해 주세요.',
@@ -84,7 +90,7 @@ export function useWorkspaceTools(
         },
       )
       .finally((): void => {
-        if (current()) {
+        if (connectionCurrent()) {
           connectionBusy.current = false;
           setConnectionPending(null);
         }
@@ -111,9 +117,15 @@ export function useWorkspaceTools(
           }
         });
     const changed = (): void => {
+      const version = connectionRequestVersion.current;
       void readToolsConnection()
         .then((result: ConnectionResult): void => {
-          if (current() && result.ok) setConnection(result.data);
+          if (
+            current() &&
+            version === connectionRequestVersion.current &&
+            result.ok
+          )
+            setConnection(result.data);
         })
         .catch((): void => {});
     };
@@ -175,10 +187,14 @@ export function useWorkspaceTools(
     operation: ConnectionOperation,
     execute: () => Promise<ConnectionResult>,
   ): Promise<void> {
-    if (connectionBusy.current) return;
+    // 재확인이 늦어도 명시 로그아웃은 기다리지 않습니다. 이전 결과는 버립니다.
+    if (connectionBusy.current && operation !== 'disconnect') return;
     connectionBusy.current = true;
     const request = generation.current;
-    const current = (): boolean => generation.current === request;
+    const version = ++connectionRequestVersion.current;
+    const current = (): boolean =>
+      generation.current === request &&
+      version === connectionRequestVersion.current;
     setConnectionPending(operation);
     setConnectionError(null);
     try {
@@ -265,7 +281,7 @@ export function useWorkspaceTools(
       runConnection('select', (): Promise<ConnectionResult> =>
         selectToolsWorkspace(request),
       ),
-    refresh: (): Promise<void> => runConnection('read', readToolsConnection),
+    refresh: (): Promise<void> => runConnection('refresh', refreshToolsAccess),
     restore: (): Promise<void> =>
       runConnection('restore', restoreToolsConnection),
     disconnect: (): Promise<void> =>

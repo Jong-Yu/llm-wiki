@@ -12,17 +12,28 @@ import {
   unlink,
   writeFile,
   access,
+  readdir,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+} from 'node:path';
 import { z } from 'zod';
 import { discoverAiExecutable } from '../backend/personalAi';
 import type { BundledRuntimePaths } from './bundledRuntime';
+import { AI_NETWORK_ENVIRONMENT } from './aiNetworkEnvironment';
 import { checkCliLogin, openCliLoginTerminal } from './cliLogin';
 import {
   DEFAULT_AI_MODEL,
+  aiCliEventSchema,
   aiModelSchema,
   aiProviderSchema,
+  isAiRuntimePreparationFailure,
   storedRuntimeSettingsSchema,
 } from '@contracts/runtime.contract';
 import type {
@@ -30,6 +41,7 @@ import type {
   RuntimeSnapshot,
   RuntimeCheck,
   CliConnection,
+  DiagnosticReport,
   RuntimePathKind,
   AiProvider,
 } from '@contracts/runtime.contract';
@@ -63,6 +75,52 @@ const fileSchema = z.union([
 ]);
 type ChoosePath = (kind: RuntimePathKind) => Promise<string | null>;
 type FindCli = (provider: AiProvider) => Promise<string | null>;
+/** 저장한 보고서를 운영체제 기본 앱으로 엽니다. 실패하면 오류 문구, 성공하면 빈 문자열을 돌려줍니다. */
+type OpenReport = (path: string) => Promise<string>;
+/** 운영체제에 맞춰 경로를 비교합니다. Windows는 대소문자를 구분하지 않습니다. */
+function samePath(
+  first: string,
+  second: string,
+  platform: NodeJS.Platform,
+): boolean {
+  const value = (path: string): string =>
+    platform === 'win32' ? normalize(path).toLowerCase() : normalize(path);
+  return value(first) === value(second);
+}
+/**
+ * 저장된 실행기가 다른 앱 사본(예: 이전 포터블 폴더)에 들어 있던 실행기이면 지금 앱에 든 실행기로 바꾼 설정을 돌려줍니다(D-144).
+ * 사용자가 직접 고른 외부 실행기(개발 폴더의 .venv 등)와 이미 같은 실행기를 쓰는 설정에는 null을 돌려줍니다.
+ */
+export function withCurrentBundledRuntime(
+  settings: RuntimeSettings,
+  bundled: BundledRuntimePaths | null,
+  platform: NodeJS.Platform = process.platform,
+): RuntimeSettings | null {
+  if (!bundled || !settings.root) return null;
+  const root = settings.root;
+  const bundleRoot =
+    basename(root) === 'personal-runtime' &&
+    basename(dirname(root)) === 'resources';
+  if (
+    !bundleRoot ||
+    samePath(root, bundled.root, platform) ||
+    !samePath(settings.python, join(root, 'python/python.exe'), platform)
+  )
+    return null;
+  const fromOldBundle = (value: string, path: string): boolean =>
+    !value || samePath(value, join(root, path), platform);
+  return {
+    ...settings,
+    root: bundled.root,
+    python: bundled.python,
+    tesseract: fromOldBundle(settings.tesseract, 'ocr/tesseract.exe')
+      ? bundled.tesseract
+      : settings.tesseract,
+    tessdata: fromOldBundle(settings.tessdata, 'ocr/tessdata')
+      ? bundled.tessdata
+      : settings.tessdata,
+  };
+}
 /** 진단에 필요한 로컬 환경만 전달하며 서버 인증을 포함하지 않습니다. */
 function environment(settings: RuntimeSettings): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
@@ -84,6 +142,7 @@ function environment(settings: RuntimeSettings): NodeJS.ProcessEnv {
     'LC_ALL',
     'CODEX_HOME',
     'CLAUDE_CONFIG_DIR',
+    ...AI_NETWORK_ENVIRONMENT,
   ]) {
     if (process.env[key]) result[key] = process.env[key];
   }
@@ -145,6 +204,33 @@ function runJson(
     },
   );
 }
+/**
+ * 진단 도구를 실행하고 종료 코드만 돌려줍니다. 출력은 보고서 파일에만 남으며 화면에 원문을 보내지 않습니다.
+ * 실제 AI 호출(45초)과 Python 재실행(60초)을 포함해 기다립니다.
+ */
+function runReport(
+  python: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<number | null> {
+  return new Promise((resolve: (code: number | null) => void): void => {
+    execFile(
+      python,
+      args,
+      { cwd, env, timeout: 150_000, maxBuffer: 64 * 1024, windowsHide: true },
+      (error: (Error & { code?: unknown }) | null): void => {
+        resolve(
+          error === null
+            ? 0
+            : typeof error.code === 'number'
+              ? error.code
+              : null,
+        );
+      },
+    );
+  });
+}
 /** 같은 제공자의 자동 로그인 확인 사이 최소 간격입니다. */
 const AUTO_CHECK_INTERVAL_MS = 30_000;
 /** 설정 파일의 전체 기준을 고정해 다른 인스턴스의 변경을 덮어쓰지 않습니다. */
@@ -163,6 +249,9 @@ export class RuntimeSettingsService {
   #issue: string | null = null;
   #checks: RuntimeCheck[] = [];
   #connection: CliConnection | null = null;
+  #diagnostic: DiagnosticReport | null = null;
+  readonly #bundled: BundledRuntimePaths | null;
+  readonly #openReport: OpenReport;
   #busy = false;
   #autoCheck: { provider: AiProvider; at: number } | null = null;
   constructor(
@@ -171,10 +260,13 @@ export class RuntimeSettingsService {
     choose: ChoosePath,
     bundled: BundledRuntimePaths | null = null,
     findCli: FindCli = discoverAiExecutable,
+    openReport: OpenReport = async (): Promise<string> => '',
   ) {
     this.#directory = directory;
     this.#choose = choose;
     this.#findCli = findCli;
+    this.#bundled = bundled;
+    this.#openReport = openReport;
     const explicitRoot =
       process.env.WIKI_CLIENT_ROOT || process.env.WIKI_ANALYSIS_PROJECT_ROOT;
     const root = explicitRoot || bundled?.root || defaultRoot;
@@ -243,6 +335,19 @@ export class RuntimeSettingsService {
           JSON.parse(bytes.toString('utf8')),
         ).settings;
         this.#issue = null;
+        // 이전 앱 사본의 실행기 경로가 남아 있으면 이 앱의 실행기로 바꿔 저장합니다(D-144).
+        // 진단 도구도 저장 파일을 읽으므로 저장에 성공한 때만 바꿉니다.
+        const current = withCurrentBundledRuntime(
+          this.#settings,
+          this.#bundled,
+        );
+        if (current)
+          try {
+            await this.#writeSettings(current);
+            this.#settings = current;
+          } catch {
+            // 저장하지 못하면 기존 설정을 그대로 씁니다. 사용자는 설정 화면에서 직접 고를 수 있습니다.
+          }
       } else if (this.#issue) return;
       await this.#resolveDefaultCli('codex');
       await this.#resolveDefaultCli('claude');
@@ -301,6 +406,9 @@ export class RuntimeSettingsService {
       issue: this.#issue,
       checks: [...this.#checks],
       ...(this.#connection ? { cliConnection: { ...this.#connection } } : {}),
+      ...(this.#diagnostic
+        ? { diagnosticReport: { ...this.#diagnostic } }
+        : {}),
       platform: process.platform,
     };
   }
@@ -379,6 +487,7 @@ export class RuntimeSettingsService {
     message: string,
     code: string | null = null,
     verifiedAt: string | null = null,
+    event: string | null = null,
   ): void {
     this.#connection = {
       provider: this.#settings.provider,
@@ -386,6 +495,7 @@ export class RuntimeSettingsService {
       message,
       code,
       verifiedAt,
+      ...(event ? { event } : {}),
     };
   }
   /** 실행 파일을 찾고 로그인되어 있지 않으면 사용자 터미널에서 로그인을 시작합니다. */
@@ -516,7 +626,9 @@ export class RuntimeSettingsService {
       const raw = z
         .object({
           ok: z.boolean(),
-          error: z.object({ code: z.string() }).optional(),
+          error: z
+            .object({ code: z.string(), event: z.unknown().optional() })
+            .optional(),
         })
         .parse(
           await runJson(
@@ -549,14 +661,22 @@ export class RuntimeSettingsService {
         );
       else {
         const code = raw.error?.code ?? 'ai_test_failed';
+        // 형식이 맞는 이름표만 보여 주고 다른 값은 버립니다.
+        const event = aiCliEventSchema.safeParse(raw.error?.event);
         this.#setConnection(
           'error',
-          code === 'ai_cli_unavailable'
-            ? `${name} 실행 파일을 실행하지 못했습니다. 설치 위치를 ‘프로그램 위치 변경’에서 다시 선택해 주세요.`
-            : code === 'ai_rate_limited'
-              ? `${name}의 사용 한도에 도달했습니다. 한도가 풀린 뒤 다시 시험해 주세요.`
-              : `${name} 로그인은 확인됐지만 실제 호출에 실패했습니다. 터미널에서 ${provider}가 응답하는지 확인해 주세요.`,
+          code === 'ai_cli_event_rejected'
+            ? `${name}가 앱이 허용하지 않는 동작(훅·하위 작업 등)을 보내 호출을 멈췄습니다. 문제 상세의 메시지 종류를 확인해 주세요.`
+            : code === 'ai_cli_unavailable'
+              ? `${name} 실행 파일을 실행하지 못했습니다. 설치 위치를 ‘프로그램 위치 변경’에서 다시 선택해 주세요.`
+              : isAiRuntimePreparationFailure(code)
+                ? `${name} 설치나 로그인 문제가 아니라 앱이 호출을 준비하는 단계(프로세스·작업 폴더 보호)에서 실패했습니다. 문제 상세의 오류 코드를 확인해 주세요.`
+                : code === 'ai_rate_limited'
+                  ? `${name}의 사용 한도에 도달했습니다. 한도가 풀린 뒤 다시 시험해 주세요.`
+                  : `${name} 로그인은 확인됐지만 실제 호출에 실패했습니다. 터미널에서 ${provider}가 응답하는지 확인해 주세요.`,
           code,
+          null,
+          event.success ? event.data : null,
         );
       }
     } catch {
@@ -570,6 +690,69 @@ export class RuntimeSettingsService {
         await rm(directory, { recursive: true, force: true }).catch(
           (): void => {},
         );
+      this.#busy = false;
+    }
+    return this.snapshot();
+  }
+  /**
+   * Windows Claude 호출을 한 번 관측하는 진단 도구(tools/claude_call_diagnostic.py)로 보고서를 저장하고 엽니다(D-143).
+   * 보고서에는 경로·계정·응답 본문이 없습니다. 앱에 든 실행기가 있으면 그 진단 도구를 쓰고,
+   * 진단 도구는 저장된 설정 파일의 실행 경로로 같은 호출을 재현합니다. 기존 보고서는 덮어쓰지 않습니다.
+   */
+  async diagnoseClaude(): Promise<RuntimeSnapshot> {
+    if (this.#busy) throw new Error('busy');
+    this.#busy = true;
+    try {
+      const root = this.#bundled?.root || this.#settings.root;
+      const python = this.#bundled?.python || this.#settings.python;
+      const directory = join(dirname(this.#directory), 'diagnostics');
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const before = new Set(await readdir(directory));
+      const code = await runReport(
+        python,
+        [
+          '-B',
+          join(root, 'tools/claude_call_diagnostic.py'),
+          '--runtime',
+          root,
+          '--output',
+          join(directory, 'claude-connection-report.txt'),
+          '--test',
+        ],
+        root,
+        environment(this.#settings),
+      );
+      const created = (await readdir(directory)).filter(
+        (name: string): boolean =>
+          !before.has(name) &&
+          /^claude-connection-report(-\d+)?\.txt$/u.test(name),
+      );
+      const report =
+        created.length === 1 ? join(directory, created[0] ?? '') : null;
+      if (report && (code === 0 || code === 1)) {
+        const openError = await this.#openReport(report).catch(
+          (): string => 'open_failed',
+        );
+        this.#diagnostic = {
+          status: 'saved',
+          message: `진단 보고서를 저장했습니다(${code === 0 ? '호출 성공' : '호출 실패 원인 기록'}). ${openError ? '보고서를 열지 못했으니 아래 위치에서 직접 열어 주세요.' : '열린 보고서를 그대로 전달해 주세요.'}`,
+          path: report,
+        };
+      } else
+        this.#diagnostic = {
+          status: 'failed',
+          message:
+            '진단 보고서를 만들지 못했습니다. 문서 처리 프로그램 폴더와 Python 설정을 확인해 주세요.',
+          path: null,
+        };
+    } catch {
+      this.#diagnostic = {
+        status: 'failed',
+        message:
+          '진단 도구를 실행하지 못했습니다. 문서 처리 프로그램 폴더와 Python 설정을 확인해 주세요.',
+        path: null,
+      };
+    } finally {
       this.#busy = false;
     }
     return this.snapshot();

@@ -1,27 +1,30 @@
 """공개 웹 조회 경계·실제 읽은 텍스트·기본 도구 차단을 격리 자료로 검사한다."""
 
 import asyncio
+from contextlib import redirect_stdout
 from email.message import Message
 from hashlib import sha256
 import json
+from io import StringIO
 from pathlib import Path
 import socket
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from core.client.ai.codex import CodexAdapter, _events
 from core.client.ai.claude import ClaudeAdapter, _Events
 from core.client.ai.contracts import AIAdapterError
 from core.client.web_research import (
-    MAX_CONTENT, MAX_PAGE_BYTES, PageReadError, _PinnedConnection, _public_addresses, _text, public_url, read_page, research,
+    MAX_CONTENT, MAX_PAGE_BYTES, UNKNOWN_QUESTION_QUERY, PageReadError, _PinnedConnection, _public_addresses, _text,
+    public_url, read_page, research,
 )
 
 
 def codex_events(item_type="web_search"):
     return b"\n".join(json.dumps(event).encode() for event in [
         {"type": "item.started", "item": {"type": item_type}},
-        {"type": "item.completed", "item": {"type": item_type, "status": "completed"}},
+        {"type": "item.completed", "item": {"type": item_type, "status": "completed", "query": "public query"}},
         {"type": "turn.completed"}])
 
 
@@ -31,6 +34,8 @@ class WebEventTests(unittest.IsolatedAsyncioTestCase):
             _events(codex_events(), [])
         trace, _ = _events(codex_events(), [], web_search=True)
         self.assertEqual(sum(bool(item.get("web_search_completed")) for item in trace), 1)
+        self.assertEqual(trace[1]["web_search_queries"], ["public query"])
+        self.assertTrue(trace[1]["web_search_queries_complete"])
         with self.assertRaises(AIAdapterError):
             _events(codex_events("command_execution"), [], web_search=True)
 
@@ -46,6 +51,7 @@ class WebEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(events.web_completed_ids)
         events(result, lambda _: None)
         self.assertEqual(events.web_completed_ids, {"search-1"})
+        self.assertEqual(events.web_queries, ["public topic"])
         with self.assertRaises(AIAdapterError):
             _Events(web_search=True)(result, lambda _: None)
         with self.assertRaises(AIAdapterError):
@@ -64,6 +70,8 @@ class WebEventTests(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as root, patch("core.client.ai.codex._execute", execute):
             first = await adapter.run(prompt="public query", schema=schema, directory=Path(root).resolve()/"first", web_search=True)
             self.assertEqual(first["execution"]["web_search_completed"], 1)
+            self.assertEqual(first["execution"]["web_search_queries"], ["public query"])
+            self.assertTrue(first["execution"]["web_search_queries_complete"])
             self.assertIn('web_search="live"', calls[0])
             self.assertIn("shell_tool", calls[0])
             self.assertIn("--ephemeral", calls[0])
@@ -97,6 +105,8 @@ class WebEventTests(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", execute):
             first = await adapter.run(prompt="public", schema=schema, directory=Path(root).resolve()/"first", web_search=True)
             self.assertEqual(first["execution"]["web_search_completed"], 1)
+            self.assertEqual(first["execution"]["web_search_queries"], ["public"])
+            self.assertTrue(first["execution"]["web_search_queries_complete"])
             self.assertEqual(calls[0][calls[0].index("--tools") + 1], "WebSearch")
             self.assertEqual(calls[0][calls[0].index("--allowedTools") + 1], "WebSearch")
             self.assertIn("mcp__*", calls[0])
@@ -104,6 +114,32 @@ class WebEventTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(AIAdapterError) as caught:
                 await adapter.run(prompt="public", schema=schema, directory=Path(root).resolve()/"second", web_search=True)
             self.assertEqual(caught.exception.code, "ai_web_search_not_used")
+
+    def test_codex_keeps_all_action_queries_and_marks_unknown_inputs(self):
+        items = [
+            {"action": {"type": "search", "query": "first", "queries": ["first", "second"]}},
+            {"action": {"type": "search", "queries": ["third", "x" * 201]}},
+            {"action": {"type": "search"}},
+        ]
+        raw = b"\n".join(json.dumps(event).encode() for event in [
+            *({"type": "item.completed", "item": {"type": "web_search", **item}} for item in items),
+            {"type": "turn.completed"},
+        ])
+        trace, _ = _events(raw, [], web_search=True)
+        self.assertEqual(trace[0]["web_search_queries"], ["first", "second"])
+        self.assertEqual(trace[1]["web_search_queries"], ["third", "x" * 201])
+        self.assertFalse(trace[2]["web_search_queries_complete"])
+
+    def test_claude_records_only_completed_queries_and_keeps_multiple_searches(self):
+        events = _Events(web_search=True)
+        for tool_id, query in (("first", "one"), ("second", "two"), ("unfinished", "three")):
+            events(json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": tool_id, "name": "WebSearch", "input": {"query": query}}]}}), lambda _: None)
+        for tool_id in ("second", "first"):
+            events(json.dumps({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": tool_id, "content": "results"}]}}), lambda _: None)
+        self.assertEqual(events.web_queries, ["two", "one"])
+        self.assertTrue(events.web_queries_complete)
 
 
 class PublicReadTests(unittest.TestCase):
@@ -257,6 +293,134 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase):
                 raise asyncio.CancelledError()
         with self.assertRaises(asyncio.CancelledError):
             await research("public topic", directory="unused", adapter=Adapter())
+
+    async def test_question_is_preserved_and_one_invocation_derives_query_and_searches(self):
+        question = "질문 앞부분의 비교 조건을 보존합니다. " * 100 + "마지막 질문 조건"
+        calls = []
+        class Adapter:
+            async def run(self, **kwargs):
+                calls.append(kwargs)
+                return {"value": {"query": "공개 검토 절차 비교", "urls": ["https://public.example/a"]},
+                    "execution": {"web_search_completed": 1, "web_search_queries": ["공개 검토 절차 비교"],
+                        "web_search_queries_complete": True}}
+        result = await research(question=question, directory="unused", adapter=Adapter(), reader=self.reader)
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["query"], "공개 검토 절차 비교")
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0]["prompt"].endswith(json.dumps(question, ensure_ascii=False)))
+        self.assertTrue(calls[0]["web_search"])
+        self.assertEqual(calls[0]["schema"]["properties"]["query"]["maxLength"], 200)
+        self.assertEqual(set(calls[0]), {"prompt", "schema", "directory", "web_search"})
+
+    async def test_question_search_does_not_record_model_query_as_used_without_search(self):
+        class Adapter:
+            async def run(self, **kwargs):
+                return {"value": {"query": "공개 검토 절차", "urls": []}, "execution": {}}
+        result = await research(question="비교해 주세요", directory="unused", adapter=Adapter())
+        self.assertEqual(result["query"], UNKNOWN_QUESTION_QUERY)
+        self.assertEqual(result["warnings"], ["search_not_performed", "search_query_unavailable"])
+
+    async def test_question_search_uses_observed_query_and_preserves_sources_on_mismatch(self):
+        async def execute(arguments, **kwargs):
+            events = [
+                {"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": "search", "name": "WebSearch", "input": {"query": "실제 검색어"}}]}},
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "search", "content": "results"}]}},
+                {"type": "result", "subtype": "success", "is_error": False,
+                    "structured_output": {"query": "모델이 다르게 반환한 검색어", "urls": ["https://public.example/a"]}},
+            ]
+            for event in events:
+                kwargs["event_parser"](json.dumps(event), kwargs["on_event"])
+            return 0, b"", b""
+        adapter = ClaudeAdapter()
+        adapter._capabilities = (["claude"], "isolated-fixture")
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", execute):
+            result = await research(question="비교해 주세요", directory=Path(root).resolve()/"invocation",
+                adapter=adapter, reader=self.reader)
+        self.assertEqual(result["query"], "실제 검색어")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["warnings"], ["search_query_mismatch"])
+        self.assertEqual(len(result["sources"]), 1)
+
+    async def test_question_search_keeps_sources_when_query_observation_is_incomplete(self):
+        for observed, complete in ((None, False), (["observed", ""], True), (["observed"], False), (["x" * 201], True)):
+            class Adapter:
+                async def run(self, **kwargs):
+                    return {"value": {"query": "reported", "urls": ["https://public.example/a"]},
+                        "execution": {"web_search_completed": 1, "web_search_queries": observed,
+                            "web_search_queries_complete": complete}}
+            with self.subTest(observed=observed, complete=complete):
+                result = await research(question="question", directory="unused", adapter=Adapter(), reader=self.reader)
+                self.assertEqual(result["query"], UNKNOWN_QUESTION_QUERY)
+                self.assertEqual(result["status"], "partial")
+                self.assertEqual(len(result["sources"]), 1)
+                self.assertTrue(result["warnings"])
+
+    async def test_multiple_native_queries_keep_sources_and_matching_representative(self):
+        urls = ["https://public.example/a", "https://public.example/b"]
+        class Adapter:
+            async def run(self, **kwargs):
+                return {"value": {"query": "second", "urls": urls},
+                    "execution": {"web_search_completed": 2, "web_search_queries": ["first", "second"],
+                        "web_search_queries_complete": True}}
+        result = await research(question="compare", directory="unused", adapter=Adapter(), reader=self.reader)
+        self.assertEqual(result["query"], "second")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["warnings"], ["multiple_search_queries"])
+        self.assertEqual(len(result["sources"]), 2)
+        urls.clear()
+        empty = await research(question="compare", directory="unused", adapter=Adapter(), reader=self.reader)
+        self.assertEqual(empty["status"], "empty")
+        self.assertEqual(empty["warnings"], ["multiple_search_queries"])
+
+    async def test_missing_or_invalid_generated_query_is_explicitly_unknown(self):
+        for value in (None, "", "x" * 201):
+            class Adapter:
+                async def run(self, **kwargs):
+                    return {"value": {"query": value, "urls": []}, "execution": {"web_search_completed": 1}}
+            with self.subTest(value=value):
+                result = await research(question="질문", directory="unused", adapter=Adapter())
+                self.assertEqual(result["query"], UNKNOWN_QUESTION_QUERY)
+                self.assertEqual(result["status"], "unavailable")
+                self.assertIn("search_query_unavailable", result["warnings"])
+                self.assertEqual(result["sources"], [])
+
+    async def test_question_failure_and_cancellation_are_not_empty_successes(self):
+        class FailedAdapter:
+            async def run(self, **kwargs):
+                raise RuntimeError("provider details")
+        result = await research(question="질문", directory="unused", adapter=FailedAdapter())
+        self.assertEqual(result["query"], UNKNOWN_QUESTION_QUERY)
+        self.assertEqual(result["warnings"], ["search_unavailable", "search_query_unavailable"])
+        class CancelledAdapter:
+            async def run(self, **kwargs):
+                raise asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await research(question="질문", directory="unused", adapter=CancelledAdapter())
+
+    async def test_question_and_legacy_query_are_mutually_exclusive_and_bounded(self):
+        for arguments in ({"query": "public", "question": "질문"}, {"question": " "},
+                {"question": "x" * 16001}, {"query": "x" * 201}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                await research(directory="unused", **arguments)
+
+
+class WebSearchCliTests(unittest.TestCase):
+    def test_question_file_is_not_truncated_and_does_not_become_a_query_file(self):
+        from tools.web_search_cli import main
+        text = "긴 질문의 조건 " * 200 + "마지막 조건"
+        web = {"query": "생성 검색어", "status": "empty", "sources": [], "warnings": []}
+        with TemporaryDirectory() as root:
+            path = Path(root) / "question.txt"
+            path.write_text(text, encoding="utf-8")
+            output = StringIO()
+            with patch("tools.web_search_cli.research", new_callable=AsyncMock, return_value=web) as run, redirect_stdout(output):
+                code = main(["--work-dir", root, "--question-file", str(path)])
+            self.assertEqual(code, 0)
+            self.assertIsNone(run.call_args.args[0])
+            self.assertEqual(run.call_args.kwargs["question"], text)
+            self.assertEqual(json.loads(output.getvalue())["web"], web)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ from core.modules.personal.comparisons import ComparisonStore, KIND
 from core.modules.personal.store import PersonalStore, PersonalConflictError, PersonalLimitError
 from core.modules.access.policy import AccessDenied, AccessPolicy
 from core.modules.access.auth import initialize_auth
+from core.tests.poc_access.fixtures import grant_test_membership
 from core.modules.documents.store import WikiStore
 from core.modules.ontology.store import OntologyStore
 from core.modules.reviews.store import ReviewStore
@@ -234,6 +235,7 @@ class ComparisonHttpTests(unittest.IsolatedAsyncioTestCase):
         self.policy = AccessPolicy(config, self.root / "data")
         self.auth = initialize_auth(self.policy)
         self.user = self.auth.signup("comparison test")
+        self.user = grant_test_membership(self.policy, self.user)
         self.tenant = self.user["default_tenant"]
         self.scope = self.policy.authorize(self.user["token"], self.tenant, "read")
         for name in ("a.md", "b.md"):
@@ -318,6 +320,7 @@ class ComparisonHttpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_http_owner_boundary_invalid_contract_and_missing_read_permission(self):
         other = self.auth.signup("other comparison owner")
+        other = grant_test_membership(self.policy, other)
         async with self.app.router.lifespan_context(self.app):
             async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=self.app), base_url=self.base,
                 headers={"Authorization": "Bearer " + self.user["token"]}) as http:

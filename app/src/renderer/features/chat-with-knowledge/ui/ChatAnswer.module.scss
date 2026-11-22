@@ -1,25 +1,51 @@
 .markdown {
-  max-inline-size: 56ch;
-  font-size: var(--wiki-font-size-14);
-  line-height: 1.6;
+  max-inline-size: 100%;
+  font-size: var(--wiki-font-size-15);
+  line-height: 1.75;
   word-break: keep-all;
   overflow-wrap: anywhere;
 
   p,
   ul,
   ol {
-    margin: 0 0 var(--wiki-space-6);
+    margin: 0 0 var(--wiki-space-14);
+  }
+  // 표·코드는 대화 열의 가용 폭을 쓰고 긴 설명만 읽기 폭을 제한합니다.
+  > p,
+  > ul,
+  > ol,
+  > blockquote {
+    max-inline-size: 88ch;
   }
   ul,
   ol {
-    padding-inline-start: var(--wiki-space-20);
+    padding-inline-start: var(--wiki-space-24);
+  }
+  li + li {
+    margin-top: var(--wiki-space-4);
+  }
+  li > :last-child {
+    margin-bottom: 0;
+  }
+  li > ul,
+  li > ol {
+    margin-block: var(--wiki-space-6);
   }
   h1,
   h2,
   h3 {
-    margin: var(--wiki-space-12) 0 var(--wiki-space-3);
-    font-size: inherit;
-    line-height: inherit;
+    margin: var(--wiki-space-24) 0 var(--wiki-space-8);
+    font-weight: 600;
+    line-height: 1.45;
+  }
+  h1 {
+    font-size: var(--wiki-font-size-20);
+  }
+  h2 {
+    font-size: var(--wiki-font-size-18);
+  }
+  h3 {
+    font-size: var(--wiki-font-size-16);
   }
   code {
     padding: 1px var(--wiki-space-4);
@@ -30,14 +56,15 @@
   }
   pre {
     box-sizing: border-box;
-    inline-size: fit-content;
+    inline-size: 100%;
     max-inline-size: 100%;
     overflow-x: auto;
-    margin: var(--wiki-space-6) 0 var(--wiki-space-14);
-    padding: var(--wiki-space-9) var(--wiki-space-12);
+    margin: var(--wiki-space-12) 0 var(--wiki-space-16);
+    padding: var(--wiki-space-14) var(--wiki-space-16);
     border-radius: var(--wiki-radius-7);
     background: var(--wiki-color-surface-hover);
     font: inherit;
+    line-height: 1.6;
     code {
       padding: 0;
       background: transparent;
@@ -46,8 +73,8 @@
   }
   blockquote {
     margin: var(--wiki-space-14) 0;
-    padding-inline-start: var(--wiki-space-11);
-    border-inline-start: 2px solid var(--wiki-color-border-control);
+    padding: var(--wiki-space-6) 0 var(--wiki-space-6) var(--wiki-space-16);
+    border-inline-start: 2px solid var(--wiki-color-action-primary);
     > :last-child {
       margin-bottom: 0;
     }
@@ -58,13 +85,18 @@
   > :last-child {
     margin-block-end: 0;
   }
+  hr {
+    margin: var(--wiki-space-24) 0;
+    border: 0;
+    border-top: 1px solid var(--wiki-color-border-default);
+  }
   &[data-secondary-ending] > p:not(:first-child):last-child {
     color: var(--wiki-color-text-secondary);
   }
 }
 .tableScroll {
   max-inline-size: 100%;
-  margin: var(--wiki-space-14) 0;
+  margin: var(--wiki-space-16) 0;
   overflow-x: auto;
   table {
     width: 100%;
@@ -73,14 +105,18 @@
   }
   th,
   td {
-    padding: var(--wiki-space-6) var(--wiki-space-12) var(--wiki-space-6) 0;
+    padding: var(--wiki-space-10) var(--wiki-space-14);
     text-align: start;
     vertical-align: top;
     border-bottom: 1px solid var(--wiki-color-border-default);
   }
   th {
-    font-size: var(--wiki-font-size-12);
+    font-size: var(--wiki-font-size-13);
     font-weight: 600;
     color: var(--wiki-color-text-secondary);
+    background-color: var(--wiki-color-surface-panel);
+  }
+  tbody tr:last-child td {
+    border-bottom: 0;
   }
 }

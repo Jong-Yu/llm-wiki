@@ -33,7 +33,7 @@ from core.mcp.tools.document_management import (
     validate_arguments as validate_document_management_arguments,
 )
 from core.mcp.tools.knowledge_queries import (
-    KNOWLEDGE_QUERY_TOOLS, _register_knowledge_query_tools,
+    DEFAULT_TENANT_TOOLS, KNOWLEDGE_QUERY_TOOLS, _register_knowledge_query_tools,
     validate_arguments as validate_knowledge_query_arguments,
 )
 from core.mcp.tools.authored_relations import (
@@ -95,6 +95,7 @@ class TenantMCPServer(WikiMCPServer):
             "For current concept knowledge use ontology_concept_find, explicitly select a versioned target, then ontology_concept_query. "
             "For a compact optional term explanation, copy an entity target's document/entity_id/state_revision into ontology_glossary_query; "
             "it reads source context and existing knowledge without generating or storing a definition or adding ordinary chat context. "
+            "For a question, knowledge_lookup finds and prepares current evidence in one call (tenant may be omitted for your default workspace). "
             "For document-only answers find relevant documents with wiki_search, then prepare selected current evidence with "
             "knowledge_context_prepare or call ontology_review_query for each document in the chosen profile, even in a fresh AI session. "
             "Use the returned effective_graph and policies; machine query/context/connections and original text do not apply expert decisions. "
@@ -203,7 +204,12 @@ class TenantMCPServer(WikiMCPServer):
                 "type": "string", "pattern": r"^[a-z][a-z0-9_-]{0,63}$",
                 "description": "An authorized tenant ID from access_context; not an identity assertion.",
             }
-            schema.setdefault("required", []).append("tenant")
+            if tool.name in DEFAULT_TENANT_TOOLS:
+                # 생략하면 인증 사용자의 기본 작업 공간이다. 소속·권한 검사는 명시한 경우와 같다.
+                schema["properties"]["tenant"]["description"] = (
+                    "Optional authorized tenant ID; omit to use your default workspace. Not an identity assertion.")
+            else:
+                schema.setdefault("required", []).append("tenant")
             schema["additionalProperties"] = False
             if tool.name in DOCUMENT_MANAGEMENT_TOOLS or tool.name in KNOWLEDGE_QUERY_TOOLS or tool.name in AUTHORED_RELATION_TOOLS or tool.name in CLEANUP_TOOLS or tool.name in RESULT_TOOLS or tool.name in EXTRACTION_PROFILE_TOOLS or tool.name in CONCEPT_TOOLS or tool.name in CORRESPONDENCE_TOOLS or tool.name in ("ontology_validate_draft", "ontology_query", "ontology_context", "ontology_review_query", "ontology_impact",
                                                                "ontology_review", "ontology_review_undo", "ontology_policy", "ontology_policy_undo"):
@@ -223,6 +229,7 @@ class TenantMCPServer(WikiMCPServer):
                     )
                 # 프로필의 의미와 access 확인 안내는 서버 지침에 한 번만 둔다. 40개 도구에 반복하지 않는다.
             if tool.name in {"wiki_write", "ontology_generate", "ontology_review", "ontology_review_undo", "ontology_policy", "ontology_policy_undo"}:
+                # 변경 전 기준 캡처와 저장 후 영향 조회를 구분하고, 완료된 저장의 재시도를 막는다.
                 tool.description += (
                     " In tenant mode optionally save ontology_impact's four revision fields before changing data, "
                     "then call ontology_impact separately after success to find documents for re-review. "
@@ -261,6 +268,12 @@ class TenantMCPServer(WikiMCPServer):
             if not isinstance(arguments, dict):
                 await anyio.to_thread.run_sync(self.policy.authenticate, credential)
                 return _invalid_argument("Tool arguments must be a JSON object.")
+            if name in DEFAULT_TENANT_TOOLS and "tenant" not in arguments:
+                # 인증된 사용자 자신의 기본 소속만 채운다. 아래 authorize가 현재 권한을 다시 확인한다.
+                info = await anyio.to_thread.run_sync(self.policy.describe, credential)
+                if not info.get("default_tenant"):
+                    return _invalid_argument("tenant is required: no default workspace; pass a tenant ID from access_context.")
+                arguments = {**arguments, "tenant": info["default_tenant"]}
             tenant = arguments.get("tenant")
             if not isinstance(tenant, str) or re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", tenant) is None:
                 await anyio.to_thread.run_sync(self.policy.authenticate, credential)

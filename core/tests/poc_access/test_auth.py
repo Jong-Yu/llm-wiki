@@ -1,4 +1,4 @@
-"""D-071 계약 검증. 모든 정책·자료·키는 임시 디렉터리에만 생성한다."""
+"""이름 인증·미배정 가입·기존 가입 복구 검증. 정책·자료·키는 임시 디렉터리만 쓴다."""
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from hashlib import sha256
@@ -14,11 +14,13 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from core.common.json_codec import canonical_json_bytes
 from core.modules.access.auth import AuthError, initialize_auth
 from core.modules.access.policy import AccessDenied, AccessPolicy, PolicyError, _PERMISSIONS
 from core.modules.documents.store import StorageBusyError
 from core.runtime.application import create_application
 from core.runtime.http_security import HttpAccessMiddleware
+from core.tests.poc_access.fixtures import grant_test_membership
 from starlette.applications import Starlette
 import core.modules.access.auth as auth_module
 
@@ -58,6 +60,26 @@ class AuthFixture(unittest.TestCase):
     def restart(self):
         return initialize_auth(AccessPolicy(self.config, self.root))
 
+    def grant_membership(self, user):
+        """권한 검사 fixture에만 명시 소속을 부여하고 최신 접근 기준을 반환한다."""
+        return grant_test_membership(self.policy, user)
+
+    def prepare_legacy_pending(self):
+        """구버전이 내구성 있게 남긴 SDV 자동 가입 의도를 직접 구성한다."""
+        policy, revision = self.policy._load()
+        user_id, token = "legacy-pending-user", "L" * 48
+        policy["tenants"]["sdv-platform"] = {"display_name": "SDV 플랫폼",
+            "profiles": {"default": {"domain": None, "viewpoint": None}}}
+        policy["users"][user_id] = {"display_name": "이전 가입", "auth_generation": 0,
+            "token_sha256": sha256(token.encode()).hexdigest(), "default_tenant": "sdv-platform",
+            "memberships": {"sdv-platform": {"permissions": sorted(_PERMISSIONS),
+                "profiles": ["default"], "default_profile": "default"}}}
+        credential = self.auth._encrypt(user_id, token)
+        pending = {"base_revision": revision, "policy": policy, "user_id": user_id,
+            "credential": credential.decode("ascii"), "new_tenant": True}
+        auth_module._publish(self.auth.pending, canonical_json_bytes(pending))
+        return user_id, token, policy, credential
+
 
 class AccessTests(AuthFixture):
     def test_token_survives_separate_server_processes(self):
@@ -75,9 +97,13 @@ class AccessTests(AuthFixture):
         self.assertEqual(set(first), {"token", "user_id", "display_name", "memberships", "default_tenant",
                                       "policy_revision", "access_revision"})
         self.assertEqual(first["display_name"], "홍길동")
-        self.assertEqual(first["default_tenant"], "sdv-platform")
-        self.assertEqual(first["memberships"]["sdv-platform"]["display_name"], "SDV 플랫폼")
-        self.assertEqual(set(first["memberships"]["sdv-platform"]["permissions"]), _PERMISSIONS)
+        self.assertIsNone(first["default_tenant"])
+        self.assertEqual(first["memberships"], {})
+        self.assertEqual(self.load_policy()["tenants"], {})
+        self.assertEqual(list(self.root.iterdir()), [])
+        for permission in _PERMISSIONS:
+            with self.subTest(permission=permission), self.assertRaises(AccessDenied):
+                self.policy.authorize(first["token"], "sdv-platform", permission)
         with self.assertRaises(AuthError) as caught:
             self.auth.signup("홍길동")
         self.assertEqual(caught.exception.code, "name_conflict")
@@ -99,6 +125,8 @@ class AccessTests(AuthFixture):
         self.assertEqual(len(successes), 1)
         self.assertEqual(results.count("name_conflict"), 3)
         self.assertEqual(self.restart().login("동시 가입")["token"], successes[0]["token"])
+        self.assertEqual(successes[0]["memberships"], {})
+        self.assertEqual(list(self.root.iterdir()), [])
 
     def test_concurrent_distinct_signups_respect_capacity(self):
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -107,9 +135,13 @@ class AccessTests(AuthFixture):
         self.assertEqual(results.count("user_limit"), 3)
         self.assertEqual(len(self.load_policy()["users"]), 5)
         self.assertEqual(len(list((self.private / "credentials").glob("*.enc"))), 5)
+        self.assertTrue(all(value["memberships"] == {} and value["default_tenant"] is None
+                            for value in results if isinstance(value, dict)))
+        self.assertEqual(self.load_policy()["tenants"], {})
+        self.assertEqual(list(self.root.iterdir()), [])
 
     def test_access_revision_ignores_other_users_names_and_json_formatting(self):
-        first = self.auth.signup("첫째")
+        first = self.grant_membership(self.auth.signup("첫째"))
         self.auth.signup("둘째")
         current = self.policy.describe(first["token"])
         self.assertEqual(first["access_revision"], current["access_revision"])
@@ -122,7 +154,7 @@ class AccessTests(AuthFixture):
         self.assertEqual(first["access_revision"], self.policy.describe(first["token"])["access_revision"])
 
     def test_own_permissions_profiles_generation_and_token_change_revision(self):
-        first = self.auth.signup("본인")
+        first = self.grant_membership(self.auth.signup("본인"))
         baseline = first["access_revision"]
         policy = self.load_policy()
         user = policy["users"][first["user_id"]]
@@ -156,6 +188,8 @@ class AccessTests(AuthFixture):
                 self.auth.signup("중단")
         self.assertEqual(before, self.config.read_bytes())
         pending = json.loads(self.auth.pending.read_bytes())
+        self.assertFalse(pending["new_tenant"])
+        self.assertEqual(pending["policy"]["users"][pending["user_id"]]["memberships"], {})
         credential = self.private / "credentials" / (pending["user_id"] + ".enc")
         saved_cipher = credential.read_bytes()
         recovered = self.restart().login("중단")
@@ -163,6 +197,9 @@ class AccessTests(AuthFixture):
         self.assertEqual(saved_cipher, credential.read_bytes())
         self.assertEqual(self.auth._decrypt(saved_cipher, recovered["user_id"], self.load_policy()), recovered["token"])
         self.assertFalse(self.auth.pending.exists())
+        self.assertEqual(recovered["memberships"], {})
+        self.assertIsNone(recovered["default_tenant"])
+        self.assertEqual(list(self.root.iterdir()), [])
 
     def test_recover_credential_write_failure(self):
         original = auth_module._publish
@@ -174,7 +211,10 @@ class AccessTests(AuthFixture):
             with self.assertRaises(PolicyError):
                 self.auth.signup("암호문 실패")
         self.assertEqual(self.load_policy()["users"], {})
-        self.assertEqual(self.restart().login("암호문 실패")["display_name"], "암호문 실패")
+        recovered = self.restart().login("암호문 실패")
+        self.assertEqual(recovered["display_name"], "암호문 실패")
+        self.assertEqual(recovered["memberships"], {})
+        self.assertEqual(list(self.root.iterdir()), [])
 
     def test_failure_before_journal_keeps_workspace_and_policy_unchanged(self):
         original = auth_module._publish
@@ -202,6 +242,41 @@ class AccessTests(AuthFixture):
         self.assertEqual(saved, self.config.read_bytes())
         self.assertEqual(len(self.load_policy()["users"]), 1)
         self.assertEqual(result["token"], self.auth.login("응답 유실")["token"])
+        self.assertEqual(result["memberships"], {})
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_legacy_pending_creates_original_workspace_without_changing_new_signup(self):
+        user_id, token, desired, credential = self.prepare_legacy_pending()
+        recovered = self.restart().login("이전 가입")
+        self.assertEqual(recovered["user_id"], user_id)
+        self.assertEqual(recovered["token"], token)
+        self.assertEqual(recovered["default_tenant"], "sdv-platform")
+        self.assertEqual(set(recovered["memberships"]["sdv-platform"]["permissions"]), _PERMISSIONS)
+        self.assertEqual(self.load_policy(), desired)
+        self.assertEqual(self.auth._credential_path(user_id).read_bytes(), credential)
+        self.assertTrue((self.root / "sdv-platform").is_dir())
+        self.assertFalse(self.auth.pending.exists())
+        newcomer = self.auth.signup("새 가입")
+        self.assertEqual(newcomer["memberships"], {})
+        self.assertIsNone(newcomer["default_tenant"])
+        self.assertEqual(self.load_policy()["users"][user_id], desired["users"][user_id])
+        self.assertEqual(self.auth.login("이전 가입")["token"], token)
+
+    def test_legacy_pending_recovers_after_policy_commit_without_rewriting_data(self):
+        user_id, token, desired, credential = self.prepare_legacy_pending()
+        target = self.root / "sdv-platform"
+        target.mkdir()
+        (target / "keep.md").write_bytes(b"existing workspace data")
+        auth_module._publish(self.auth._credential_path(user_id), credential)
+        self.auth._commit_policy(canonical_json_bytes(desired))
+        before = self.config.read_bytes()
+        recovered = self.restart().login("이전 가입")
+        self.assertEqual(recovered["token"], token)
+        self.assertEqual(recovered["default_tenant"], "sdv-platform")
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual((target / "keep.md").read_bytes(), b"existing workspace data")
+        self.assertEqual(self.auth._credential_path(user_id).read_bytes(), credential)
+        self.assertFalse(self.auth.pending.exists())
 
     def test_pending_recovery_never_overwrites_admin_policy_change(self):
         with patch.object(self.auth, "_commit_policy", side_effect=OSError()):
@@ -231,10 +306,18 @@ class AccessTests(AuthFixture):
             self.auth.login("existing-user")
         self.auth.enroll_existing_token("existing-user", token)
         self.assertEqual(self.auth.login("existing-user")["token"], token)
-        self.auth.signup("새 사람")
+        existing_credential = self.auth._credential_path("existing-user").read_bytes()
+        key = (self.private / "credential.key").read_bytes()
+        newcomer = self.auth.signup("새 사람")
+        self.assertEqual(newcomer["memberships"], {})
+        self.assertIsNone(newcomer["default_tenant"])
         self.assertEqual(self.load_policy()["users"]["existing-user"], policy["users"]["existing-user"])
         self.assertEqual(self.load_policy()["tenants"]["old-workspace"], policy["tenants"]["old-workspace"])
         self.assertEqual((personal / "keep.json").read_bytes(), b"user owned")
+        self.assertEqual(self.auth._credential_path("existing-user").read_bytes(), existing_credential)
+        self.assertEqual((self.private / "credential.key").read_bytes(), key)
+        self.assertEqual(self.auth.login("existing-user")["token"], token)
+        self.assertFalse((self.root / "sdv-platform").exists())
 
     def test_existing_sdv_workspace_profiles_are_not_replaced(self):
         (self.root / "sdv-platform").mkdir()
@@ -242,16 +325,18 @@ class AccessTests(AuthFixture):
         self.save_policy({"version": 1, "tenants": {"sdv-platform": tenant}, "users": {}})
         result = self.auth.signup("연결")
         self.assertEqual(self.load_policy()["tenants"]["sdv-platform"], tenant)
-        self.assertEqual(result["memberships"]["sdv-platform"]["default_profile"], "architecture")
+        self.assertEqual(result["memberships"], {})
+        self.assertIsNone(result["default_tenant"])
 
     def test_unregistered_existing_workspace_is_not_adopted(self):
         target = self.root / "sdv-platform"
         target.mkdir()
         (target / "existing.md").write_text("preserve")
-        with self.assertRaises(PolicyError):
-            self.auth.signup("보존")
+        result = self.auth.signup("보존")
         self.assertEqual((target / "existing.md").read_text(), "preserve")
-        self.assertEqual(self.load_policy()["users"], {})
+        self.assertEqual(self.load_policy()["tenants"], {})
+        self.assertEqual(result["memberships"], {})
+        self.assertIsNone(result["default_tenant"])
 
     def test_missing_key_wrong_key_tampering_and_symlink_fail_closed(self):
         user = self.auth.signup("키 검증")
@@ -362,7 +447,7 @@ class AccessTests(AuthFixture):
             self.policy.authenticate(user["token"])
 
     def test_unallowed_profile_and_other_user_generation_do_not_change_revision(self):
-        user = self.auth.signup("나")
+        user = self.grant_membership(self.auth.signup("나"))
         other = self.auth.signup("남")
         policy = self.load_policy()
         policy["tenants"]["sdv-platform"]["profiles"]["unallowed"] = {"domain": "다른 범위", "viewpoint": None}
@@ -429,6 +514,9 @@ class HttpTests(AuthFixture):
         with TestClient(app, base_url="http://127.0.0.1:8766", raise_server_exceptions=False) as client:
             user = client.post("/api/v1/auth/signup", json={"name": "권한"}).json()["data"]
             headers = {"Authorization": "Bearer " + user["token"]}
+            self.assertEqual(client.get("/api/v1/tenants/sdv-platform/documents", headers=headers).status_code, 403)
+            self.grant_membership(user)
+            self.assertEqual(client.get("/api/v1/tenants/sdv-platform/documents", headers=headers).status_code, 200)
             policy = self.load_policy()
             policy["users"][user["user_id"]]["memberships"]["sdv-platform"]["permissions"] = []
             self.save_policy(policy)
@@ -448,6 +536,10 @@ class HttpTests(AuthFixture):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.headers["cache-control"], "no-store")
             result = response.json()["data"]
+            self.assertEqual(result["memberships"], {})
+            self.assertIsNone(result["default_tenant"])
+            self.assertEqual(self.load_policy()["tenants"], {})
+            self.assertEqual(list(self.root.iterdir()), [])
             self.assertEqual(client.post("/api/v1/auth/login", json={"name": "API 사용자"}).json()["data"], result)
             headers = {"Authorization": "Bearer " + result["token"]}
             context = client.get("/api/v1/access-context", headers=headers)

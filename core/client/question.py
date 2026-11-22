@@ -116,6 +116,26 @@ class _QuestionExecution:
     async def read(self):
         return await _call(self.http, "GET", self.endpoint())
 
+    async def read_registered_template(self, reference):
+        """Read the selected immutable template under the same profile and active run."""
+        if (not isinstance(reference, dict) or set(reference) != {"id", "revision"}
+                or not isinstance(reference["id"], str) or not re.fullmatch(r"[0-9a-f]{32}", reference["id"])
+                or not isinstance(reference["revision"], str) or not re.fullmatch(r"[0-9a-f]{64}", reference["revision"])
+                or reference != self.state.get("record", {}).get("data", {}).get("template_ref")):
+            raise QuestionClientError("question_input_mismatch")
+        self.check_cancel()
+        async with self.lock:
+            self.check_active(await self.read())
+            path = self.base + f"/templates/{reference['id']}/versions/{reference['revision']}"
+            if self.profile:
+                path += "?" + urlencode({"profile": self.profile})
+            detail = await _call(self.http, "GET", path)
+            self.check_active(await self.read())
+        self.check_cancel()
+        if any(detail.get("template", {}).get(key) != reference[key] for key in ("id", "revision")):
+            raise QuestionClientError("question_input_mismatch")
+        return detail
+
     async def query_evidence(self, query):
         """정확히 한 조회 의도를 보내고 응답 유실은 저장된 조회 영수증으로만 확인한다."""
         async with self.lock:
@@ -212,13 +232,21 @@ class _QuestionExecution:
         old_callback = getattr(adapter, "on_event", None)
         parameters = inspect.signature(adapter.run).parameters
         state = self.state if isinstance(self.state, dict) else {}
-        contract = state.get("record", {}).get("data", {}).get("input_contract_version")
+        data = state.get("record", {}).get("data", {})
+        contract = data.get("input_contract_version")
         if (self.provider == "codex" and contract in {"personal-question-v5", "personal-question-v6"}
                 and ("question_profile" in parameters or any(
                     value.kind == inspect.Parameter.VAR_KEYWORD for value in parameters.values()))):
             # 검증한 Codex 선택 조회 질문에만 호출별 안내를 적용한다.
             # 어댑터 모드나 전역 설정을 바꾸지 않는다.
             options["question_profile"] = True
+            ref = data.get("template_ref")
+            if (isinstance(ref, dict) and set(ref) == {"id", "revision"}
+                    and isinstance(ref["id"], str) and re.fullmatch(r"[0-9a-f]{32}", ref["id"])
+                    and isinstance(ref["revision"], str) and re.fullmatch(r"[0-9a-f]{64}", ref["revision"])
+                    and ("template_profile" in parameters or any(
+                        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()))):
+                options["template_profile"] = True
         if "on_event" in parameters:
             options["on_event"] = preview
             if not allow_preview and hasattr(adapter, "on_event"):

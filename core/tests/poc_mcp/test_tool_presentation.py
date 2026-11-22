@@ -81,8 +81,8 @@ class ToolPresentationIntegration(ServerFixture):
         self.assertIn(ACCESS_SENTENCE, compact_instructions(True))
         for name in ("wiki_write", "ontology_generate", "ontology_review", "ontology_policy"):
             description = next(tool for tool in tools if tool["name"] == name)["description"]
-            self.assertIn("optionally save ontology_impact's four revision fields before changing data", description)
-            self.assertIn("never retry the saved write because of it", description)
+            self.assertIn("four revision fields before changing data", description)
+            self.assertIn("never retry the saved write", description)
 
     def test_annotations_distinguish_additive_and_replayable_writes(self):
         tools = {tool["name"]: tool["annotations"] for tool in self.rpc("tools/list", {})["tools"]}

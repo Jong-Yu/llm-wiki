@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from 'electron';
+import { app, dialog, ipcMain, shell } from 'electron';
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
 import { resolve, join } from 'node:path';
 import {
@@ -47,6 +47,9 @@ export async function registerRuntimeHandlers(
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
     bundled,
+    undefined,
+    // 진단 보고서(.txt)는 운영체제 기본 앱으로 엽니다. 빈 문자열이 성공입니다.
+    (path: string): Promise<string> => shell.openPath(path),
   );
   await service.initialize();
   ipcMain.handle(
@@ -85,7 +88,9 @@ export async function registerRuntimeHandlers(
                             ? service.cancelCliLogin()
                             : request.operation === 'test-ai'
                               ? await service.testAi()
-                              : await service.refreshConnection();
+                              : request.operation === 'diagnose-claude'
+                                ? await service.diagnoseClaude()
+                                : await service.refreshConnection();
         return { ok: true, data };
       } catch {
         return {

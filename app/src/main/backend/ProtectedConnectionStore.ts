@@ -18,6 +18,7 @@ const savedConnectionSchema = z
     policyRevision: z.string().min(1).max(4096),
     accessRevision: z.string().min(1).max(4096).optional(),
     displayName: z.string().min(1).max(160).optional(),
+    awaitingWorkspaceAssignment: z.literal(true).optional(),
     selection: z
       .object({
         tenant: z.string().min(1).max(4096),
@@ -28,7 +29,15 @@ const savedConnectionSchema = z
       .strict()
       .nullable(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (entry: {
+      awaitingWorkspaceAssignment?: true;
+      selection: unknown;
+    }): boolean =>
+      !entry.awaitingWorkspaceAssignment || entry.selection === null,
+    'Assignment waiting state cannot contain a selected workspace',
+  );
 
 /** 원문 인증정보를 포함하므로 main 전용 저장 모듈 밖으로 직렬화하지 않습니다. */
 export type SavedConnection = z.infer<typeof savedConnectionSchema>;

@@ -8,7 +8,12 @@ import type { KnowledgeChatModel } from './useKnowledgeChat';
 type ChatNavigationOptions = {
   model: Pick<
     KnowledgeChatModel,
-    'ready' | 'thread' | 'openConversation' | 'selectChat' | 'newChat'
+    | 'ready'
+    | 'thread'
+    | 'openConversation'
+    | 'selectChat'
+    | 'newChat'
+    | 'setTemplate'
   >;
   location: ChatLocation;
   active: boolean;
@@ -41,6 +46,7 @@ export function useChatNavigation({
     location.threadId,
     location.document,
     location.questionRunId,
+    location.templateId,
   ]);
   const applyLocation = useEffectEvent(
     async (serial: number): Promise<void> => {
@@ -64,12 +70,22 @@ export function useChatNavigation({
       } else if (location.document) target = model.newChat(location.document);
       else target = model.thread;
       if (routeSerial.current !== serial || !activity.current) return;
+      if (
+        target &&
+        location.templateId &&
+        /^[a-f0-9]{32}$/.test(location.templateId)
+      )
+        model.setTemplate(`tpl-${location.templateId}`);
       setNavigationError(
         target
           ? ''
           : '선택한 대화를 열지 못했습니다. 대상이 없거나 이전 실행·저장 결과를 먼저 확인해야 합니다.',
       );
-      if (target && !location.conversationId && !location.threadId)
+      if (
+        target &&
+        ((!location.conversationId && !location.threadId) ||
+          location.templateId)
+      )
         onNavigate(
           { ...chatLocationForThread(target), panel: location.panel },
           true,

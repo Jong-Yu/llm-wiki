@@ -231,7 +231,7 @@ export async function exportBrowserMarkdown(
       ok: false,
       error: {
         code: 'invalid_export',
-        message: '제목과 1 MiB 이내의 본문을 확인해 주세요.',
+        message: '제목과 본문을 확인해 주세요.',
       },
     };
   const format = parsed.data.format ?? 'md';

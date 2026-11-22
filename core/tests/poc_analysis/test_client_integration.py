@@ -12,6 +12,7 @@ from core.common.json_codec import canonical_json_bytes
 from core.client.analysis import prepare
 from core.modules.access.policy import AccessPolicy
 from core.modules.access.auth import initialize_auth
+from core.tests.poc_access.fixtures import grant_test_membership
 from core.modules.extraction_rules.publish import publish
 from core.modules.extraction_rules.store import RulesetRegistry
 from core.modules.analysis_results.diagnostics import empty_report
@@ -64,6 +65,7 @@ class ClientIntegration(unittest.IsolatedAsyncioTestCase):
             policy = AccessPolicy(config, root / 'data')
             auth = initialize_auth(policy)
             user = auth.signup('분석 사용자')
+            user = grant_test_membership(policy, user)
             tenant = user['default_tenant']
             schema = build_submission_schema()
             publish(root / 'rules', tenant_root=root / 'data', ruleset_id='common', ruleset_version='v1',

@@ -682,3 +682,44 @@
     min-height: var(--wiki-component-control-height-touch);
   }
 }
+
+.assignmentWaiting {
+  margin-bottom: var(--wiki-space-16);
+  h2 {
+    margin: 0 0 var(--wiki-space-12);
+    font-size: var(--wiki-font-size-16);
+    line-height: var(--wiki-font-line-height-ui);
+  }
+  p {
+    margin: 0 0 var(--wiki-space-24);
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.assignmentActions {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-12);
+  flex-wrap: wrap;
+}
+.assignmentRefresh {
+  position: relative;
+  display: inline-flex;
+  > button {
+    width: var(--wiki-component-control-height-small);
+    min-width: 32px;
+    padding: 0;
+  }
+}
+.assignmentTooltip {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1;
+  white-space: nowrap;
+  padding: var(--wiki-space-8);
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-radius-8);
+  color: var(--wiki-color-text-primary);
+  background: var(--wiki-color-surface-canvas);
+  box-shadow: var(--wiki-shadow-overlay);
+}

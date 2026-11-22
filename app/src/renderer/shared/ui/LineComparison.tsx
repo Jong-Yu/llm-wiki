@@ -93,7 +93,7 @@ export function LineComparison({
   leftOffset = 0,
   rightOffset = 0,
 }: LineComparisonProps): JSX.Element {
-  // 같은 비교 내 이동에서 최대 1 MiB 문서를 다시 계산하지 않습니다.
+  // 같은 비교 내 이동에서 큰 문서를 다시 계산하지 않습니다.
   const diff = useMemo(
     (): ReturnType<typeof compareLines> => compareLines(left, right),
     [left, right],

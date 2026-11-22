@@ -20,6 +20,7 @@ description: LLM Wiki MCP로 현재 지식·질문 근거·검토함·이력·�
 | 요청 | 호출과 선택 |
 | --- | --- |
 | 문서·원본 목록과 과거 판본 | `wiki_list`로 자료 종류를 구별하고 `wiki_versions` → 정확한 `history_id`의 `wiki_version_read`로 과거 파일을 읽는다. 현재 내용은 `wiki_read`와 대조하며 복원은 실행하지 않는다. |
+| 질문 답변(기본 시작점) | `knowledge_lookup(question)` 한 번으로 상위 문서 목록과 질문에 맞는 원문 단락(정확한 줄·문구)·주장·판단을 받는다. 단락 앞뒤는 `wiki_read(document, view=lines, start_line, end_line)`로 읽고, 문서 전체가 필요할 때만 `knowledge_context_prepare`를 쓴다. tenant를 생략하면 기본 작업 공간이며 `access`로 확인한다. `candidates_not_prepared`·`skipped`·`truncated`를 보고 모자라면 표현·`documents`·`max_documents`를 바꿔 다시 부른다. |
 | 문서 검색·문서의 현재 내용 | `wiki_search`로 관련 문서를 찾고, 선택 문서의 `knowledge_context_prepare` 또는 각 문서의 `ontology_review_query`로 현재 검토 맥락을 읽는다. 정확한 전체 파일은 `wiki_read`를 사용한다. |
 | 질문의 정의·조건·예외와 원본 근거 묶기 | `knowledge_context_prepare`에 문서, 필수 문서, 실제 claim ID·state revision, 정확한 원본 판본/hash를 명시한다. 각 입력 한도를 지키며 이 조회는 모델 실행이나 영구 저장이 아니다. |
 | 지금 검토할 항목·최근 변경 이력 | `ontology_review_queue` 또는 `wiki_history_query`를 사용한다. 허용 공간 집계는 `coverage: tenant`, 선택 집계는 `coverage: selected`와 문서 1~8개 및 필요한 참조를 전달한다. |

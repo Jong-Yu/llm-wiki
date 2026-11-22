@@ -34,12 +34,13 @@ test.describe('정상 흐름', () => {
     await shot(page, '전송-직후');
     const answer = await answered(page);
     await expect(answer).toContainText('근거 문서를 확인했습니다');
-    await expect(answer.getByRole('button', { name: /근거 \d 확인/ })).toHaveCount(3);
+    // 같은 문서의 여러 구절을 인용할 수 있으므로 씨앗 문서 세 개의 실제 포함 여부를 확인합니다.
+    await expect.poll(async (): Promise<string[]> => [...new Set(await answer.getByRole('button', { name: /근거 \d 확인/ }).allTextContents())].sort()).toEqual(['경고-온도', '센서-경고', '운전-모드']);
     await expect(conversation(page).getByText('검색으로 찾은 3개 문서')).toHaveCount(0);
     await expect(composer(page)).toHaveValue('');
     await shot(page, '근거-답변');
     await answer.getByRole('button', {name: /근거 1 확인/}).click();
-    await expect(page.getByRole('complementary', {name: '답변 근거'}).getByText('검색으로 찾은 3개 문서')).toBeVisible();
+    await expect(page.getByRole('complementary', {name: '답변 근거'}).getByText(/관련 문서 3개와 검토 근거/)).toBeVisible();
     const calls = await aiCalls();
     expect(calls).toHaveLength(1);
     expect(calls[0]?.scenario).toBe('근거');
@@ -83,8 +84,9 @@ test.describe('정상 흐름', () => {
   test('07 답변 안의 HTML/스크립트는 실행되지 않고 문자로만 보인다', async ({ launch, openChat, shot }) => {
     const page = await launch();
     await openChat(page);
-    await ask(page, '보안 확인 #스크립트');
-    await answered(page);
+    await ask(page, '답변에 HTML이나 스크립트가 들어오면 어떻게 안전하게 표시해야 할까? 실행되면 안 되는 예시도 보여줘. #스크립트');
+    const answer = await answered(page);
+    await expect(answer).toContainText('HTML 태그가 포함된 답변은 태그를 실행하지 않고 텍스트로 표시해야 합니다.');
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as unknown as { __injected?: boolean }).__injected)).toBeUndefined();
     await expect(conversation(page).locator('script, img[src="x"]')).toHaveCount(0);

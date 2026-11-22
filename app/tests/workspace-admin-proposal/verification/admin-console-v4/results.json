@@ -1,0 +1,96 @@
+{
+  "passed": true,
+  "checks": [
+    "구버전 상태 거부, 관리 전용 탐색, 제품 및 고정 v3 프레임·타이포·검색 크기 일치",
+    "240명도 20개씩 표시, 이름·고정 ID·동명 검색, 상세와 목록 분리, 페이지·초점 복귀",
+    "240명 조건의 별도 검색 선택 페이지도 20개 제한, 페이지를 넘긴 선택과 권한 단계 왕복 시 권한 초안 보존",
+    "배정 대기 필터→행에서 사용자 고정→공간 검색→선택 권한 배정, 재검색 없이 원래 필터·검색 복귀와 상태 변화",
+    "공간 첫 진입은 멤버, 선택 권한으로 일괄 배정; 부분 성공·실패·응답 유실·미실행 구별, 재확인 쓰기 0·완료 대상 재전송 0·사용자별 감사 기록 1개",
+    "기존 권한 변경의 실제 추가·회수 항목을 저장 전과 감사 이력에서 확인, 저장 알림→이력→사용자 상세→원래 검색 복귀",
+    "공간 이력의 사용자 검색 후 공간 범위 유지, 이력→사용자/공간 상세→뒤로에서 전역·공간 필터와 원래 맥락 보존",
+    "목록 행에서 이름 편집→원래 목록 복귀→해당 변경 이력으로 이름 전후 확인",
+    "배정의 대상·선택·권한 폼 정렬 일치, 생성과 단독 이름 편집의 폼 위치·폭 일치",
+    "목록·권한 320/736/1280 밝음·어두움 가로넘침 없음, 아이콘 focus·툴팁·Escape·Enter",
+    "host v4 echo가 편집 자료를 보존하고 외부 상태 이벤트로 페이지 복원, 저장 크기 16KiB 미만, 브라우저 오류 및 외부 요청 없음"
+  ],
+  "geometry": {
+    "product": {
+      "mode": "CSS1Compat",
+      "header": 52,
+      "sidebar": 208,
+      "footer": 26,
+      "font": "13px",
+      "line": "20px",
+      "background": "rgb(238, 240, 242)",
+      "search": 36,
+      "overflow": false
+    },
+    "admin": {
+      "mode": "CSS1Compat",
+      "header": 52,
+      "sidebar": 208,
+      "footer": 26,
+      "font": "13px",
+      "line": "20px",
+      "background": "rgb(238, 240, 242)",
+      "search": 36,
+      "overflow": false
+    },
+    "previous": {
+      "mode": "CSS1Compat",
+      "header": 52,
+      "sidebar": 208,
+      "footer": 26,
+      "font": "13px",
+      "line": "20px",
+      "background": "rgb(238, 240, 242)",
+      "search": 36,
+      "overflow": false
+    },
+    "renameForm": {
+      "x": 428,
+      "y": 93,
+      "width": 640,
+      "height": 122
+    },
+    "createForm": {
+      "x": 428,
+      "y": 93,
+      "width": 640,
+      "height": 272
+    }
+  },
+  "screenshots": [
+    "product-list-baseline-1280.png",
+    "workspaces-light-1280.png",
+    "waiting-users-light-1280.png",
+    "user-fixed-workspace-search-light-1280.png",
+    "assignment-permissions-light-1280.png",
+    "workspace-members-light-1280.png",
+    "member-search-light-1280.png",
+    "assignment-partial-light-1280.png",
+    "assignment-complete-light-1280.png",
+    "permission-diff-light-1280.png",
+    "history-diff-light-1280.png",
+    "history-filters-light-1280.png",
+    "workspace-rename-light-1280.png",
+    "workspace-create-light-1280.png",
+    "users-light-1280.png",
+    "users-dark-1280.png",
+    "users-light-736.png",
+    "users-dark-736.png",
+    "users-light-320.png",
+    "users-dark-320.png",
+    "permissions-light-1280.png",
+    "permissions-dark-1280.png",
+    "permissions-light-736.png",
+    "permissions-dark-736.png",
+    "permissions-light-320.png",
+    "permissions-dark-320.png"
+  ],
+  "errors": [],
+  "requests": [],
+  "verifiedAt": "2026-11-17T13:16:21.463Z",
+  "scope": "모의 관리자 콘솔의 기능·동선·시각 확인; 실제 관리자 API·사용성 승인 아님",
+  "previousEvidence": "../admin-console-v3/"
+}

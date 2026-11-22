@@ -41,7 +41,7 @@ export const resultDraftRequestSchema = z.discriminatedUnion('operation', [
       request_id: id,
       expected_revision: revision,
       title: z.string().min(1).max(200),
-      content: z.string().max(1024 * 1024),
+      content: z.string(),
     }),
   }),
   z.strictObject({

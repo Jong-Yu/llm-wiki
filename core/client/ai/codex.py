@@ -21,7 +21,8 @@ from uuid import UUID
 from jsonschema import Draft202012Validator
 
 from core.common.json_codec import canonical_json_bytes
-from core.runtime.client_platform import private_directory, write_new, read_private, is_windows, ClientPlatformError
+from core.runtime.client_platform import (private_directory, write_new, read_private, is_windows,
+    ClientPlatformError, platform_error_code)
 from core.runtime.client_process import cli_command, stop_windows, start_owned_process
 from .contracts import (
     AIAdapterError, MAX_EVENTS, MAX_PROMPT_BYTES, MAX_RESULT_BYTES, MAX_SCHEMA_BYTES, MAX_TRACE_BYTES,
@@ -202,6 +203,27 @@ def _preview_event(line, callback):
         raise AIAdapterError("ai_invalid_events") from None
 
 
+def _web_search_queries(value):
+    """실제 도구 입력의 단일·복수 검색어를 자르지 않고 모으며 미관측 입력을 구분한다."""
+    if not isinstance(value, dict):
+        return [], False
+    queries, complete = [], True
+    for key in ("query", "queries"):
+        entry = value.get(key)
+        if entry is None:
+            continue
+        entries = [entry] if key == "query" else entry
+        if not isinstance(entries, list) or not entries:
+            complete = False
+            continue
+        for query in entries:
+            if not isinstance(query, str) or not query.strip():
+                complete = False
+            elif query.strip() not in queries:
+                queries.append(query.strip())
+    return queries, complete and bool(queries)
+
+
 def _events(raw, trace, *, web_search=False):
     completed, reported_model = False, None
     try:
@@ -237,6 +259,10 @@ def _events(raw, trace, *, web_search=False):
                 if item.get("status") in {"failed", "cancelled"}:
                     raise AIAdapterError("ai_web_search_failed")
                 trace[-1]["web_search_completed"] = True
+                action = item.get("action", item)
+                queries, known = _web_search_queries(action if not isinstance(action, dict)
+                    or action.get("type") in {None, "search", "web_search"} else None)
+                trace[-1].update(web_search_queries=queries, web_search_queries_complete=known)
             if kind == "turn.started":
                 completed = False
             if kind == "turn.completed":
@@ -301,7 +327,8 @@ class CodexAdapter:
         except ImportError as error:
             raise AIAdapterError("ai_windows_dependency_missing") from error
         except (OSError, TimeoutError) as error:
-            raise AIAdapterError("ai_cli_unavailable") from error
+            # 앱의 실행 준비 실패는 CLI 설치 문제로 바꾸지 않고 고정 코드를 유지한다.
+            raise AIAdapterError(platform_error_code(error) or "ai_cli_unavailable") from error
         return {"provider": "codex", "cli_version": version, "requested_model": self.model,
                 "capabilities_checked": True, "login_checked": False}
 
@@ -314,7 +341,8 @@ class CodexAdapter:
             code, output, _ = await _execute([*executable, "features", "list"],
                                             directory=None, environment=environment)
         except (OSError, TimeoutError) as error:
-            raise AIAdapterError("ai_cli_unavailable") from error
+            # 앱의 실행 준비 실패는 CLI 설치 문제로 바꾸지 않고 고정 코드를 유지한다.
+            raise AIAdapterError(platform_error_code(error) or "ai_cli_unavailable") from error
         try:
             supported = any(len(parts := line.split()) >= 3 and parts[0] == FEATURE
                             and parts[-1] in {"true", "false"}
@@ -326,12 +354,13 @@ class CodexAdapter:
         self._question_profile_checked = True
 
     async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None,
-                  web_search=False, question_profile=False):
+                  web_search=False, question_profile=False, template_profile=False):
         """전체 prompt/schema로 한 번 실행해 {'value': 결과 dict, 'execution': 관측 기록}을 반환한다."""
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
                 or output_schema is not None and not isinstance(output_schema, dict)
                 or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)
                 or type(question_profile) is not bool
+                or type(template_profile) is not bool or template_profile and not question_profile
                 or question_profile and (self.persist_session or session_id is not None or web_search)):
             raise AIAdapterError("ai_invalid_input")
         prompt_bytes = prompt.encode("utf-8")
@@ -390,6 +419,10 @@ class CodexAdapter:
                 "enabled_features": [FEATURE], "feature_support_checked": False}
         if self.model is not None:
             arguments.extend(["--model", self.model])
+        if template_profile:
+            from .question_profile import TEMPLATE_VERSION, TEMPLATE_SETTINGS
+            for key, value in TEMPLATE_SETTINGS.items():
+                arguments.extend(["-c", key + "=" + json.dumps(value)])
         arguments.append("-")
         metadata = {"provider": "codex", "cli_version": version, "requested_model": self.model,
             "model_selection": "explicit" if self.model is not None else "provider_default",
@@ -398,7 +431,11 @@ class CodexAdapter:
             "input_schema_sha256": sha256(original_schema).hexdigest(), "status": "failed"}
         if profile_metadata is not None:
             metadata["question_profile"] = profile_metadata
+        if template_profile:
+            metadata["template_profile"] = {"version": TEMPLATE_VERSION, "settings": dict(TEMPLATE_SETTINGS),
+                                             "provider_effective_settings": "not_reported"}
         started = time.monotonic()
+        output = stderr = None
         try:
             if question_profile:
                 await self._check_question_profile(executable, environment)
@@ -414,7 +451,12 @@ class CodexAdapter:
             try:
                 _, metadata["reported_model"] = _events(output, trace, web_search=web_search)
                 if web_search:
-                    metadata["web_search_completed"] = sum(bool(event.get("web_search_completed")) for event in trace)
+                    searches = [event for event in trace if event.get("web_search_completed")]
+                    metadata["web_search_completed"] = len(searches)
+                    metadata["web_search_queries"] = list(dict.fromkeys(
+                        query for event in searches for query in event["web_search_queries"]))
+                    metadata["web_search_queries_complete"] = bool(searches) and all(
+                        event["web_search_queries_complete"] for event in searches)
                     if not metadata["web_search_completed"]:
                         raise AIAdapterError("ai_web_search_not_used")
                 observed_ids = {event["session_id"] for event in trace if "session_id" in event}
@@ -473,8 +515,20 @@ class CodexAdapter:
             metadata["error_code"] = error.code
             raise
         except (OSError, ValueError, TypeError, UnicodeError) as error:
-            metadata["error_code"] = "ai_invalid_result"
-            raise AIAdapterError("ai_invalid_result") from error
+            # 실행 준비(Job·비공개 파일) 실패를 결과 형식 오류로 바꿔 보고하지 않는다.
+            code = platform_error_code(error) or "ai_invalid_result"
+            metadata["error_code"] = code
+            raise AIAdapterError(code) from error
         finally:
+            if output is not None and metadata["status"] != "completed":
+                from .codex_diagnostics import failure_observation
+                observation = failure_observation(output, stderr or b"")
+                metadata["failure_observation"] = observation
+                # Resumed CLI usage is cumulative; do not present it as this
+                # failed invocation's incremental consumption.
+                if not self.persist_session and session_id is None and observation["usage_reports"]:
+                    metadata["token_usage"] = {"origin": "provider_reported", "reports": [
+                        {"origin": "provider_reported", "tokens": row["tokens"]}
+                        for row in observation["usage_reports"]]}
             metadata["duration_seconds"] = round(time.monotonic() - started, 3)
             _write_new(directory / "execution.json", canonical_json_bytes(metadata))

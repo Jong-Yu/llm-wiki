@@ -64,6 +64,14 @@ class BatchContractTests(unittest.TestCase):
         self.catalog = alpha_handoff()["basis"]
         self.schema = batch_step_schema(STEP_SCHEMA, 6)
 
+    def test_global_claim_and_history_queries_keep_null_binding_for_frozen_wiki_scope(self):
+        queries = [query_step("claims", material_id=None), query_step("history", material_id=None)]
+        selected = batch_query_steps(batch(*queries), 6, self.catalog, self.schema)
+        self.assertEqual([item["action"] for item in selected], ["claims", "history"])
+        self.assertTrue(all(item["material_id"] is None for item in selected))
+        empty_wiki = {**self.catalog, "documents": []}
+        self.assertEqual(batch_query_steps(batch(*queries), 6, empty_wiki, self.schema), selected)
+
     def invalid(self, value, *, remaining=6, schema=None, catalog=None):
         with self.assertRaises(AIAdapterError) as caught:
             batch_query_steps(value, remaining, self.catalog if catalog is None else catalog,

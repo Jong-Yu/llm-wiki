@@ -109,6 +109,23 @@
     margin: 0 0 24px;
   }
 }
+.searchPanel[data-empty-start] {
+  overflow-y: auto;
+  > .intro {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    padding: var(--wiki-space-24) var(--wiki-space-16);
+    p {
+      margin-bottom: 0;
+    }
+  }
+  > .results {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+}
 .recentHeading {
   display: flex;
   align-items: center;

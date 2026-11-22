@@ -29,6 +29,7 @@ description: LLM Wiki 요청을 조회·작성·추출·검토·진단 조각으
 
 ## 적은 토큰으로 충분한 도구
 
+- 도구 왕복을 줄인다. Codex 실측에서 왕복마다 약1만 토큰의 기본 문맥이 다시 들어갔다. 질문은 `knowledge_lookup(question)` 한 번으로 시작하고(tenant 생략 가능), 근거가 모자라면 표현·`documents`를 바꿔 다시 부른다. 같은 내용을 여러 도구로 나눠 읽지 않는다.
 - 좁은 조회부터: `wiki_search` 스니펫으로 대상 선택 → 필요한 문서만 읽기 → 인용할 문서만 검토 맥락(`knowledge_context_prepare`/`ontology_review_query`) 준비.
 - 용어 하나는 그래프 전체 대신 `ontology_concept_find`·`ontology_glossary_query`를 쓴다.
 - 같은 세션에서 revision이 같은 결과는 다시 읽지 않는다. 목록은 `next_cursor`로 필요한 페이지까지만 읽고 `truncated`/`skipped`를 밝힌다.

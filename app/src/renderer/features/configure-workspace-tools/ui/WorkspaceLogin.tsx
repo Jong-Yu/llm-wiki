@@ -1,6 +1,9 @@
 import { ReadQueriesProvider } from '@renderer/shared/lib/readQueries';
-import type { JSX, ReactNode } from 'react';
+import { useId, useState } from 'react';
+import type { JSX, KeyboardEvent, ReactNode } from 'react';
 import { Link } from 'react-router';
+import { Button } from '@renderer/shared/ui/Button';
+import { Icon } from '@renderer/shared/ui/Icon';
 import { BrandMark } from '@renderer/shared/ui/BrandMark';
 import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
 import { useWorkspaceTools } from '../model/useWorkspaceTools';
@@ -15,7 +18,14 @@ export function WorkspaceLogin({
   publicContent,
 }: WorkspaceLoginProps): JSX.Element {
   const tools = useWorkspaceTools(false);
-  if (tools.connection?.status === 'connected') {
+  const tooltipId = useId();
+  const [tooltipOpen, setTooltipOpen] = useState<'refresh' | 'logout' | null>(
+    null,
+  );
+  const waiting =
+    tools.connection?.status === 'connected' &&
+    tools.connection.workspaces.length === 0;
+  if (tools.connection?.status === 'connected' && !waiting) {
     const connection = tools.connection;
     // 보관된 페이지와 초안을 다른 주체·관점·권한에서 재사용하지 않습니다.
     const scope = JSON.stringify([
@@ -54,7 +64,103 @@ export function WorkspaceLogin({
             {tools.connection.warning}
           </StatusNotice>
         )}
-        {tools.connection ? (
+        {waiting ? (
+          <section
+            className={styles.assignmentWaiting}
+            aria-labelledby="assignment-title"
+          >
+            <h2 id="assignment-title">워크스페이스 배정 대기</h2>
+            <p>
+              로그인했습니다. 관리자가 워크스페이스를 배정하면 사용할 수
+              있습니다.
+            </p>
+            <div className={styles.assignmentActions}>
+              <span
+                className={styles.assignmentRefresh}
+                onMouseEnter={(): void => setTooltipOpen('refresh')}
+                onMouseLeave={(): void => setTooltipOpen(null)}
+              >
+                <Button
+                  variant="surface"
+                  size="small"
+                  aria-label="워크스페이스 배정 다시 확인"
+                  aria-describedby={
+                    tooltipOpen === 'refresh' ? tooltipId : undefined
+                  }
+                  disabled={tools.connectionPending !== null}
+                  onFocus={(): void => setTooltipOpen('refresh')}
+                  onBlur={(): void => setTooltipOpen(null)}
+                  onKeyDown={(
+                    event: KeyboardEvent<HTMLButtonElement>,
+                  ): void => {
+                    if (event.key === 'Escape') {
+                      setTooltipOpen(null);
+                      event.preventDefault();
+                    }
+                  }}
+                  onClick={(): void => {
+                    setTooltipOpen(null);
+                    void tools.refresh();
+                  }}
+                >
+                  <Icon name="refresh-cw" />
+                </Button>
+                {tooltipOpen === 'refresh' && (
+                  <span
+                    id={tooltipId}
+                    role="tooltip"
+                    className={styles.assignmentTooltip}
+                  >
+                    배정 다시 확인
+                  </span>
+                )}
+              </span>
+              <span
+                className={styles.assignmentRefresh}
+                onMouseEnter={(): void => setTooltipOpen('logout')}
+                onMouseLeave={(): void => setTooltipOpen(null)}
+              >
+                <Button
+                  variant="surface"
+                  size="small"
+                  aria-label="로그아웃"
+                  aria-describedby={
+                    tooltipOpen === 'logout' ? `${tooltipId}-logout` : undefined
+                  }
+                  disabled={tools.connectionPending === 'disconnect'}
+                  onFocus={(): void => setTooltipOpen('logout')}
+                  onBlur={(): void => setTooltipOpen(null)}
+                  onKeyDown={(
+                    event: KeyboardEvent<HTMLButtonElement>,
+                  ): void => {
+                    if (event.key === 'Escape') {
+                      setTooltipOpen(null);
+                      event.preventDefault();
+                    }
+                  }}
+                  onClick={(): void => {
+                    setTooltipOpen(null);
+                    void tools.disconnect();
+                  }}
+                >
+                  <Icon name="log-out" />
+                </Button>
+                {tooltipOpen === 'logout' && (
+                  <span
+                    id={`${tooltipId}-logout`}
+                    role="tooltip"
+                    className={styles.assignmentTooltip}
+                  >
+                    로그아웃
+                  </span>
+                )}
+              </span>
+              {tools.connectionPending === 'refresh' && (
+                <span role="status">배정 확인 중…</span>
+              )}
+            </div>
+          </section>
+        ) : tools.connection ? (
           <ServerAccessForm
             remembered
             name={account?.name ?? ''}
@@ -71,7 +177,7 @@ export function WorkspaceLogin({
               : '로그인 상태를 불러오지 못했습니다.'}
           </p>
         )}
-        {tools.connectionError && (
+        {tools.connectionError && !waiting && (
           <button
             type="button"
             className={styles.textButton}

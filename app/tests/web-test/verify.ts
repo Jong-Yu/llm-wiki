@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { assignTestWorkspace } from '../poc-ui/assignment';
 import { startWebTestServer } from '../../src/web-test/httpServer';
 import { createWebServices } from '../../src/web-test/services';
 import { parseConnectionResult } from '../../src/shared/contracts/connection.contract';
@@ -323,8 +324,35 @@ async function verify(): Promise<void> {
       ]),
     );
     assert(signup.ok && signup.data.status === 'connected');
+    assert.equal(signup.data.selection, null);
+    assert.deepEqual(signup.data.workspaces, []);
     checks++;
     const connectionId = signup.data.connectionId;
+    const waitingList = parseDocumentListResult(
+      await post('documents:list', [{ connectionId, cursor: null, limit: 20 }]),
+    );
+    assert.equal(waitingList.ok, false);
+    checks++;
+    await assignTestWorkspace(
+      project,
+      join(root, 'fixture'),
+      signup.data.userId,
+    );
+    const cached = parseConnectionResult(
+      await post('connection:get-state', []),
+    );
+    assert(cached.ok && cached.data.status === 'connected');
+    assert.equal(cached.data.selection, null);
+    const assigned = parseConnectionResult(
+      await post('connection:refresh-access', []),
+    );
+    assert(assigned.ok && assigned.data.status === 'connected');
+    assert.equal(assigned.data.connectionId, connectionId);
+    assert.deepEqual(assigned.data.selection, {
+      tenant: 'sdv-platform',
+      profile: 'default',
+    });
+    checks++;
     const fileChecks = await verifyFiles(
       server.url,
       headers,

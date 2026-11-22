@@ -217,6 +217,76 @@ def history_query(store, actor, *, documents, correspondence_ids, job_ids, limit
         "job_ids": job_ids}, _history_items(store, actor, resources, skipped, job_ids), resources, skipped, limit, cursor)
 
 
+MAX_LOOKUP_DOCUMENTS = 8
+
+
+def lookup_question(store, actor, *, question, documents, max_documents):
+    """질문 하나로 허용 공간의 후보를 찾고 상위 문서의 질문에 맞는 근거를 돌려준다. AI 실행·저장은 없다.
+
+    기존 discover(색인·개념·관계 순위)와 prepare_question(전체 원문·현재 판단·한도)으로 준비한 뒤,
+    결과는 lookup_view로 문서 목록과 질문에 맞는 단락·지식만 남긴다(D-139). 전체 원문·지식은
+    knowledge_context_prepare가 준다. 준비하지 않은 후보는 경로만 남겨 누락으로 숨기지 않는다.
+    """
+    from .question_index import catalog_revision, discover
+    if type(max_documents) is not int or not 1 <= max_documents <= MAX_LOOKUP_DOCUMENTS:
+        raise ValueError("max_documents must be from 1 to 8")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("Ask a nonblank question")
+    if len(set(documents)) != len(documents):
+        raise ValueError("Select unique document paths")
+    # 지정 문서는 순위와 관계없이 먼저 고정하고 나머지를 검색 순위로 채운다.
+    retrieval = discover(store, actor, question, documents, documents)
+    candidates = retrieval.pop("documents")
+    selected = candidates[:max_documents]
+    value = prepare_question(store, actor, documents=selected, required_documents=[], claims=[],
+                             source_refs=[], allow_empty=not selected)
+    with store._write_lock():
+        if catalog_revision(store) != retrieval["catalog_revision"]:
+            raise CatalogChangedError()
+    value.pop("snapshot_revision")
+    retrieval.update(selected_documents=selected, candidates_not_prepared=candidates[max_documents:],
+                     prepared_limit=max_documents, question_sha256=sha256(question.encode()).hexdigest(),
+                     query_prefix_length=len(question))
+    value = {**value, "retrieval": retrieval}
+    return lookup_view({**value, "snapshot_revision": canonical_json_hash(value)}, question)
+
+
+def lookup_view(value, question):
+    """질문 조회 준비값을 MCP 결과로 줄인다: 문서 목록과 질문에 맞는 단락·지식만 남긴다.
+
+    전체 원문·전체 지식은 knowledge_context_prepare가 그대로 제공한다. 이 결과의 부분 표시는
+    부재나 의미상 완전성을 증명하지 않는다.
+    """
+    from .question_evidence import _lines, lookup_evidence
+    listed = []
+    actor = value["scope"]["profile"]
+    for item in value["documents"]:
+        knowledge = item["knowledge"]
+        pending = knowledge.get("pending_history", [])
+        decisions = {}
+        for claim in knowledge.get("claims", []):
+            decision = claim.get("decision", "unreviewed")
+            decisions[decision] = decisions.get(decision, 0) + 1
+        listed.append({"document": item["document"], "source_revision": item["source_revision"],
+                       "state_revision": knowledge.get("state_revision"),
+                       "status": knowledge["status"], "needs_review": knowledge["needs_review"],
+                       **({"needs_reextraction": knowledge["machine_graph"]["needs_reextraction"]}
+                          if "needs_reextraction" in knowledge["machine_graph"] else {}),
+                       # 감사 원장은 보존하되 현재 목록에서 정리한 판단을 다시 보류로 표시하지 않는다.
+                       "pending_history_count": len(pending),
+                       "current_pending_history_count": len(knowledge.get("current_pending_history", pending)),
+                       "detail_query": {"tool": "ontology_review_query", "arguments": {
+                           "document": item["document"], "tenant": actor["tenant"], "profile": actor["profile_id"]}},
+                       "line_count": len(_lines(item["content"])), "bytes": len(item["content"].encode()),
+                       "claim_decisions": decisions, "policies": len(knowledge.get("policies", []))})
+    evidence = lookup_evidence(value, question)
+    view = {"kind": "question_lookup", "scope": value["scope"], "retrieval": value["retrieval"],
+            "documents": listed, "evidence": evidence, "can_prepare": value["can_prepare"],
+            "complete": value["complete"] and evidence["complete"], "truncated": value["truncated"],
+            "skipped": value["skipped"], "read_only": True, "ai_executed": False, "persisted": False}
+    return {**view, "snapshot_revision": canonical_json_hash(view)}
+
+
 def prepare_question(store, actor, *, documents, required_documents, claims, source_refs, allow_empty=False, web=None,
                      retrieval_scope=None, lookup_question=None):
     """선택 근거의 전체 본문·현재 판단·고정 원본을 읽어 질문 준비값을 반환한다.

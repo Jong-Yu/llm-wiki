@@ -44,6 +44,8 @@ import { registerAnalysisExecutionHandlers } from './registerAnalysisExecutionHa
 import { registerResultDraftHandlers } from './registerResultDraftHandlers';
 import { AnalysisService } from '@main/backend/AnalysisService';
 import { ArtifactService } from '@main/backend/ArtifactService';
+import { TemplateService } from '@main/backend/TemplateService';
+import { registerTemplateHandlers } from './registerTemplateHandlers';
 import {
   ARTIFACTS_CHANNELS,
   chooseArtifactFileRequestSchema,
@@ -168,6 +170,11 @@ export async function registerConnectionHandlers(
   registerRecoveryHandlers(getWindow, rendererLocation, recovery);
   const workspace = new WorkspaceApiService(service);
   const artifacts = new ArtifactService(service);
+  registerTemplateHandlers(
+    getWindow,
+    rendererLocation,
+    new TemplateService(service),
+  );
   const analysis = new AnalysisService(service, recovery);
   const questions = new QuestionRunService(service, undefined, recovery);
   registerQuestionRunHandlers(getWindow, rendererLocation, questions);
@@ -264,6 +271,11 @@ export async function registerConnectionHandlers(
   );
   register(CONNECTION_CHANNELS.getState, 0, (): ConnectionResult =>
     service.getState(),
+  );
+  register(
+    CONNECTION_CHANNELS.refreshAccess,
+    0,
+    (): Promise<ConnectionResult> => service.refreshAccess(),
   );
   register(
     CONNECTION_CHANNELS.selectWorkspace,

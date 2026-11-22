@@ -222,7 +222,8 @@ class ObservationTests(unittest.IsolatedAsyncioTestCase):
         from core.modules.ontology import draft
         for name in ('MAX_SUBMISSION_BYTES', 'MAX_DOCUMENT_BYTES', 'MAX_INPUT_NODES', 'MAX_INPUT_DEPTH',
                      'MAX_ERRORS', 'MAX_SCHEMA_STEPS', 'MAX_CORE_ITEM_VISITS', 'MAX_SOURCE_SCAN_WORK'):
-            with self.subTest(limit=name), patch.object(draft, name, getattr(draft, name) + 1):
+            changed = 1 if getattr(draft, name) is None else getattr(draft, name) + 1
+            with self.subTest(limit=name), patch.object(draft, name, changed):
                 self.assertNotEqual(first, key())
         from core.client.ai import draft_validation
         with patch.object(draft.constants, 'MAX_ONTOLOGY_BYTES', draft.constants.MAX_ONTOLOGY_BYTES + 1):

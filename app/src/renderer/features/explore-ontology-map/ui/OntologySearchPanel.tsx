@@ -53,7 +53,14 @@ export function OntologySearchPanel(
     onDocument,
   } = props;
   const recent = !query && !documentFilter;
-  const showIntroduction = props.showIntroduction !== false && !onClose;
+  const emptyStart =
+    recent &&
+    page?.items.length === 0 &&
+    seeds.length === 0 &&
+    !onClose &&
+    !searching;
+  const showIntroduction =
+    !onClose && (props.showIntroduction !== false || emptyStart);
   /** 개념은 이름·출처·추가 상태로 구분하고 문서는 개념 목록을 엽니다. */
   function renderItem(item: OntologySearchItem): JSX.Element {
     if (item.kind === 'concept') {
@@ -149,6 +156,7 @@ export function OntologySearchPanel(
         }
       }}
       className={styles.searchPanel}
+      data-empty-start={emptyStart || undefined}
       aria-label="전체 문서에서 개념 찾기"
     >
       <header className={styles.panelHeading}>
@@ -230,10 +238,12 @@ export function OntologySearchPanel(
               <p>전체 문서에서 찾아 연결을 따라가 보세요.</p>
             </div>
           )}
-          <div className={styles.recentHeading}>
-            <strong>최근 변경된 문서</strong>
-            <span>최근 {page?.items.length ?? 5}개</span>
-          </div>
+          {page && page.items.length > 0 && (
+            <div className={styles.recentHeading}>
+              <strong>최근 변경된 문서</strong>
+              <span>최근 {page.items.length}개</span>
+            </div>
+          )}
         </>
       ) : null}
       <div className={styles.results} aria-busy={searching}>
@@ -272,18 +282,10 @@ export function OntologySearchPanel(
             {page?.items.map(renderItem)}
           </ul>
         )}
-        {page?.items.length === 0 && (
+        {page?.items.length === 0 && !recent && (
           <div className={styles.empty}>
-            <strong>
-              {query || documentFilter
-                ? '일치하는 결과가 없습니다'
-                : '아직 탐색할 문서가 없습니다'}
-            </strong>
-            <p>
-              {query || documentFilter
-                ? '다른 개념이나 문서 이름으로 검색해 주세요.'
-                : '문서를 추가하고 분석하면 이곳에서 개념을 찾을 수 있습니다.'}
-            </p>
+            <strong>일치하는 결과가 없습니다</strong>
+            <p>다른 개념이나 문서 이름으로 검색해 주세요.</p>
           </div>
         )}
         {page && (

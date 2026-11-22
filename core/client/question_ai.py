@@ -8,6 +8,7 @@ import re
 from jsonschema import Draft202012Validator
 
 from core.common.json_codec import canonical_json_hash
+from core.common.evidence_transport import initial_citation_encoding
 from core.client.ai.contracts import MAX_PROMPT_BYTES
 from core.client.transport import AnalysisClientError
 
@@ -97,9 +98,20 @@ def assemble_question(handoff, record, *, resumed=False, seen_turns=None):
         if "conversation_context" in data:
             value["conversation_context"] = handoff["conversation_context"]
             expected["conversation_context"] = data["conversation_context"]
+        for key in ("template_ref", "source_prefetch"):
+            if key in data:
+                value[key] = handoff[key]
+                expected[key] = data[key]
+            elif key in handoff:
+                raise AnalysisClientError("question_input_mismatch")
         if data["input_contract_version"] == "personal-question-v6":
             value["initial_evidence"] = handoff["initial_evidence"]
             expected["initial_evidence"] = {"action": "initial", "sha256": data["initial_evidence_sha256"]}
+            encoding = initial_citation_encoding(data)
+            if encoding is not None:
+                expected["initial_evidence"]["citation_encoding"] = encoding
+        elif initial_citation_encoding(data) is not None:
+            raise ValueError("Initial citation encoding requires the prefetch contract")
         if value != expected or canonical_json_hash(value) != handoff["input_sha256"]:
             raise AnalysisClientError("question_input_mismatch")
         question_answer_schema(handoff)

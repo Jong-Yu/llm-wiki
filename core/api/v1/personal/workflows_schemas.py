@@ -20,7 +20,8 @@ class DraftEdit(PersonalProfile):
     request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     title: str = Field(min_length=1, max_length=200)
-    content: str = Field(max_length=1024 * 1024)
+    # 문서 크기 한도는 없다(D-141). 요청 본문 한도는 ingress가 따로 적용한다.
+    content: str
 
 
 class DraftApply(PersonalProfile):

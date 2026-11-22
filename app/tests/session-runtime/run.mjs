@@ -1,19 +1,24 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import electron from 'electron';
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const temporary = await mkdtemp('/private/tmp/wiki-runtime-check-');
+const temporary = await realpath(
+  await mkdtemp(join(tmpdir(), 'wiki-runtime-check-')),
+);
 try {
-  for (const target of process.argv.includes('--boundaries')
-    ? ['boundaries']
-    : process.argv.includes('--web-search')
-      ? ['web-research']
-      : process.argv.includes('--live-usage')
-        ? ['live-usage']
-        : ['verify', 'lifetime', 'cli-connection']) {
+  for (const target of process.argv.includes('--lifetime')
+    ? ['lifetime']
+    : process.argv.includes('--boundaries')
+      ? ['boundaries']
+      : process.argv.includes('--web-search')
+        ? ['web-research']
+        : process.argv.includes('--live-usage')
+          ? ['live-usage']
+          : ['verify', 'lifetime', 'cli-connection']) {
     await build({
       configFile: false,
       root: appRoot,

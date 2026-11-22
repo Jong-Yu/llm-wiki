@@ -33,7 +33,8 @@ class VersionsQuery(ListQuery):
 class SaveContent(Model):
     """None 기준은 신규 생성만 뜻한다. 기존 수정에는 읽었던 revision이 필요하다."""
     document: str = Field(min_length=1, max_length=4096)
-    content: str = Field(max_length=1024 * 1024)
+    # 문서 크기 한도는 없다(D-141). 요청 본문 한도(8 MiB)는 ingress가 따로 적용한다.
+    content: str
     expected_revision: str | None = Field(pattern=r"^[a-f0-9]{64}$")
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     reason: str | None = Field(None, max_length=2000)

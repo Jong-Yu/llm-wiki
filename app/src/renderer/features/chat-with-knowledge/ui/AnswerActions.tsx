@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import type { ExportFormat } from '@contracts/fileExports.contract';
 import {
   EXPORT_FORMAT_NAMES,
@@ -34,6 +34,7 @@ export function AnswerActions({
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
   const supported = availableExportFormats();
   const formats = supported.includes(recommended)
     ? [
@@ -43,6 +44,47 @@ export function AnswerActions({
         ),
       ]
     : supported;
+  // 최상위 표시층을 사용해 대화 스크롤 영역에 잘리지 않게 하며 화면 안쪽에 배치합니다.
+  useLayoutEffect((): (() => void) | undefined => {
+    const anchor = menu.current;
+    const panel = popup.current;
+    if (!open || !anchor || !panel) return;
+    panel.showPopover();
+    const place = (): void => {
+      const trigger = anchor.getBoundingClientRect();
+      const bounds = panel.getBoundingClientRect();
+      const edge = 8;
+      const gap = 4;
+      const scrollArea = anchor
+        .closest('[role="log"]')
+        ?.getBoundingClientRect();
+      const bottom = Math.min(
+        window.innerHeight - edge,
+        scrollArea?.bottom ?? window.innerHeight,
+      );
+      const above = trigger.top - gap - bounds.height;
+      const top =
+        trigger.bottom + gap + bounds.height <= bottom
+          ? trigger.bottom + gap
+          : above >= edge
+            ? above
+            : Math.max(edge, window.innerHeight - edge - bounds.height);
+      panel.style.top = `${top}px`;
+      panel.style.left = `${Math.max(edge, Math.min(trigger.left, window.innerWidth - edge - bounds.width))}px`;
+    };
+    const closeOnScroll = (event: Event): void => {
+      if (event.target instanceof Node && !panel.contains(event.target))
+        setOpen(false);
+    };
+    place();
+    window.addEventListener('resize', place);
+    document.addEventListener('scroll', closeOnScroll, true);
+    return (): void => {
+      window.removeEventListener('resize', place);
+      document.removeEventListener('scroll', closeOnScroll, true);
+      if (panel.matches(':popover-open')) panel.hidePopover();
+    };
+  }, [open]);
   useEffect((): (() => void) | undefined => {
     if (!open) return;
     const close = (event: Event): void => {
@@ -117,6 +159,8 @@ export function AnswerActions({
         </button>
         {open && (
           <div
+            ref={popup}
+            popover="manual"
             className={styles.formatMenu}
             role="menu"
             aria-label="내려받을 형식"

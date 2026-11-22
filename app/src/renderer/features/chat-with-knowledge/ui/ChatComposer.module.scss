@@ -1,9 +1,13 @@
 // 입력창. 질문과 보내기만 눈에 띄게 두고 나머지는 ＋ 메뉴와 칩으로 접습니다.
 .wrap {
+  box-sizing: border-box;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: var(--wiki-space-8);
+  width: 100%;
+  max-width: 960px;
+  margin-inline: auto;
 }
 .composer {
   position: relative;
@@ -47,7 +51,8 @@
   background: transparent;
   color: inherit;
   font: inherit;
-  line-height: 22px;
+  font-size: var(--wiki-font-size-14);
+  line-height: var(--wiki-space-24);
   outline: none;
   // 초점 표시는 바깥 입력창이 대신하므로 안쪽 글상자에는 따로 그리지 않습니다.
   &:focus,
