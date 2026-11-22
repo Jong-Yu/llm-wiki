@@ -1,5 +1,13 @@
 # 실행 환경 작업 기록
 
+## 2026-11-22 — Windows 0.1.1 포터블 정식 배포
+
+- 사용자 요청으로 커밋 `2f6513a`에서 기존 `npm run package:win:portable`을 실행했습니다. 앱 정적 검사·빌드와 포장이 75.893초·exit 0으로 완료됐습니다. `app/release/portable/0.1.1/windows-x64/`에 ZIP(253,427,668바이트)과 SHA-256을 보존하며 해시는 `9df646f01cb4061c8f078af065466b2a3d99c252009a05985871b6c58a042c9f`입니다.
+- 포터블/업데이트 관련 기존 검사 46개 통과, ZIP 3,469항목 CRC 및 압축 전 파일 바이트 일치, 버전/portable 표시·트레이·업데이트 차단·설치용 업데이트 정보 제외를 확인했습니다. 런타임 2,961개 파일과 소스 325개가 manifest·커밋·최종 ZIP에서 모두 일치하며 Python/OCR·한영 언어 데이터를 포함합니다. Windows 실기기 실행은 미수행입니다.
+- 기존 정식 릴리스는 immutable이므로 새 정식 태그 `app-0.1.1-portable-windows`를 준비했습니다. 공개 저장소 업로드는 자동 승인 검토가 평문 소스 포함 ZIP의 명시적 공개 승인을 요구해 차단했습니다. 기존 공개 실행기 ZIP을 익명 다운로드해 소스 325개가 모두 동일함을 증명했으나 재검토도 거부되어 사용자에게 업로드 승인을 요청했습니다. 사용자가 소스 포함 ZIP의 공개 업로드와 정식 배포를 명시 승인한 뒤 초안에 두 자산을 올려 크기·digest를 대조하고 [정식 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1-portable-windows)로 게시했습니다(draft=false, prerelease=false). 저장소 공개 설정은 변경하지 않았습니다.
+- 게시 후 두 파일을 인증 없이 전체 다운로드해 크기·SHA-256·체크섬 본문이 로컬 및 GitHub digest와 일치함을 확인했습니다. 최신 설치판은 `app-0.1.1`이며 기존 9개 릴리스의 ID·상태·자산 이름/크기/digest도 그대로입니다. 원격 검증은 `.local/windows-portable-011-remote-verification.json`에 보존했습니다.
+- 최초 체크섬 명령은 시스템 Python의 `hashlib.file_digest` 미지원으로 실패해 프로젝트 `.venv`로 다시 계산했습니다. 검증 후 이번 출력의 `win-unpacked`만 정리하고 빌더 진단과 검증 기록은 `.local/windows-portable-011-*`에 보존했습니다. 제품 코드는 변경하지 않았습니다.
+
 ## 2026-11-22 — 0.1.1 정식 배포와 Windows 트레이 포함 확인
 
 - 사용자가 원격 푸시와 앱 배포를 요청해 통합 개선 `72797c0` 및 버전 0.1.1 커밋 [`eeb36ed`](https://github.com/Jong-Yu/llm-wiki/commit/eeb36ed300fdba8352fa7efb691e931a57d11230)을 원격 main에 반영했다. [0.1.1 정식 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)에 Mac arm64 DMG/ZIP, Windows x64 NSIS, 개인 실행기와 양 OS 업데이트 메타데이터·블록맵 등 10개 파일을 공개했다. 성공한 최종 릴리스 명령은 164.2초·exit 0이다.

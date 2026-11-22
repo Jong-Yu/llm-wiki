@@ -2,6 +2,10 @@
 
 ## 현재 상태
 
+### 2026-11-22 — Windows 0.1.1 포터블 정식 배포
+
+Windows x64 [0.1.1 포터블 정식 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1-portable-windows)에 ZIP과 SHA-256을 게시했습니다. 트레이와 Python/OCR을 포함하며 앱 정적 검사·빌드, 포터블/업데이트 차단 46개 검사, ZIP 및 런타임 전체 무결성 검증을 통과했습니다. 소스가 포함된 공개 업로드는 사용자의 명시적 승인 후 수행했으며, 두 파일의 익명 다운로드·해시 및 기존 배포 보존도 확인했습니다. 실제 Windows 실행 확인은 남습니다. [실행 기록](HISTORY.md#2026-11-22--windows-011-포터블-정식-배포)을 따릅니다.
+
 ### 2026-11-22 — 0.1.1 정식 앱 배포 완료
 
 원격 main에 통합 개선과 버전 커밋 `eeb36ed`을 반영하고 [0.1.1 정식 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)를 공개했습니다. Windows 트레이·최신 실행기를 포함하며 Mac/Windows 설치 파일과 공개 자산 10개, 양 OS 업데이트 정보, Windows 런타임 2,961개 파일·소스 325개 파일의 일치를 확인했습니다. 실제 Windows 설치·트레이·업데이트는 별도 실기기 확인이 남습니다. 실패 복구와 기존 자료 보존은 [실행 기록](HISTORY.md#2026-11-22--011-정식-배포와-windows-트레이-포함-확인)을 따릅니다.
