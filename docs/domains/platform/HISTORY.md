@@ -1,5 +1,13 @@
 # 실행 환경 작업 기록
 
+## 2026-11-23 — 0.1.2 정식 배포와 공개 다운로드 검증
+
+- 사용자 요청으로 앱/lock 버전을 0.1.2로 올리고 채팅 UI·공개 작업 설명·검증 기록을 `7434b184807ebc0ab121168c65a4bacb51ddeab6`에 커밋해 원격 main에 반영했다. 릴리스 70개 검사 통과 후 해당 커밋의 별도 worktree에서 실제 의존성 파일을 사용해 `npm run release -- --mac --win`을 실행했다. 모든 제품 검사·빌드·양 OS 패키징·게시가 exit 0으로 완료됐다.
+- [0.1.2 정식 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.2)는 draft=false·prerelease=false이며 최신 릴리스다. Mac arm64 DMG/ZIP, Windows x64 NSIS, 개인 실행기 ZIP/SHA256, 양 OS 업데이트 정보·블록맵 등 자산 10개를 공개했다. 작업 설명·다운로드 조건·중단 경합 수정과 외부 개인 실행기 동시 갱신 절차를 릴리스 본문에 기록했다.
+- 최종 Mac ZIP의 CRC·Info.plist/asar 0.1.2·새 UI·필수 의존성·업데이트 채널과 빌드 out 10개 파일의 바이트를 대조했다. Windows EXE는 실행 없이 추출해 asar 버전·Mac과 동일한 main 번들, 런타임 2,962개 파일의 manifest SHA256, 소스 326개의 배포 커밋 바이트 일치를 확인했다. 개인 실행기 ZIP도 CRC·전체 소스·체크섬이 일치하며 data·.local·계정·초기화 백업은 포함하지 않는다. 양 OS 피드의 파일 크기·SHA512가 일치한다.
+- 공개 자산 10개를 인증 없이 전체 다운로드해 로컬 크기·SHA256·GitHub digest와 대조했다. 본문·latest 상태도 확인했고 이전 릴리스 10개의 ID·상태·전체 자산 ID/크기/digest를 보존했다. 기록은 `.local/release-012-local-verification.json`, `.local/release-012-remote-verification.json`, `.local/release-012-build-records`에 둔다. 최종 산출물은 `app/release/0.1.2/`로 옮겼으며 기존 로컬 배포 폴더는 유지했다.
+- 배포 중 원본 작업 트리에 추가된 별도 서버 런처 수정은 고정한 커밋에 포함하지 않았다. 이번 격리 worktree·복사한 의존성·검증용 임시 추출물만 정리했다. 제품 설치·운영 서버 재시작·사용자 자료/계정 변경은 하지 않았다. Mac Developer ID 서명·공증 및 실제 Windows 설치·자동 업데이트는 미검증이다.
+
 ## 2026-11-23 — 서버 주소를 비공개 GitHub 메모에 자동 게시
 
 - 사용자 요청: 도메인이 없어 Quick Tunnel 주소가 재시작마다 바뀌므로 현재 주소를 한곳에서 보게 한다. 고정 주소는 사용자가 보류했고, 휴대폰 앱 설치형 알림 대신 GitHub 비공개 메모를 골랐다.

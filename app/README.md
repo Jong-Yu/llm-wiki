@@ -214,9 +214,9 @@ Word·PDF·Excel·PowerPoint 내보내기는 앱에 포함된 라이브러리(`m
 
 ### 자동 업데이트와 릴리스
 
-현재 정식 배포는 [LLM Wiki 0.1.1](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)입니다. Windows 트레이에서 앱 열기·종료를 제공하며, 창 닫기는 작업을 유지한 채 숨깁니다. macOS는 기존 Dock 동작입니다. 같은 태그로 재게시하지 않습니다.
+현재 정식 배포는 [LLM Wiki 0.1.2](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.2)입니다. AI가 작성한 작업별 중간 설명을 표시하고 완료되면 최종 답변만 남기며, 파일 결과가 없을 때 내려받기 버튼을 숨깁니다. Mac 등 외부 개인 실행기를 사용하는 환경에서는 같은 버전의 실행기 ZIP도 함께 갱신합니다. 같은 태그로 재게시하지 않습니다.
 
-앱 배포 전용 저장소는 [Jong-Yu/llm-wiki-releases](https://github.com/Jong-Yu/llm-wiki-releases/releases)입니다. `config/electron-builder.json`의 `publish` 설정을 릴리스 사전 확인·게시와 설치 앱의 `app-update.yml`에서 함께 사용합니다. `tagNamePrefix: app-`를 사용하므로 현재0.1.1의 게시 태그는 `app-0.1.1`, 다음0.1.2는 `app-0.1.2`입니다. 소스 저장소의 릴리스를 앱 다운로드 채널로 사용하지 않습니다.
+앱 배포 전용 저장소는 [Jong-Yu/llm-wiki-releases](https://github.com/Jong-Yu/llm-wiki-releases/releases)입니다. `config/electron-builder.json`의 `publish` 설정을 릴리스 사전 확인·게시와 설치 앱의 `app-update.yml`에서 함께 사용합니다. `tagNamePrefix: app-`를 사용하므로 현재0.1.2의 게시 태그는 `app-0.1.2`, 다음0.1.3은 `app-0.1.3`입니다. 소스 저장소의 릴리스를 앱 다운로드 채널로 사용하지 않습니다.
 
 변경을 커밋한 뒤 `app/`에서 실행합니다. 현재 버전으로 게시할 때는 버전 인자를 생략합니다. 플랫폼을 지정하지 않으면 현재 OS만 빌드합니다.
 
