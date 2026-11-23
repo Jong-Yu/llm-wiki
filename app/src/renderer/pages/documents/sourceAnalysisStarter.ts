@@ -1,5 +1,6 @@
 import {
   isSourceAnalysisInFlight,
+  sourceAnalysisProgressPath,
   startSourceAnalysis,
 } from '@renderer/features/import-document-content';
 import type { SourceAnalysisStarter } from '@renderer/features/browse-document-library';
@@ -8,4 +9,5 @@ import type { SourceAnalysisStarter } from '@renderer/features/browse-document-l
 export const sourceAnalysisStarter: SourceAnalysisStarter = {
   start: startSourceAnalysis,
   inFlight: isSourceAnalysisInFlight,
+  progressPath: sourceAnalysisProgressPath,
 };

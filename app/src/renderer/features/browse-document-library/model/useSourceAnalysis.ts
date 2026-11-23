@@ -8,6 +8,7 @@ import {
 import type {
   SourceAnalysisStarter,
   LibrarySourceItem,
+  LibraryScope,
 } from './documentLibrary.types';
 import type {
   SourceAnalysis,
@@ -19,6 +20,7 @@ import type {
 export type SourceAnalysisView = {
   kind: SourceAnalysisKind | 'unknown';
   jobId: string | null;
+  progressPath: string | null;
 };
 type SourceAnalysisModel = {
   viewOf: (item: LibrarySourceItem) => SourceAnalysisView;
@@ -33,10 +35,11 @@ const pollMs = 4000;
  * 같은 판본의 작업이 이미 있으면(서버 기준 재확인) 새로 시작하지 않고 그 작업을 보여 줍니다.
  */
 export function useSourceAnalysis(
-  connectionId: string | null,
+  scope: LibraryScope | null,
   items: readonly LibrarySourceItem[],
   starter: SourceAnalysisStarter,
 ): SourceAnalysisModel {
+  const connectionId = scope?.connectionId ?? null;
   const active = useWorkspaceActivity();
   const [index, setIndex] = useState<SourceAnalysisIndex | null>(null);
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
@@ -51,7 +54,7 @@ export function useSourceAnalysis(
   }, [items]);
   const load = useCallback(async (): Promise<void> => {
     // 여러 페이지 조회가 주기보다 오래 걸려도 같은 목록 요청을 겹쳐 보내지 않습니다.
-    if (!connectionId || pending.current !== null) return;
+    if (!scope || !connectionId || pending.current !== null) return;
     const request = ++generation.current;
     pending.current = request;
     try {
@@ -65,13 +68,17 @@ export function useSourceAnalysis(
         notifyReadChange();
       indexFingerprint.current = fingerprint;
       setIndex(next);
-      setInFlight(itemsRef.current.some(starter.inFlight));
+      setInFlight(
+        itemsRef.current.some((item: LibrarySourceItem): boolean =>
+          starter.inFlight(item, scope),
+        ),
+      );
     } catch {
       // 상태를 읽지 못해도 목록은 그대로 두고 이전에 읽은 상태를 유지합니다.
     } finally {
       if (pending.current === request) pending.current = null;
     }
-  }, [connectionId, starter]);
+  }, [connectionId, scope, starter]);
   useEffect((): (() => void) => {
     generation.current += 1;
     pending.current = null;
@@ -119,16 +126,18 @@ export function useSourceAnalysis(
   }, [polling, load]);
 
   const start = async (item: LibrarySourceItem): Promise<void> => {
-    if (!connectionId) return;
+    if (!connectionId || !scope) return;
     const key = sourceAnalysisKey(item.sourceId, item.sourceVersion);
-    if (starting.has(key) || starter.inFlight(item)) return;
+    if (starting.has(key) || (!!scope && starter.inFlight(item, scope))) return;
     setMessage(null);
     setStarting((current: ReadonlySet<string>): ReadonlySet<string> =>
       new Set(current).add(key),
     );
+    const request = generation.current;
     try {
       // 목록이 오래됐을 수 있어 시작 직전에 서버 작업을 다시 읽고 중복 접수를 막습니다.
       const fresh = await readSourceAnalysisIndex(connectionId);
+      if (request !== generation.current) return;
       if (fresh.bySource.has(key)) {
         setIndex(fresh);
         setMessage(
@@ -142,9 +151,11 @@ export function useSourceAnalysis(
         );
         return;
       }
-      const result = await starter.start(item);
+      const result = await starter.start(item, scope);
+      if (request !== generation.current) return;
       if (!result.ok) setMessage(result.message);
     } catch {
+      if (request !== generation.current) return;
       setMessage(
         '분석을 시작한 결과를 확인하지 못했습니다. 작업 보기에서 상태를 확인해 주세요.',
       );
@@ -161,10 +172,17 @@ export function useSourceAnalysis(
   const viewOf = (item: LibrarySourceItem): SourceAnalysisView => {
     const key = sourceAnalysisKey(item.sourceId, item.sourceVersion);
     const entry = index?.bySource.get(key);
-    if (starting.has(key) || starter.inFlight(item))
-      return { kind: 'running', jobId: entry?.jobId ?? null };
-    if (entry) return { kind: entry.kind, jobId: entry.jobId };
-    return { kind: index?.complete ? 'none' : 'unknown', jobId: null };
+    const progressPath = scope
+      ? (starter.progressPath?.(item, scope) ?? null)
+      : null;
+    if (starting.has(key) || (!!scope && starter.inFlight(item, scope)))
+      return { kind: 'running', jobId: entry?.jobId ?? null, progressPath };
+    if (entry) return { kind: entry.kind, jobId: entry.jobId, progressPath };
+    return {
+      kind: progressPath ? 'attention' : index?.complete ? 'none' : 'unknown',
+      jobId: null,
+      progressPath,
+    };
   };
   return { viewOf, start, message };
 }

@@ -1,4 +1,12 @@
-import type { SourceConversionScope } from '@contracts/sourceConversion.contract';
+import type {
+  SourceConversionScope,
+  SourceConversionRun,
+} from '@contracts/sourceConversion.contract';
+import {
+  importProcessingSession,
+  readSourceProcessingSession,
+  sourceProcessingSession,
+} from '@renderer/features/import-document-content/model/importProcessingSessions';
 import { ImportProcessingSession } from '@renderer/features/import-document-content/model/ImportProcessingSession';
 import type {
   ImportProcessingApi,
@@ -482,7 +490,16 @@ async function verify(): Promise<void> {
         }),
         executeJob: async (): Promise<AnalysisDetailResult> => {
           executions += 1;
-          return { ok: true, data: partial };
+          return {
+            ok: true,
+            data:
+              executions === 2
+                ? {
+                    ...partial,
+                    local: { status: 'running', message: '다시 실행 중' },
+                  }
+                : partial,
+          };
         },
       };
       const session = new ImportProcessingSession(
@@ -493,16 +510,21 @@ async function verify(): Promise<void> {
         api,
       );
       await session.begin();
-      assert.equal(session.getSnapshot().phase, 'partial');
+      assert.equal(session.getSnapshot().phase, 'stopped');
+      assert.equal(session.getSnapshot().error, '관계 추출 실패');
       assert.equal(session.getSnapshot().document, 'registered.md');
       // 등록 요청이 곧 명시 실행이므로 begin이 관계 추출을 한 번 자동으로 이어갑니다.
       assert.equal(executions, 1);
       await session.refresh();
       assert.equal(executions, 1);
-      await session.execute();
+      await session.restart();
       assert.equal(registrations, 1);
       assert.equal(executions, 2);
+      assert.equal(session.getSnapshot().phase, 'running');
+      assert.equal(session.getSnapshot().error, null);
       assert.equal(session.getSnapshot().document, 'registered.md');
+      await session.refresh();
+      assert.equal(session.getSnapshot().phase, 'stopped');
     },
   );
   await check(
@@ -552,6 +574,183 @@ async function verify(): Promise<void> {
       await session.begin();
       assert.equal(registrations, 1);
       assert.equal(executions, 1);
+    },
+  );
+  await check(
+    'processing session lookup isolates workspace, profile and access revision',
+    async (): Promise<void> => {
+      assert.ok(registeredFixture);
+      const local = connection.localContext();
+      assert.ok(local);
+      const current = {
+        connectionId: local.active.connectionId,
+        ...scope(local),
+        canRegister: true,
+        canPrepare: true,
+        canExtract: true,
+      };
+      const session = importProcessingSession(current, registeredFixture, {
+        targetDocument: 'registered.md',
+        extract: true,
+      });
+      assert.equal(
+        sourceProcessingSession(registeredFixture.item, current),
+        session,
+      );
+      assert.equal(
+        readSourceProcessingSession(
+          current,
+          registeredFixture.item.sourceId,
+          registeredFixture.item.sourceVersion,
+        )?.session,
+        session,
+      );
+      assert.equal(
+        sourceProcessingSession(registeredFixture.item, {
+          ...current,
+          profileId: 'different',
+        }),
+        null,
+      );
+      assert.equal(
+        sourceProcessingSession(registeredFixture.item, {
+          ...current,
+          tenant: 'different',
+        }),
+        null,
+      );
+      assert.equal(
+        sourceProcessingSession(registeredFixture.item, {
+          ...current,
+          accessRevision: '0'.repeat(64),
+        }),
+        null,
+      );
+    },
+  );
+  await check(
+    'failed conversion retries without reupload and advances after leaving the progress screen',
+    async (): Promise<void> => {
+      assert.ok(registeredFixture);
+      assert.ok(jobFixture);
+      const local = connection.localContext();
+      assert.ok(local);
+      const initial = jobFixture;
+      const failed = analysisDetailSchema.parse({
+        ...initial,
+        local: { status: 'failed', message: 'AI 사용 한도로 중단됐습니다.' },
+        job: { ...initial.job, reported_status: 'failed' },
+      });
+      const item = { ...registeredFixture.item, format: 'pdf' as const };
+      const source = {
+        sourceId: item.sourceId,
+        sourceVersion: item.sourceVersion,
+        sourceSha256: item.sourceSha256,
+        registrationRevision: item.registrationRevision,
+      };
+      const conversion: SourceConversionRun = {
+        requestId: '3'.repeat(32),
+        source,
+        state: 'failed',
+        format: 'pdf',
+        progress: null,
+        report: null,
+        receiptState: 'not_submitted',
+        reference: null,
+        message: '본문 변환 실행에 실패했습니다.',
+        diagnosticCodes: ['worker_failed'],
+        cleanupWarning: false,
+      };
+      let starts = 0;
+      let registrations = 0;
+      let executions = 0;
+      const api: ImportProcessingApi = {
+        conversionRead: async () => ({
+          ok: true,
+          data:
+            starts === 0
+              ? conversion
+              : {
+                  ...conversion,
+                  state: 'complete',
+                  receiptState: 'saved',
+                  reference: {
+                    ...source,
+                    requestId: conversion.requestId,
+                    conversionId: '4'.repeat(32),
+                    conversionRevision: '5'.repeat(64),
+                  },
+                  report: {
+                    method: 'pdf_text',
+                    units: [
+                      {
+                        unit_id: 'page1',
+                        location: { kind: 'pages', start: 1, end: 1 },
+                        content: '원문',
+                      },
+                    ],
+                    complete: true,
+                    unread_ranges: [],
+                    warnings: [],
+                    origin: 'client_reported',
+                    coverage: 'reported_units_only',
+                    original_coverage: 'not_verified',
+                    semantic_validation: 'not_run',
+                    diagnostics: [],
+                    unit_methods: {},
+                  },
+                },
+        }),
+        conversionStart: async () => {
+          starts += 1;
+          return {
+            ok: true,
+            data: { ...conversion, state: 'running', receiptState: 'pending' },
+          };
+        },
+        register: async () => {
+          registrations += 1;
+          return { ok: true, data: initial };
+        },
+        inspectJob: async () => ({
+          ok: true,
+          data: {
+            detail: executions ? failed : initial,
+            mode: 'start',
+            blockers: [],
+            checkedAt: new Date().toISOString(),
+          },
+        }),
+        executeJob: async () => {
+          executions += 1;
+          return { ok: true, data: failed };
+        },
+      };
+      const session = new ImportProcessingSession(
+        { connectionId: local.active.connectionId, ...scope(local) },
+        { item, cleanupWarningCount: 0 },
+        'registered.md',
+        true,
+        api,
+      );
+      await session.begin();
+      assert.equal(session.getSnapshot().phase, 'conversion_failed');
+      assert.equal(starts, 0);
+      await session.restart();
+      assert.equal(starts, 1);
+      assert.equal(session.getSnapshot().phase, 'converting');
+      // 화면 구독이나 수동 refresh 없이도 변환 완료 뒤 접수·추출을 이어갑니다.
+      const deadline = Date.now() + 5000;
+      while (executions === 0 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(executions, 1);
+      assert.equal(registrations, 1);
+      assert.equal(session.getSnapshot().phase, 'stopped');
+      assert.equal(session.getSnapshot().error, 'AI 사용 한도로 중단됐습니다.');
+      await session.restart();
+      assert.equal(executions, 2);
+      assert.equal(registrations, 1);
+      assert.equal(starts, 1);
     },
   );
   await check(

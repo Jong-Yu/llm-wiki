@@ -45,6 +45,7 @@ export type ImportProcessingSnapshot = {
     | 'ready'
     | 'running'
     | 'partial'
+    | 'stopped'
     | 'complete'
     | 'error';
   message: string;

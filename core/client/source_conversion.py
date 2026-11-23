@@ -29,6 +29,44 @@ from .source_conversion_report import empty_conversion, interrupt_conversion
 
 MAX_ORIGINAL = 20 * 1024 * 1024
 SOURCE_KEYS = ("source_id", "source_version", "source_sha256", "registration_revision")
+WORKER_FAILURE_CODES = frozenset({"conversion_checkpoint_locked", "conversion_checkpoint_write_failed",
+    "conversion_memory_failed", "conversion_worker_io_failed", "conversion_worker_exception"})
+
+
+def worker_exit_failure(path, returncode):
+    """전용 실패 보고의 허용 필드와 종료 숫자만 읽고 원시 stderr는 공개하지 않는다."""
+    failure = {}
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(4097)
+        report = json.loads(raw) if len(raw) <= 4096 else None
+        if (type(report) is dict and report.get("schema_version") == 1
+                and report.get("code") in WORKER_FAILURE_CODES):
+            failure["code"] = report["code"]
+            for key in ("errno", "winerror"):
+                number = report.get(key)
+                if type(number) is int and -(2 ** 31) <= number < 2 ** 32:
+                    failure[key] = number
+    except (OSError, ValueError, TypeError):
+        pass
+    if "code" not in failure:
+        # Windows NTSTATUS는 bootstrap을 거치면 signed/unsigned 어느 쪽으로도 올 수 있다.
+        native = returncode & 0xffffffff
+        if native in {0xc0000017, 0xc000012d}:
+            code = "conversion_memory_failed"
+        elif native == 0xc000009a:
+            code = "conversion_resources_failed"
+        elif native in {0xc0000005, 0xc000001d, 0xc0000094, 0xc00000fd, 0xc0000409}:
+            code = "conversion_worker_crashed"
+        elif returncode in {-signal.SIGSEGV, -signal.SIGABRT, -signal.SIGILL,
+                            -getattr(signal, "SIGBUS", signal.SIGSEGV)}:
+            code = "conversion_worker_crashed"
+        elif returncode < 0:
+            code = "conversion_worker_terminated"
+        else:
+            code = "worker_failed"
+        failure["code"] = code
+    return {**failure, "exit_code": returncode}
 
 
 def check_ref(reference):
@@ -87,13 +125,16 @@ async def stop_worker(process):
 
 async def run_worker(original, format, result_path, *, ocr, language, timeout, cancel_file, emit):
     scratch = Path(tempfile.mkdtemp(prefix="scratch-", dir=result_path.parent))
+    failure_path = scratch / "worker-failure.json"
     environment = {**os.environ, "TMPDIR": str(scratch), "TEMP": str(scratch), "TMP": str(scratch)}
     process, job = None, None
     reason, previous, deadline = None, None, time.monotonic() + timeout
+    failure = None
     try:
         job = WindowsJob() if is_windows() else None
         arguments = [sys.executable, "-B", "-m", "core.client.source_conversion_worker",
-                     str(original), format, str(result_path), "--ocr", ocr, "--language", language]
+                     str(original), format, str(result_path), "--ocr", ocr, "--language", language,
+                     "--failure-report", str(failure_path)]
         process = await asyncio.create_subprocess_exec(*process_arguments(arguments),
             cwd=Path(__file__).resolve().parents[2], env=environment, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, **spawn_options())
@@ -122,6 +163,8 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
                     emit("convert", completed=progress[0], total=snapshot.get("total_units"), unread=progress[1])
             await asyncio.sleep(0.1)
         await process.wait()
+        if process.returncode != 0 and reason is None:
+            failure = worker_exit_failure(failure_path, process.returncode)
     except asyncio.CancelledError:
         if process is not None:
             await stop_worker(process)
@@ -132,9 +175,16 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
         if job is not None:
             job.close()
         shutil.rmtree(scratch)
-    value = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else empty_conversion(format, reason or "worker_failed")
+    code = reason or (failure or {}).get("code", "worker_failed")
+    value = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else empty_conversion(format, code)
     if reason or process.returncode != 0 or value.get("state") == "running":
-        interrupt_conversion(value, reason or "worker_failed")
+        interrupt_conversion(value, code)
+        failure = failure or {"code": code, "exit_code": process.returncode}
+        value["worker_failure"] = failure
+        # 기존 불변 보고에도 원인 분류와 종료 숫자가 남아 앱 재시작 뒤 조회할 수 있다.
+        warning = "worker: " + ";".join(f"{key}={item}" for key, item in failure.items())
+        if len(value["warnings"]) < 100:
+            value["warnings"].append(warning)
     atomic_json(result_path, value)
     return value
 
@@ -243,6 +293,9 @@ async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profi
         conversion = await run_worker(path, original["format"], result_path, ocr=ocr, language=ocr_language,
                                      timeout=timeout, cancel_file=cancel_file, emit=emit)
         local["conversion"] = conversion
+        if conversion.get("worker_failure"):
+            # 첫 checkpoint 이전 실패는 UI가 method 없는 보고를 null로 투영하므로 코드도 별도로 보낸다.
+            local["error"] = {"code": conversion["worker_failure"]["code"]}
         if cancelled(cancel_file):
             conversion["complete"] = False
             conversion["state"] = "cancelled"

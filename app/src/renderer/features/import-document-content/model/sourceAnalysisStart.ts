@@ -1,12 +1,18 @@
+import type { SourceConversionScope } from '@contracts/sourceConversion.contract';
 import type { DocumentListItem } from '@contracts/documents.contract';
 import {
   checkTargetExistence,
   findFreeTarget,
-  importScopeKey,
   readImportScope,
+  importScopeKey,
 } from '../api/importRegistration.api';
 import type { ImportScope } from '../api/importRegistration.api';
-import { ImportProcessingSession } from './ImportProcessingSession';
+import type { ImportProcessingSession } from './ImportProcessingSession';
+import {
+  importProcessingSession,
+  readSourceProcessingSession,
+  sourceProcessingSession,
+} from './importProcessingSessions';
 import { baseNameFromTitle, targetWithNumber } from './importTargetName';
 
 export type RegisteredSource = Extract<DocumentListItem, { kind: 'source' }>;
@@ -14,41 +20,28 @@ export type SourceAnalysisStartResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
-type Started = { scopeKey: string; session: ImportProcessingSession };
-
-/** 같은 원본 판본은 앱이 켜져 있는 동안 하나의 처리 세션만 가집니다(중복 클릭·화면 재진입 방지). */
-const started = new Map<string, Started>();
-/** 변환·접수·실행이 이어지는 단계입니다. 이 동안은 "분석 중"으로 봅니다. */
-const activePhases = new Set(['converting', 'planning', 'running']);
-/** 화면 밖에서도 끝까지 이어가되 무한히 붙잡지 않는 상한(약 30분)입니다. */
-const maxDriveTicks = 1200;
-
-function sourceKey(item: RegisteredSource): string {
-  return `${item.sourceId}:${item.sourceVersion}`;
-}
-
 /** 이 앱에서 시작해 아직 진행 중인 원본 판본인지 알려 줍니다. */
-export function isSourceAnalysisInFlight(item: RegisteredSource): boolean {
-  const session = started.get(sourceKey(item))?.session;
-  if (!session) return false;
-  const snapshot = session.getSnapshot();
+export function isSourceAnalysisInFlight(
+  item: RegisteredSource,
+  scope: SourceConversionScope,
+): boolean {
+  const snapshot = sourceProcessingSession(item, scope)?.getSnapshot();
   return (
+    !!snapshot &&
     !snapshot.scopeInvalid &&
-    (snapshot.busy || activePhases.has(snapshot.phase))
+    (snapshot.busy ||
+      ['converting', 'planning', 'running'].includes(snapshot.phase))
   );
 }
 
-/** 화면을 떠나도 변환·접수·실행이 끝나거나 멈출 때까지 같은 세션의 상태를 이어서 확인합니다. */
-async function drive(session: ImportProcessingSession): Promise<void> {
-  for (let tick = 0; tick < maxDriveTicks; tick += 1) {
-    const snapshot = session.getSnapshot();
-    if (snapshot.scopeInvalid) return;
-    if (!snapshot.busy && !activePhases.has(snapshot.phase)) return;
-    await new Promise<void>((resolve: () => void): void => {
-      window.setTimeout(resolve, 1500);
-    });
-    await session.refresh();
-  }
+/** 작업 접수 전에도 같은 원본의 변환 상태와 재시도 화면으로 돌아갈 수 있습니다. */
+export function sourceAnalysisProgressPath(
+  item: RegisteredSource,
+  scope: SourceConversionScope,
+): string | null {
+  const session = sourceProcessingSession(item, scope);
+  if (!session || session.getSnapshot().scopeInvalid) return null;
+  return `/register?${new URLSearchParams({ sourceId: item.sourceId, version: item.sourceVersion })}`;
 }
 
 /** 처리 세션의 최종 상태를 사용자에게 알릴 한 줄로 바꿉니다. */
@@ -65,6 +58,7 @@ function outcome(session: ImportProcessingSession): SourceAnalysisStartResult {
  */
 export async function startSourceAnalysis(
   item: RegisteredSource,
+  expectedScope: SourceConversionScope,
 ): Promise<SourceAnalysisStartResult> {
   const read = await readImportScope();
   if (read.status !== 'ready')
@@ -76,17 +70,26 @@ export async function startSourceAnalysis(
           : '작업 공간을 선택한 뒤 다시 시도해 주세요.',
     };
   const scope: ImportScope = read.scope;
+  if (importScopeKey(scope) !== importScopeKey(expectedScope))
+    return {
+      ok: false,
+      message:
+        '작업 공간이나 권한이 변경되었습니다. 현재 원본 목록을 다시 확인해 주세요.',
+    };
   if (!scope.canPrepare)
     return {
       ok: false,
       message: '이 작업 공간에서 분석을 시작할 쓰기 권한이 없습니다.',
     };
-  const key = sourceKey(item);
-  const existing = started.get(key);
-  if (existing && existing.scopeKey === importScopeKey(scope)) {
-    if (isSourceAnalysisInFlight(item))
+  const existing = readSourceProcessingSession(
+    scope,
+    item.sourceId,
+    item.sourceVersion,
+  );
+  if (existing) {
+    if (isSourceAnalysisInFlight(item, scope))
       return { ok: true, message: '이미 분석을 진행하고 있습니다.' };
-    await existing.session.refresh();
+    await existing.session.restart();
     return outcome(existing.session);
   }
   // 저장 이름은 등록 화면과 같은 규칙으로 정하고, 겹치면 번호를 붙입니다.
@@ -109,14 +112,11 @@ export async function startSourceAnalysis(
       };
     target = numbered;
   }
-  const session = new ImportProcessingSession(
+  const session = importProcessingSession(
     scope,
     { item, cleanupWarningCount: 0 },
-    target,
-    true,
+    { targetDocument: target, extract: true },
   );
-  started.set(key, { scopeKey: importScopeKey(scope), session });
   await session.begin();
-  void drive(session);
   return outcome(session);
 }

@@ -3,15 +3,22 @@
 from hashlib import sha256
 from io import BytesIO
 import json
+import errno
+import os
 from pathlib import Path
+import signal
+import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
 from core.client import source_conversion_formats as formats
 from core.client.source_conversion import convert_source, report_body, run_worker
+from core.client.source_conversion import worker_exit_failure
+from core.client import source_conversion_worker as worker
 from core.client import source_conversion_xlsx as xlsx_view
 from core.tests.poc_access.fixtures import grant_test_membership
 
@@ -272,7 +279,122 @@ class XlsxConversionTest(unittest.TestCase):
                 xlsx_view.part_path(target)
 
 
+class CheckpointTest(unittest.TestCase):
+    def test_windows_transient_replace_keeps_old_checkpoint_until_success(self):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'conversion.json'
+            path.write_text('{"units": ["old"]}')
+            original = path.read_bytes()
+            replace = os.replace
+            attempts = []
+
+            def busy_then_replace(source, target):
+                attempts.append(source)
+                self.assertEqual(path.read_bytes(), original)
+                if len(attempts) <= 2:
+                    error = PermissionError(errno.EACCES, 'private path and token must not escape')
+                    error.winerror = 32
+                    raise error
+                replace(source, target)
+
+            with patch.object(worker.os, 'replace', side_effect=busy_then_replace), patch.object(worker.time, 'sleep'):
+                worker.atomic_json(path, {'units': ['old', 'new']})
+            self.assertEqual(len(attempts), 3)
+            self.assertEqual(json.loads(path.read_text()), {'units': ['old', 'new']})
+            self.assertEqual(list(path.parent.glob('.conversion-*')), [])
+
+    def test_permanent_lock_and_other_io_failure_preserve_checkpoint(self):
+        for winerror, expected_attempts, code in ((32, 8, 'conversion_checkpoint_locked'),
+                (None, 1, 'conversion_checkpoint_write_failed')):
+            with self.subTest(winerror=winerror), TemporaryDirectory() as temporary:
+                path = Path(temporary) / 'conversion.json'
+                path.write_text('{"units": ["old"]}')
+                original = path.read_bytes()
+                error = PermissionError(errno.EACCES, 'private path and token must not escape')
+                if winerror is not None:
+                    error.winerror = winerror
+                with patch.object(worker.os, 'replace', side_effect=error) as replace, patch.object(worker.time, 'sleep'):
+                    with self.assertRaises(worker.CheckpointWriteError) as caught:
+                        worker.atomic_json(path, {'units': ['new']})
+                self.assertEqual(replace.call_count, expected_attempts)
+                self.assertEqual(path.read_bytes(), original)
+                self.assertEqual(list(path.parent.glob('.conversion-*')), [])
+                self.assertEqual(caught.exception.code, code)
+                self.assertNotIn('private', str(caught.exception))
+
+    def test_worker_exit_reports_whitelist_and_native_failure(self):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'failure.json'
+            path.write_text(json.dumps({'schema_version': 1, 'code': 'conversion_checkpoint_locked',
+                'winerror': 32, 'errno': 13, 'message': 'secret', 'path': '/private/input'}))
+            self.assertEqual(worker_exit_failure(path, 1), {'code': 'conversion_checkpoint_locked',
+                'winerror': 32, 'errno': 13, 'exit_code': 1})
+            for value in ({'schema_version': 1, 'code': 'secret'}, {'schema_version': 1, 'code': []},
+                          {'schema_version': 1, 'code': 'conversion_worker_exception', 'message': 'x' * 5000}):
+                path.write_text(json.dumps(value))
+                self.assertEqual(worker_exit_failure(path, 1), {'code': 'worker_failed', 'exit_code': 1})
+            path.unlink()
+            for exit_code, code in ((-signal.SIGSEGV, 'conversion_worker_crashed'),
+                    (-signal.SIGTERM, 'conversion_worker_terminated'),
+                    (0xc0000005, 'conversion_worker_crashed'), (-1073741819, 'conversion_worker_crashed'),
+                    (0xc0000017, 'conversion_memory_failed'),
+                    (0xc000009a, 'conversion_resources_failed')):
+                self.assertEqual(worker_exit_failure(path, exit_code), {'code': code, 'exit_code': exit_code})
+
+
 class WorkerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_failure_before_first_unit_has_public_error_without_conversion_method(self):
+        from core.client.source_conversion_report import empty_conversion
+        source = dict(source_id='a' * 32, source_version='b' * 32,
+                      source_sha256='c' * 64, registration_revision='d' * 64)
+        catalog = {'source_id': source['source_id'], 'current_version': source['source_version'],
+                   'registration_revision': source['registration_revision'],
+                   'versions': [{**source, 'format': 'pdf', 'size_bytes': 10}]}
+        failure = empty_conversion('pdf', 'conversion_checkpoint_locked')
+        failure['worker_failure'] = {'code': 'conversion_checkpoint_locked', 'exit_code': 1, 'winerror': 32}
+        with TemporaryDirectory() as temporary:
+            with patch('core.client.source_conversion.api_call', new=AsyncMock(return_value=catalog)), \
+                    patch('core.client.source_conversion.download', new=AsyncMock(return_value=Path(temporary) / 'original')), \
+                    patch('core.client.source_conversion.run_worker', new=AsyncMock(return_value=failure)):
+                result = await convert_source(base_url='http://127.0.0.1:8766', tenant='test', token='private',
+                    source_ref=source, work_dir=Path(temporary).resolve() / 'work', http=object())
+        self.assertFalse(result['ok'])
+        self.assertIsNone(result['conversion']['method'])
+        self.assertEqual(result['error'], {'code': 'conversion_checkpoint_locked'})
+
+    async def test_worker_checkpoint_failure_retains_units_and_safe_reason(self):
+        script = '''
+import errno, sys
+from core.client import source_conversion_worker as worker
+from core.client.source_conversion_report import Conversion
+def fail(path, format, **kwargs):
+    report = Conversion(format, kwargs['checkpoint'])
+    report.add('page-1', {'kind': 'pages', 'start': 1, 'end': 1}, 'preserved text', 'ocr')
+    report.note('ocr_confidence=87', 'page 2', unread=False)
+    error = PermissionError(errno.EACCES, 'sensitive path/token must not escape')
+    error.winerror = 32
+    raise worker.CheckpointWriteError(error)
+worker.convert_file = fail
+sys.exit(worker.main())
+'''
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary); original = directory / 'original'; original.write_bytes(b'preserve')
+            with patch('core.client.source_conversion.process_arguments',
+                    side_effect=lambda arguments: [sys.executable, '-c', script, *arguments[4:]]):
+                result = await run_worker(original, 'pdf', directory / 'conversion.json', ocr='auto', language='eng',
+                    timeout=30, cancel_file=None, emit=lambda *args, **kwargs: None)
+            self.assertEqual(result['state'], 'partial')
+            self.assertFalse(result['complete'])
+            self.assertEqual(result['units'][0]['content'], 'preserved text')
+            self.assertIn('page 2: ocr_confidence=87', result['warnings'])
+            self.assertEqual(result['unread_ranges'], ['remaining source: conversion_checkpoint_locked'])
+            self.assertEqual(result['worker_failure'], {'code': 'conversion_checkpoint_locked',
+                'errno': 13, 'winerror': 32, 'exit_code': 1})
+            self.assertNotIn('sensitive', json.dumps(result))
+            self.assertNotIn(str(directory), json.dumps(result))
+            self.assertEqual(original.read_bytes(), b'preserve')
+            self.assertEqual(list(directory.glob('scratch-*')), [])
+
     async def test_worker_timeout_and_cancel_do_not_report_complete(self):
         with TemporaryDirectory() as temporary:
             directory = Path(temporary); original = directory / 'original'; original.write_bytes(docx_bytes())
@@ -285,6 +407,7 @@ class WorkerTest(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(result['complete'])
                 self.assertEqual(result['state'], 'cancelled' if reason == 'cancel' else 'failed')
                 self.assertIn('conversion_' + ('cancelled' if reason == 'cancel' else 'timeout'), str(result['unread_ranges']))
+                self.assertEqual(result['worker_failure']['code'], 'conversion_' + ('cancelled' if reason == 'cancel' else 'timeout'))
                 self.assertTrue(original.exists())
             self.assertEqual(list(directory.glob('scratch-*')), [])
 

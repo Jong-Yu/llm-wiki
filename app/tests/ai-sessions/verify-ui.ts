@@ -205,6 +205,51 @@ async function verify(directory: string): Promise<void> {
     console.log(
       'PASS representative sessions renders actual AppShell, controls, saved records and schema-validated comparison without execution',
     );
+    await window.loadURL(
+      pathToFileURL(join(directory, 'renderer/index.html')).href +
+        '?conversionFailure=1',
+    );
+    await until(
+      "document.body.innerText.includes('본문을 변환하지 못했습니다')",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('button')].some(x=>x.textContent.trim()==='본문 변환 다시 시도' && !x.disabled)",
+      ),
+      true,
+    );
+    await js(
+      "[...document.querySelectorAll('summary')].find(x=>x.textContent.includes('변환한 본문과 미독 구간 확인')).click()",
+    );
+    await until(
+      "document.body.innerText.includes('구체적인 중단 원인이 남아 있지 않습니다')",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('details')].some(x=>x.textContent.includes('remaining source: worker_failed') && !x.open)",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "document.body.innerText.includes('변환 시간이 제한을 넘어') && document.body.innerText.includes('원본에서 읽을 수 있는 본문을 얻지 못했습니다')",
+      ),
+      true,
+    );
+    await click('본문 변환 다시 시도');
+    await until('window.__conversionRetries === 1');
+    await until(
+      "document.body.innerText.includes('본문을 변환하지 못했습니다')",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('a')].some(x=>x.textContent.includes('등록 원본 열기'))",
+      ),
+      true,
+    );
+    console.log(
+      'PASS actual conversion failure UI explains unknown worker failure, preserves technical detail and retries without registering or executing AI',
+    );
   } finally {
     window.destroy();
   }

@@ -3,15 +3,13 @@ import { Icon } from '@renderer/shared/ui/Icon';
 import type { IconName } from '@renderer/shared/ui/Icon';
 import { ConnectionNotice } from '@renderer/shared/ui/PageNotice';
 import { useAiConnection } from '@renderer/platform/aiConnection';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import { Link } from 'react-router';
 import { WorkspaceSection } from '@renderer/shared/ui/WorkspaceSection';
 import type { ImportScope } from '../api/importRegistration.api';
-import type { CompletedImport } from '../model/ImportRegistrationSession';
-import type { ImportDocumentValues } from '../model/importDocument.schema';
+import type { ImportRegisteredSource } from '../model/importProcessing.types';
 import type { ImportProcessingSession } from '../model/ImportProcessingSession';
-import { importProcessingSession } from '../model/importProcessingSessions';
 import styles from './ImportDocumentContent.module.scss';
 
 type StepView = {
@@ -59,15 +57,67 @@ function stepState(
   return failed ? 'failed' : 'active';
 }
 
-/** 최초 변환 기록과 현재 변환 보고의 미독·경고를 같은 형식으로 표시합니다. */
+const conversionFailures: Record<string, string> = {
+  empty_conversion:
+    '원본에서 읽을 수 있는 본문을 얻지 못했습니다. 원본 파일과 문자 인식 상태를 확인해 주세요.',
+  worker_failed:
+    '변환 프로그램이 중단되어 나머지 원본을 읽지 못했습니다. 이 기록에는 구체적인 중단 원인이 남아 있지 않습니다.',
+  conversion_timeout: '변환 시간이 제한을 넘어 나머지 원본을 읽지 못했습니다.',
+  conversion_cancelled: '변환을 취소해 나머지 원본을 읽지 않았습니다.',
+  conversion_checkpoint_locked:
+    '중간 결과 파일이 잠겨 변환을 이어가지 못했습니다.',
+  conversion_checkpoint_write_failed:
+    '변환 중간 결과를 저장하지 못해 중단됐습니다.',
+  conversion_memory_failed: '변환에 필요한 메모리가 부족해 중단됐습니다.',
+  conversion_resources_failed:
+    '변환에 필요한 시스템 자원이 부족해 중단됐습니다.',
+  conversion_worker_io_failed: '변환 중 파일을 읽거나 쓰지 못해 중단됐습니다.',
+  conversion_worker_exception: '변환 프로그램 내부 오류로 중단됐습니다.',
+  conversion_worker_crashed: '변환 프로그램이 비정상 종료됐습니다.',
+  conversion_worker_terminated:
+    '변환 프로그램이 외부 종료 신호를 받아 중단됐습니다.',
+};
+
+/** 알려진 미독 오류만 설명으로 바꾸고 원래 범위·코드는 접힌 기록에 보존합니다. */
 function ConversionWarnings({ report }: ConversionWarningsProps): JSX.Element {
+  const explained = report.unread_ranges.map(
+    (range: string): { range: string; message: string | null } => {
+      const code = /^(?:remaining|whole) source: ([a-zA-Z0-9_.-]+)$/.exec(
+        range,
+      )?.[1];
+      return {
+        range,
+        message: code ? (conversionFailures[code] ?? null) : null,
+      };
+    },
+  );
   return (
     <>
-      {report.unread_ranges.map((range: string, index: number): JSX.Element => (
-        <p key={`${index}:${range}`} className={styles.error}>
-          미독: {range}
-        </p>
-      ))}
+      {explained.map(
+        (
+          { range, message }: { range: string; message: string | null },
+          index: number,
+        ): JSX.Element => (
+          <p key={`${index}:${range}`} className={styles.error}>
+            {message ?? `미독: ${range}`}
+          </p>
+        ),
+      )}
+      {explained.some(
+        (item: { message: string | null }): boolean => item.message !== null,
+      ) && (
+        <details>
+          <summary>변환 오류 기록</summary>
+          {explained
+            .filter(
+              (item: { message: string | null }): boolean =>
+                item.message !== null,
+            )
+            .map((item: { range: string }, index: number): JSX.Element => (
+              <p key={index}>{item.range}</p>
+            ))}
+        </details>
+      )}
       {report.warnings.map((warning: string, index: number): JSX.Element => (
         <p key={`${index}:${warning}`}>{warning}</p>
       ))}
@@ -77,8 +127,9 @@ function ConversionWarnings({ report }: ConversionWarningsProps): JSX.Element {
 
 type ImportDocumentProgressProps = {
   scope: ImportScope;
-  registered: CompletedImport;
-  draft: ImportDocumentValues;
+  registered: ImportRegisteredSource;
+  targetDocument: string;
+  session: ImportProcessingSession;
   onNewRegistration: () => void;
 };
 
@@ -86,27 +137,16 @@ type ImportDocumentProgressProps = {
 export function ImportDocumentProgress({
   scope,
   registered,
-  draft,
+  targetDocument,
+  session,
   onNewRegistration,
 }: ImportDocumentProgressProps): JSX.Element {
-  const targetDocument = draft.targetDocument;
-  const [session] = useState<ImportProcessingSession>(
-    (): ImportProcessingSession =>
-      importProcessingSession(scope, registered, draft),
-  );
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const aiRequired = useAiConnection().status === 'required';
   const active =
     state.phase === 'converting' ||
     state.phase === 'running' ||
     state.phase === 'planning';
-  useEffect((): (() => void) | undefined => {
-    if (!active) return;
-    const timer = setInterval((): void => {
-      void session.refresh();
-    }, 1500);
-    return (): void => clearInterval(timer);
-  }, [active, session]);
 
   if (state.scopeInvalid)
     return (
@@ -156,7 +196,9 @@ export function ImportDocumentProgress({
     plainText ||
     (conversion?.state === 'complete' && conversion.receiptState === 'saved');
   const failedStage =
-    state.error !== null || state.phase === 'conversion_failed';
+    state.error !== null ||
+    state.phase === 'conversion_failed' ||
+    state.phase === 'stopped';
   const steps: StepView[] = [
     { label: '원본 보관', state: 'done' },
     {
@@ -180,6 +222,13 @@ export function ImportDocumentProgress({
   ];
   const phaseTitles: Partial<Record<typeof state.phase, string>> = {
     conversion_failed: '본문을 변환하지 못했습니다',
+    stopped: savedWiki
+      ? '문서는 저장됐지만 관계 추출이 중단됐습니다'
+      : '문서 분석이 중단됐습니다',
+    partial: '문서는 저장됐지만 관계 추출이 남아 있습니다',
+    ready: '분석 실행을 준비했습니다',
+    conversion_unconfirmed: '본문 변환 결과를 확인해 주세요',
+    planning_unconfirmed: '분석 접수 결과를 확인해 주세요',
     error: savedWiki
       ? '저장한 문서의 상태를 다시 확인해 주세요'
       : '문서를 만들지 못했습니다',
@@ -249,14 +298,11 @@ export function ImportDocumentProgress({
             </p>
           </div>
         )}
-        {partial && !aiRequired && (
-          <div className={`${styles.notice} ${styles.warning}`} role="status">
-            <p>
-              AI가 연결되어 있지 않거나 사용 한도가 없으면 관계 추출이 멈춥니다.
-              연결한 뒤 문서에서 ‘관계 재추출’을 누르면 됩니다.
-            </p>
-            <Link to="/settings?section=ai">AI 연결하기</Link>
-          </div>
+        {partial && (
+          <p className={styles.notice}>
+            저장된 문서는 보존되어 있습니다. 중단 원인을 확인한 뒤 남은 관계
+            추출을 다시 실행할 수 있습니다.
+          </p>
         )}
         {(!finished || state.error) && (
           <div

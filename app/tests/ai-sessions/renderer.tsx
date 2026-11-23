@@ -15,6 +15,19 @@ import {
   visualComparisonList,
   visualComparisonDetail,
 } from './visualFixtures';
+import { ImportDocumentProgress } from '@renderer/features/import-document-content/ui/ImportDocumentProgress';
+import { ImportProcessingSession } from '@renderer/features/import-document-content/model/ImportProcessingSession';
+import type {
+  ImportProcessingApi,
+  ImportRegisteredSource,
+} from '@renderer/features/import-document-content/model/importProcessing.types';
+import type {
+  SourceConversionRun,
+  SourceConversionResult,
+} from '@contracts/sourceConversion.contract';
+const conversionFailure = new URLSearchParams(location.search).has(
+  'conversionFailure',
+);
 const visual = new URLSearchParams(location.search).has('visual');
 
 type Checks = {
@@ -158,9 +171,110 @@ Object.defineProperty(window, 'wiki', {
   },
 });
 
+const conversionScope = {
+  connectionId: 'fixture',
+  userId: 'fixture-user',
+  tenant: 'fixture',
+  profileId: 'default',
+  policyRevision: 'e'.repeat(64),
+  canRegister: true,
+  canPrepare: true,
+  canExtract: true,
+};
+const conversionRegistered: ImportRegisteredSource = {
+  cleanupWarningCount: 0,
+  item: {
+    kind: 'source',
+    sourceId: 'b'.repeat(32),
+    sourceVersion: 'c'.repeat(32),
+    sourceSha256: 'e'.repeat(64),
+    registrationRevision: 'e'.repeat(64),
+    title: '변환 실패 검증 PDF',
+    sizeBytes: 3400,
+    format: 'pdf',
+    linkedDocumentCount: 0,
+    analysisStatus: 'not_started',
+  },
+};
+const failedConversion: SourceConversionRun = {
+  requestId: 'd'.repeat(32),
+  source: {
+    sourceId: 'b'.repeat(32),
+    sourceVersion: 'c'.repeat(32),
+    sourceSha256: 'e'.repeat(64),
+    registrationRevision: 'e'.repeat(64),
+  },
+  state: 'partial',
+  format: 'pdf',
+  progress: null,
+  receiptState: 'saved',
+  reference: null,
+  message: '원본은 보관됐지만 전체 본문 변환을 완료하지 못했습니다.',
+  diagnosticCodes: ['worker_failed'],
+  cleanupWarning: false,
+  report: {
+    method: 'ocr',
+    units: [],
+    complete: false,
+    unread_ranges: [
+      'remaining source: worker_failed',
+      'remaining source: conversion_timeout',
+      'whole source: empty_conversion',
+    ],
+    warnings: [],
+    origin: 'client_reported',
+    coverage: 'reported_units_only',
+    original_coverage: 'not_verified',
+    semantic_validation: 'not_run',
+    diagnostics: [],
+    unit_methods: {},
+  },
+};
+let conversionRetries = 0;
+const conversionApi: ImportProcessingApi = {
+  conversionRead: async (): Promise<SourceConversionResult> => ({
+    ok: true,
+    data: failedConversion,
+  }),
+  conversionStart: async (): Promise<SourceConversionResult> => {
+    conversionRetries += 1;
+    Reflect.set(window, '__conversionRetries', conversionRetries);
+    return { ok: true, data: failedConversion };
+  },
+  register: async (): Promise<never> => {
+    throw new Error('Partial conversion must not register');
+  },
+  inspectJob: async (): Promise<never> => {
+    throw new Error('Partial conversion must not inspect');
+  },
+  executeJob: async (): Promise<never> => {
+    throw new Error('Partial conversion must not execute');
+  },
+};
+const conversionSession = new ImportProcessingSession(
+  conversionScope,
+  conversionRegistered,
+  'fixture.md',
+  true,
+  conversionApi,
+);
+if (conversionFailure) void conversionSession.begin();
+
 /** 실제 목록을 보관/활성 전환해 숨겨진 자료의 수명도 검사합니다. */
 function Fixture(): JSX.Element {
   const [active, setActive] = useState(true);
+  if (conversionFailure)
+    return (
+      <MemoryRouter>
+        <ImportDocumentProgress
+          scope={conversionScope}
+          registered={conversionRegistered}
+          targetDocument="fixture.md"
+          session={conversionSession}
+          onNewRegistration={(): void => {}}
+        />
+      </MemoryRouter>
+    );
   if (visual)
     return (
       <MemoryRouter initialEntries={['/sessions']}>

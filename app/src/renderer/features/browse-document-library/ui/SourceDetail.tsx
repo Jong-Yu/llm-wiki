@@ -97,7 +97,7 @@ export function SourceDetail({
   const preview = useLibrarySourcePreview();
   const aiRequired = useAiConnection().status === 'required';
   const analysis = useSourceAnalysis(
-    detail?.scope.connectionId ?? null,
+    detail?.scope ?? null,
     detail ? [detail.item] : [],
     analysisStarter,
   );
@@ -206,19 +206,26 @@ export function SourceDetail({
       aria-label="등록 원본 상세"
     >
       <HeaderActions>
-        {detail && analysisView?.kind === 'none' && (
-          <Button
-            variant="primary"
-            type="submit"
-            className={styles.primary}
-            disabled={aiRequired}
-            onClick={(): void => {
-              void analysis.start(detail.item);
-            }}
-          >
-            분석 시작
-          </Button>
+        {detail && analysisView?.progressPath && !analysisView.jobId && (
+          <Link className={styles.primary} to={analysisView.progressPath}>
+            진행·오류 보기
+          </Link>
         )}
+        {detail &&
+          analysisView?.kind === 'none' &&
+          !analysisView.progressPath && (
+            <Button
+              variant="primary"
+              type="submit"
+              className={styles.primary}
+              disabled={aiRequired}
+              onClick={(): void => {
+                void analysis.start(detail.item);
+              }}
+            >
+              분석 시작
+            </Button>
+          )}
         {detail && analysisView?.jobId && (
           <Link
             className={styles.primary}

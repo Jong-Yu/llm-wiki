@@ -114,6 +114,16 @@ export function AnalysisJobWorkspace({
     if (active) void read();
   }, [active, read]);
 
+  const running =
+    detail?.local.status === 'running' || detail?.job.lease_status === 'active';
+  useEffect((): (() => void) | undefined => {
+    if (!active || !running || error) return;
+    const timer = window.setInterval((): void => {
+      void read();
+    }, 1500);
+    return (): void => window.clearInterval(timer);
+  }, [active, running, error, read]);
+
   // 같은 화면의 확인 영역으로 이동하고 닫을 때 원래 행동으로 돌아갑니다.
   useEffect((): void => {
     if (confirmCancel && active) cancelHeading.current?.focus();

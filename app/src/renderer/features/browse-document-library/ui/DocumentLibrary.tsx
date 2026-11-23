@@ -151,7 +151,7 @@ export function DocumentLibrary({
     row.item.kind === 'source' ? [row.item] : [],
   );
   const analysis = useSourceAnalysis(
-    ready?.scope.connectionId ?? null,
+    ready?.scope ?? null,
     sourceItems,
     analysisStarter,
   );
@@ -508,6 +508,15 @@ export function DocumentLibrary({
                           {item.kind === 'source' &&
                             ((): JSX.Element | null => {
                               const view = analysis.viewOf(item);
+                              if (view.progressPath && !view.jobId)
+                                return (
+                                  <Link
+                                    className={styles.textButton}
+                                    to={view.progressPath}
+                                  >
+                                    진행·오류 보기
+                                  </Link>
+                                );
                               if (view.kind === 'none')
                                 return (
                                   <button

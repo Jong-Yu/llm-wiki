@@ -63,7 +63,7 @@ function scopeFromConnection(result: ConnectionResult): ImportScope | null {
 }
 
 /** 전체 사용자·연결·정책 기준으로 초안의 수명을 격리합니다. */
-export function importScopeKey(scope: ImportScope): string {
+export function importScopeKey(scope: SourceConversionScope): string {
   return JSON.stringify([
     scope.connectionId,
     scope.userId,

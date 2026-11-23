@@ -1,7 +1,7 @@
 import { Button } from '@renderer/shared/ui/Button';
 import { useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import type { ImportScope } from '../api/importRegistration.api';
 import { importScopeKey } from '../api/importRegistration.api';
 import {
@@ -13,6 +13,10 @@ import { useImportScope } from '../model/useImportScope';
 import { ImportDocumentForm } from './ImportDocumentForm';
 import { ImportDocumentProgress } from './ImportDocumentProgress';
 import styles from './ImportDocumentContent.module.scss';
+import {
+  importProcessingSession,
+  readSourceProcessingSession,
+} from '../model/importProcessingSessions';
 
 type ImportWorkspaceProps = { scope: ImportScope; onRefreshScope: () => void };
 
@@ -25,6 +29,36 @@ function ImportWorkspace({
     (): ImportRegistrationSession => registrationSession(scope),
   );
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const [parameters, setParameters] = useSearchParams();
+  const sourceId = parameters.get('sourceId');
+  const version = parameters.get('version');
+  if (sourceId && version) {
+    const processing = readSourceProcessingSession(scope, sourceId, version);
+    return processing ? (
+      <ImportDocumentProgress
+        key={`${sourceId}:${version}`}
+        scope={scope}
+        registered={processing.registered}
+        targetDocument={processing.targetDocument}
+        session={processing.session}
+        onNewRegistration={(): void => {
+          setSession(newRegistrationSession(scope));
+          setParameters({});
+        }}
+      />
+    ) : (
+      <section className={styles.notice} role="status">
+        <h2>이 기기의 진행 기록을 찾지 못했습니다</h2>
+        <p>
+          앱을 다시 열었거나 작업 범위가 바뀌었습니다. 원본에서 분석 작업을 다시
+          확인해 주세요.
+        </p>
+        <Link to={`/source?${new URLSearchParams({ sourceId, version })}`}>
+          등록 원본 열기
+        </Link>
+      </section>
+    );
+  }
   if (state.scopeInvalid)
     return (
       <section className={styles.notice} role="alert">
@@ -50,7 +84,8 @@ function ImportWorkspace({
         key={state.completed.requestId}
         scope={scope}
         registered={state.completed}
-        draft={state.draft}
+        targetDocument={state.draft.targetDocument}
+        session={importProcessingSession(scope, state.completed, state.draft)}
         onNewRegistration={(): void =>
           setSession(newRegistrationSession(scope))
         }

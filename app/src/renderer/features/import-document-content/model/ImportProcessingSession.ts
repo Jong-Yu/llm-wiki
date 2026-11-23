@@ -33,6 +33,7 @@ export class ImportProcessingSession {
   #preparationRequested = false;
   #autoExecuted = false;
   #snapshot: ImportProcessingSnapshot;
+  #refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     scope: SourceConversionScope,
@@ -112,6 +113,8 @@ export class ImportProcessingSession {
   /** 요청 하나의 수명을 잠가 중복 클릭으로 새로운 작업을 만들지 않습니다. */
   async #run(operation: () => Promise<void>): Promise<void> {
     if (this.#snapshot.busy || this.#snapshot.scopeInvalid) return;
+    if (this.#refreshTimer !== null) clearTimeout(this.#refreshTimer);
+    this.#refreshTimer = null;
     this.#update({ busy: true, error: null });
     try {
       await operation();
@@ -123,7 +126,20 @@ export class ImportProcessingSession {
       });
     } finally {
       this.#update({ busy: false });
+      this.#scheduleRefresh();
     }
+  }
+  /** 화면 구독과 별도로 진행을 이어가며 확정 실패·미확정 결과에서는 자동 재실행하지 않습니다. */
+  #scheduleRefresh(): void {
+    if (
+      this.#snapshot.scopeInvalid ||
+      !['converting', 'planning', 'running'].includes(this.#snapshot.phase)
+    )
+      return;
+    this.#refreshTimer = setTimeout((): void => {
+      this.#refreshTimer = null;
+      void this.refresh();
+    }, 1500);
   }
   /** 서버가 읽어 준 변환을 원래 원본 판본과 대조합니다. */
   #sameConversion(run: SourceConversionRun): boolean {
@@ -335,12 +351,14 @@ export class ImportProcessingSession {
       wikiSaved &&
       (!this.#extract || ontologySaved) &&
       job.result_summary.status === 'complete';
+    // 재실행 직후에는 이전 실패 보고가 남아 있어도 현재 로컬 실행을 우선합니다.
     const stopped =
-      detail.local.status === 'failed' ||
-      detail.local.status === 'stopped' ||
-      job.reported_status === 'failed' ||
-      job.reported_status === 'stopped' ||
-      job.state === 'cancelled';
+      detail.local.status !== 'running' &&
+      (detail.local.status === 'failed' ||
+        detail.local.status === 'stopped' ||
+        job.reported_status === 'failed' ||
+        job.reported_status === 'stopped' ||
+        job.state === 'cancelled');
     const active =
       !stopped &&
       (detail.local.status === 'running' || job.lease_status === 'active');
@@ -354,9 +372,16 @@ export class ImportProcessingSession {
           ? 'complete'
           : active
             ? 'running'
-            : wikiSaved
-              ? 'partial'
-              : 'ready',
+            : stopped
+              ? 'stopped'
+              : wikiSaved
+                ? 'partial'
+                : 'ready',
+      error:
+        stopped && !complete
+          ? detail.local.message ||
+            '분석이 중단되었습니다. 작업 상태를 확인한 뒤 다시 실행해 주세요.'
+          : null,
       canExecute: false,
       canPrepare: false,
       canRefresh: true,
@@ -378,10 +403,13 @@ export class ImportProcessingSession {
             : 'Markdown 본문의 저장 결과를 확인했습니다.'
           : active
             ? '선택한 개인 CLI가 작업을 진행 중입니다. 실제 저장 결과를 확인하고 있습니다.'
-            : wikiSaved
-              ? 'Markdown 본문은 저장됐습니다. 후속 관계 추출 상태를 확인해 주세요.'
-              : detail.local.message ||
-                '분석 작업이 준비됐습니다. 개인 AI 실행은 아직 완료되지 않았습니다.',
+            : stopped
+              ? detail.local.message ||
+                '분석이 중단되었습니다. 작업 상태를 확인한 뒤 다시 실행해 주세요.'
+              : wikiSaved
+                ? 'Markdown 본문은 저장됐습니다. 후속 관계 추출 상태를 확인해 주세요.'
+                : detail.local.message ||
+                  '분석 작업이 준비됐습니다. 개인 AI 실행은 아직 완료되지 않았습니다.',
     });
     return true;
   }
@@ -394,7 +422,11 @@ export class ImportProcessingSession {
     this.#update({
       canExecute,
       ...(inspection.blockers.length > 0
-        ? { message: inspection.blockers.join(' · ') }
+        ? {
+            message: [this.#snapshot.error, ...inspection.blockers]
+              .filter(Boolean)
+              .join(' · '),
+          }
         : {}),
     });
     return canExecute;
@@ -585,6 +617,21 @@ export class ImportProcessingSession {
     }
     this.#applyDetail(result.data);
   }
+  /** 명시 재시작은 확정 실패만 재실행하고, 미확정 요청은 같은 영수증부터 확인합니다. */
+  restart = async (): Promise<void> => {
+    if (this.#snapshot.busy || this.#snapshot.scopeInvalid) return;
+    if (this.#snapshot.canRetryConversion) {
+      await this.retryConversion();
+      return;
+    }
+    if (this.#snapshot.canPrepare) {
+      await this.begin();
+      return;
+    }
+    const executed = this.#autoExecuted;
+    await this.refresh();
+    if (executed && this.#snapshot.canExecute) await this.execute();
+  };
   /** 사용자가 남은 추출을 다시 누르는 경우에도 같은 확인 절차를 거칩니다. */
   execute = async (): Promise<void> => {
     if (!this.#snapshot.canExecute || !this.#jobId) return;
