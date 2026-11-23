@@ -1,7 +1,10 @@
 import { Button } from '@renderer/shared/ui/Button';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
+import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
+import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
+import type { ImportProcessingSession } from '../model/ImportProcessingSession';
 import type { ImportScope } from '../api/importRegistration.api';
 import { importScopeKey } from '../api/importRegistration.api';
 import {
@@ -13,12 +16,110 @@ import { useImportScope } from '../model/useImportScope';
 import { ImportDocumentForm } from './ImportDocumentForm';
 import { ImportDocumentProgress } from './ImportDocumentProgress';
 import styles from './ImportDocumentContent.module.scss';
-import {
-  importProcessingSession,
-  readSourceProcessingSession,
-} from '../model/importProcessingSessions';
+import { importProcessingSession } from '../model/importProcessingSessions';
+import { findSourceTask } from '../api/importProcessing.api';
+import type { ImportProcessingResult } from '../model/importProcessing.types';
 
 type ImportWorkspaceProps = { scope: ImportScope; onRefreshScope: () => void };
+type RegisteredTaskProps = {
+  session: ImportProcessingSession;
+  onLeave: () => void;
+};
+type LegacySourceTaskProps = {
+  scope: ImportScope;
+  sourceId: string;
+  version: string;
+};
+
+/** 이전 등록 진행 주소는 메모리 수명과 무관하게 보존된 같은 작업으로 연결합니다. */
+function LegacySourceTask({
+  scope,
+  sourceId,
+  version,
+}: LegacySourceTaskProps): JSX.Element {
+  const active = useWorkspaceActivity();
+  const [result, setResult] = useState<ImportProcessingResult<
+    string | null
+  > | null>(null);
+  useEffect((): (() => void) => {
+    let current = true;
+    if (active)
+      void findSourceTask(scope, sourceId, version).then(
+        (next: ImportProcessingResult<string | null>): void => {
+          if (current) setResult(next);
+        },
+      );
+    return (): void => {
+      current = false;
+    };
+  }, [active, scope, sourceId, version]);
+  if (active && result?.ok && result.data)
+    return (
+      <Navigate
+        to={documentTaskPath(result.data)}
+        replace
+        state={{ workflowReturnTo: '/tasks' }}
+      />
+    );
+  return (
+    <section
+      className={styles.notice}
+      role={result && !result.ok ? 'alert' : 'status'}
+    >
+      <p>
+        {!result
+          ? '보관된 작업을 확인하고 있습니다…'
+          : result.ok
+            ? '이 기기의 해당 작업 기록을 찾지 못했습니다. 원본 상세에서 기존 분석 기록을 확인해 주세요.'
+            : result.error.message}
+      </p>
+      <Link to={`/source?${new URLSearchParams({ sourceId, version })}`}>
+        등록 원본 열기
+      </Link>
+      <Link to="/tasks">작업 목록</Link>
+    </section>
+  );
+}
+
+/** 등록 요청이 만든 작업으로 이동하며 다시 등록 화면을 열면 새 입력을 제공합니다. */
+function RegisteredTask({
+  session,
+  onLeave,
+}: RegisteredTaskProps): JSX.Element {
+  const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const active = useWorkspaceActivity();
+  const navigate = useNavigate();
+  useEffect((): void => {
+    if (!active || !snapshot.taskId) return;
+    void navigate(documentTaskPath(snapshot.taskId), {
+      replace: true,
+      state: { workflowReturnTo: '/tasks' },
+    });
+    onLeave();
+  }, [active, navigate, onLeave, snapshot.taskId]);
+  return (
+    <section
+      className={styles.notice}
+      role={snapshot.error ? 'alert' : 'status'}
+    >
+      <p>
+        {snapshot.error ??
+          '원본을 보관했습니다. 작업 화면을 준비하고 있습니다…'}
+      </p>
+      {snapshot.error && (
+        <Button
+          disabled={snapshot.busy || snapshot.scopeInvalid}
+          onClick={(): void => {
+            void session.begin();
+          }}
+        >
+          작업 준비 다시 시도
+        </Button>
+      )}
+      <Link to="/tasks">작업 목록</Link>
+    </section>
+  );
+}
 
 /** 권한 범위별 입력과 원본 저장 이후 처리를 별도 수명으로 표시합니다. */
 function ImportWorkspace({
@@ -29,34 +130,17 @@ function ImportWorkspace({
     (): ImportRegistrationSession => registrationSession(scope),
   );
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
-  const [parameters, setParameters] = useSearchParams();
+  const [parameters] = useSearchParams();
   const sourceId = parameters.get('sourceId');
   const version = parameters.get('version');
   if (sourceId && version) {
-    const processing = readSourceProcessingSession(scope, sourceId, version);
-    return processing ? (
-      <ImportDocumentProgress
+    return (
+      <LegacySourceTask
         key={`${sourceId}:${version}`}
         scope={scope}
-        registered={processing.registered}
-        targetDocument={processing.targetDocument}
-        session={processing.session}
-        onNewRegistration={(): void => {
-          setSession(newRegistrationSession(scope));
-          setParameters({});
-        }}
+        sourceId={sourceId}
+        version={version}
       />
-    ) : (
-      <section className={styles.notice} role="status">
-        <h2>이 기기의 진행 기록을 찾지 못했습니다</h2>
-        <p>
-          앱을 다시 열었거나 작업 범위가 바뀌었습니다. 원본에서 분석 작업을 다시
-          확인해 주세요.
-        </p>
-        <Link to={`/source?${new URLSearchParams({ sourceId, version })}`}>
-          등록 원본 열기
-        </Link>
-      </section>
     );
   }
   if (state.scopeInvalid)
@@ -78,6 +162,14 @@ function ImportWorkspace({
         <Link to="/settings">연결하기</Link>
       </section>
     );
+  if (state.completed)
+    if (scope.canPrepare)
+      return (
+        <RegisteredTask
+          session={importProcessingSession(scope, state.completed, state.draft)}
+          onLeave={(): void => setSession(newRegistrationSession(scope))}
+        />
+      );
   if (state.completed)
     return (
       <ImportDocumentProgress

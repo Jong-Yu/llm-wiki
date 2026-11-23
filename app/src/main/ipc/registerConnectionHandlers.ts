@@ -43,6 +43,11 @@ import { ResultDraftService } from '@main/backend/ResultDraftService';
 import { registerAnalysisExecutionHandlers } from './registerAnalysisExecutionHandlers';
 import { registerResultDraftHandlers } from './registerResultDraftHandlers';
 import { AnalysisService } from '@main/backend/AnalysisService';
+import { DocumentTaskService } from '@main/backend/DocumentTaskService';
+import { SourceConversionService } from '@main/backend/SourceConversionService';
+import { registerDocumentTaskHandlers } from './registerDocumentTaskHandlers';
+import type { SourceConversionReadRequest } from '@contracts/sourceConversion.contract';
+import type { AnalysisReadRequest } from '@contracts/analysis.contract';
 import { ArtifactService } from '@main/backend/ArtifactService';
 import { TemplateService } from '@main/backend/TemplateService';
 import { registerTemplateHandlers } from './registerTemplateHandlers';
@@ -175,7 +180,36 @@ export async function registerConnectionHandlers(
     rendererLocation,
     new TemplateService(service),
   );
-  const analysis = new AnalysisService(service, recovery);
+  const taskRecovery = new RecoveryService(
+    service,
+    new ProtectedRecoveryStore(
+      join(app.getPath('userData'), 'document-task-history'),
+      createConnectionCipher(),
+      4096,
+    ),
+  );
+  const documentTasks = new DocumentTaskService(service, taskRecovery);
+  const analysis = new AnalysisService(
+    service,
+    recovery,
+    undefined,
+    documentTasks,
+  );
+  const conversion = new SourceConversionService(
+    service,
+    { workRoot: join(app.getPath('userData'), 'source-conversions') },
+    recovery,
+    documentTasks,
+  );
+  documentTasks.connect({
+    conversion: (
+      request: SourceConversionReadRequest,
+    ): ReturnType<SourceConversionService['read']> => conversion.read(request),
+    analysis: (
+      request: AnalysisReadRequest,
+    ): ReturnType<AnalysisService['read']> => analysis.read(request),
+  });
+  registerDocumentTaskHandlers(getWindow, rendererLocation, documentTasks);
   const questions = new QuestionRunService(service, undefined, recovery);
   registerQuestionRunHandlers(getWindow, rendererLocation, questions);
   const proposals = new AnalysisProposalsApi(service);
@@ -203,6 +237,7 @@ export async function registerConnectionHandlers(
     getWindow,
     rendererLocation,
     recovery,
+    conversion,
   );
   registerAnalysisExecutionHandlers(getWindow, rendererLocation, analysis);
   registerResultDraftHandlers(

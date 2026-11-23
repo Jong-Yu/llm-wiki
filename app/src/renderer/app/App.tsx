@@ -14,6 +14,7 @@ import { AnalysisProposalPage } from '@renderer/pages/analysis/AnalysisProposalP
 import { AiSessionsPage } from '@renderer/pages/sessions/AiSessionsPage';
 import { SessionHistoryPage } from '@renderer/pages/sessions/SessionHistoryPage';
 import { AnalysisJobPage } from '@renderer/pages/jobs/AnalysisJobPage';
+import { DocumentTasksPage } from '@renderer/pages/tasks/DocumentTasksPage';
 import { ReviewQueuePage } from '@renderer/pages/review/ReviewQueuePage';
 import { UserGuidePage } from '@renderer/pages/guide/UserGuidePage';
 import { WorkspacePage } from '@renderer/shared/ui/WorkspacePage';
@@ -78,6 +79,7 @@ function renderWorkspaceRoutes(location: Location): JSX.Element {
       <Route path="/sessions" element={<AiSessionsPage />} />
       <Route path="/sessions/history" element={<SessionHistoryPage />} />
       <Route path="/jobs" element={<AnalysisJobPage />} />
+      <Route path="/tasks" element={<DocumentTasksPage />} />
       <Route path="/settings" element={<ConnectionSettingsPage />} />
       <Route path="/guide" element={<UserGuidePage />} />
       <Route path="*" element={<MissingPage />} />

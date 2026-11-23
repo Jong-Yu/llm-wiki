@@ -206,9 +206,15 @@ export function SourceDetail({
       aria-label="등록 원본 상세"
     >
       <HeaderActions>
-        {detail && analysisView?.progressPath && !analysisView.jobId && (
-          <Link className={styles.primary} to={analysisView.progressPath}>
-            진행·오류 보기
+        {detail && analysisView?.progressPath && (
+          <Link
+            className={styles.primary}
+            to={analysisView.progressPath}
+            state={{
+              workflowReturnTo: `/source?${new URLSearchParams({ sourceId, version })}`,
+            }}
+          >
+            작업 보기
           </Link>
         )}
         {detail &&
@@ -226,7 +232,7 @@ export function SourceDetail({
               분석 시작
             </Button>
           )}
-        {detail && analysisView?.jobId && (
+        {detail && analysisView?.jobId && !analysisView.progressPath && (
           <Link
             className={styles.primary}
             to={`/jobs?jobId=${encodeURIComponent(analysisView.jobId)}`}

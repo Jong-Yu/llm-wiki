@@ -25,6 +25,8 @@ import { useResolvedTheme } from '@renderer/shared/theme/useThemePreference';
 import { useRouteTitles } from '@renderer/shared/lib/routeTitle';
 import { HeaderActionsProvider } from '@renderer/shared/lib/headerActions';
 import { documentEvidenceReturnTo } from '@renderer/shared/lib/documentEvidence';
+import { workflowReturnTo } from '@renderer/shared/lib/workflowNavigation';
+import { DocumentTaskActivity } from '@renderer/pages/tasks/DocumentTaskActivity';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import {
   workspaceBreadcrumb,
@@ -55,7 +57,6 @@ const navigation: readonly NavigationItem[] = [
       '/register',
       '/document',
       '/source',
-      '/jobs',
       '/analysis-proposals',
     ],
   },
@@ -84,10 +85,10 @@ const navigation: readonly NavigationItem[] = [
     routes: ['/chat', '/artifact'],
   },
   {
-    path: '/sessions',
-    label: 'AI 세션',
+    path: '/tasks',
+    label: '작업',
     icon: 'bot',
-    routes: ['/sessions', '/sessions/history'],
+    routes: ['/tasks', '/jobs', '/sessions', '/sessions/history'],
   },
 ];
 
@@ -105,6 +106,7 @@ const pageTitles: Readonly<Record<string, string>> = {
   '/sessions': 'AI 세션',
   '/sessions/history': '지난 기록',
   '/jobs': '분석 작업',
+  '/tasks': '작업',
   '/settings': '연결 설정',
   '/guide': '사용자 가이드',
 };
@@ -342,13 +344,15 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
   const navigate = useNavigate();
   const [switching, setSwitching] = useState<boolean>(false);
   /** 하위 화면에서만 뒤로가기를 보입니다. 맨 위 메뉴 화면은 돌아갈 곳이 없습니다. */
-  const canGoUp = breadcrumb.length > 1;
+  const canGoUp =
+    breadcrumb.length > 1 || workflowReturnTo(location.state) !== null;
   /** 근거 문서는 검증된 탐색 위치로, 나머지는 주소 기록과 무관하게 위치 경로의 위 단계로 돌아갑니다. */
   const goBack = (): void => {
     const returnTo =
-      location.pathname === '/document'
+      workflowReturnTo(location.state) ??
+      (location.pathname === '/document'
         ? documentEvidenceReturnTo(location.state)
-        : null;
+        : null);
     if (returnTo) {
       void navigate(returnTo);
       return;
@@ -639,6 +643,7 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
         </span>
         <div className={styles.sessionStatus}>
           <AiSessionHeader
+            activity={<DocumentTaskActivity />}
             connectionId={
               snapshot?.status === 'connected' ? snapshot.connectionId : null
             }

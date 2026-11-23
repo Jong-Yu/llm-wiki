@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import type { AiActivity } from '@contracts/aiSessions.contract';
 import { Link } from 'react-router';
 import { getAiConnectionPresentation } from '@renderer/shared/lib/useAiConnection';
@@ -13,7 +13,10 @@ import { primaryUsageWindow } from '../model/sessionPresentation';
 import { UsageBar } from './UsageBar';
 import styles from './SessionActivity.module.scss';
 
-type AiSessionHeaderProps = { connectionId: string | null };
+type AiSessionHeaderProps = {
+  connectionId: string | null;
+  activity?: ReactNode;
+};
 const statusColors = {
   ok: 'var(--wiki-color-status-success)',
   info: 'var(--wiki-color-relation-machine)',
@@ -24,6 +27,7 @@ const statusColors = {
 /** 헤더에는 전역 실행 수와 실제 계정 한도만 간결하게 표시합니다. */
 export function AiSessionHeader({
   connectionId,
+  activity,
 }: AiSessionHeaderProps): JSX.Element {
   const model = useSessionActivity(connectionId);
   const connection = useAiConnection();
@@ -80,27 +84,29 @@ export function AiSessionHeader({
   const low = window !== null && window.remainingPercent <= 20;
   return (
     <div className={styles.header}>
-      <Link
-        to="/sessions"
-        className={styles.sessionLink}
-        aria-label={`AI 세션${count ? ` ${count} · 실행 중` : ''}${newResults ? ` · 새 결과 ${newResults}` : ''} 목록`}
-      >
-        <span
-          className={
-            count
-              ? styles.runningDot
-              : newResults
-                ? styles.doneDot
-                : styles.idleDot
-          }
-          aria-hidden="true"
-        />
-        <span>
-          AI 세션{count ? ` ${count}` : ''}
-          {!count && newResults ? ` · 새 결과 ${newResults}` : ''}{' '}
-          <span aria-hidden="true">›</span>
-        </span>
-      </Link>
+      {activity ?? (
+        <Link
+          to="/sessions"
+          className={styles.sessionLink}
+          aria-label={`AI 세션${count ? ` ${count} · 실행 중` : ''}${newResults ? ` · 새 결과 ${newResults}` : ''} 목록`}
+        >
+          <span
+            className={
+              count
+                ? styles.runningDot
+                : newResults
+                  ? styles.doneDot
+                  : styles.idleDot
+            }
+            aria-hidden="true"
+          />
+          <span>
+            AI 세션{count ? ` ${count}` : ''}
+            {!count && newResults ? ` · 새 결과 ${newResults}` : ''}{' '}
+            <span aria-hidden="true">›</span>
+          </span>
+        </Link>
+      )}
       {connectionId && (
         <Link
           to={

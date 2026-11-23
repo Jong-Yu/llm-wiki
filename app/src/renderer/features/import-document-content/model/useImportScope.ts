@@ -16,11 +16,17 @@ export function useImportScope(): ImportScopeModel {
     });
   }, []);
   useEffect((): (() => void) => {
+    const changed = (): void => {
+      setState({ status: 'loading' });
+      refresh();
+    };
     refresh();
     window.addEventListener('focus', refresh);
+    window.addEventListener('wiki-connection-changed', changed);
     return (): void => {
       generation.current += 1;
       window.removeEventListener('focus', refresh);
+      window.removeEventListener('wiki-connection-changed', changed);
     };
   }, [refresh]);
   return { state, refresh };

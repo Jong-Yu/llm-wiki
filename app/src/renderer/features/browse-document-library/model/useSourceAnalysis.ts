@@ -58,7 +58,7 @@ export function useSourceAnalysis(
     const request = ++generation.current;
     pending.current = request;
     try {
-      const next = await readSourceAnalysisIndex(connectionId);
+      const next = await readSourceAnalysisIndex(connectionId, scope);
       if (request !== generation.current) return;
       const fingerprint = JSON.stringify([next.complete, [...next.bySource]]);
       if (
@@ -136,7 +136,7 @@ export function useSourceAnalysis(
     const request = generation.current;
     try {
       // 목록이 오래됐을 수 있어 시작 직전에 서버 작업을 다시 읽고 중복 접수를 막습니다.
-      const fresh = await readSourceAnalysisIndex(connectionId);
+      const fresh = await readSourceAnalysisIndex(connectionId, scope);
       if (request !== generation.current) return;
       if (fresh.bySource.has(key)) {
         setIndex(fresh);
@@ -172,12 +172,19 @@ export function useSourceAnalysis(
   const viewOf = (item: LibrarySourceItem): SourceAnalysisView => {
     const key = sourceAnalysisKey(item.sourceId, item.sourceVersion);
     const entry = index?.bySource.get(key);
-    const progressPath = scope
+    const localPath = scope
       ? (starter.progressPath?.(item, scope) ?? null)
       : null;
-    if (starting.has(key) || (!!scope && starter.inFlight(item, scope)))
+    const progressPath = entry?.progressPath ?? localPath;
+    if (
+      starting.has(key) ||
+      (!!scope &&
+        starter.inFlight(item, scope) &&
+        (!entry?.progressPath || entry.progressPath === localPath))
+    )
       return { kind: 'running', jobId: entry?.jobId ?? null, progressPath };
-    if (entry) return { kind: entry.kind, jobId: entry.jobId, progressPath };
+    if (entry)
+      return { kind: entry.kind, jobId: entry.jobId || null, progressPath };
     return {
       kind: progressPath ? 'attention' : index?.complete ? 'none' : 'unknown',
       jobId: null,

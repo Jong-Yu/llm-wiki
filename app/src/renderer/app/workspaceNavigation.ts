@@ -19,6 +19,8 @@ export function workspacePageKey(pathname: string, search: string): string {
       return `proposal:${query.get('document') ?? ''}:${query.get('proposalId') ?? ''}`;
     case '/jobs':
       return `job:${query.get('jobId') ?? ''}`;
+    case '/tasks':
+      return `task:${query.get('taskId') ?? 'list'}`;
     case '/documents':
     case '/register':
     case '/ontology':
@@ -60,6 +62,7 @@ export function workspaceParentLocation(
     return `/document?path=${encodeURIComponent(document)}`;
   if (pathname === '/jobs' || pathname === '/sessions/history')
     return '/sessions';
+  if (pathname === '/tasks') return '/tasks';
   if (pathname === '/artifact' || pathname === '/chat') return '/chat';
   return '/documents';
 }
@@ -133,6 +136,17 @@ export function workspaceBreadcrumb(
     }
     case '/jobs':
       return [{ label: 'AI 세션', to: '/sessions' }, { label: '분석 작업' }];
+    case '/tasks':
+      return query.get('taskId')
+        ? [
+            { label: '작업', to: '/tasks' },
+            {
+              label:
+                titleOf(`task:${query.get('taskId') ?? ''}`) ??
+                '문서 처리 작업',
+            },
+          ]
+        : [{ label: '작업' }];
     case '/artifact':
       return [
         { label: 'AI 채팅', to: '/chat' },

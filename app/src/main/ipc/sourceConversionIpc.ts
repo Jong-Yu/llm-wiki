@@ -20,14 +20,17 @@ export function registerSourceConversionHandlers(
   getWindow: () => BrowserWindow | null,
   rendererLocation: string,
   recovery?: RecoveryService,
+  providedService?: SourceConversionService,
 ): () => Promise<void> {
-  const service = new SourceConversionService(
-    connection,
-    {
-      workRoot: join(app.getPath('userData'), 'source-conversions'),
-    },
-    recovery,
-  );
+  const service =
+    providedService ??
+    new SourceConversionService(
+      connection,
+      {
+        workRoot: join(app.getPath('userData'), 'source-conversions'),
+      },
+      recovery,
+    );
   /** 채널별 요청 검사 전에 sender와 인자 개수를 확인합니다. */
   const register = (
     channel: string,

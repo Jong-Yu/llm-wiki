@@ -65,6 +65,7 @@ export const analysisExecuteRequestSchema = analysisReadRequestSchema.extend({
 });
 export const analysisStartRequestSchema = z.strictObject({
   connectionId: text,
+  taskId: id.optional(),
   sourceId: id,
   sourceVersion: id,
   sourceSha256: revision,

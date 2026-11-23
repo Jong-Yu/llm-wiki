@@ -1,5 +1,11 @@
 import type { AnalysisJob } from '@contracts/analysis.contract';
 import { analysisGateway } from '@renderer/platform/analysis';
+import {
+  documentTasksGateway,
+  hasDocumentTaskBridge,
+} from '@renderer/platform/documentTasks';
+import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
+import type { LibraryScope } from '../model/documentLibrary.types';
 
 /** 원본 목록 행에 보이는 분석 상태입니다. none은 이 판본에 접수된 작업이 없다는 뜻입니다. */
 export type SourceAnalysisKind =
@@ -11,6 +17,7 @@ export type SourceAnalysisKind =
 export type SourceAnalysis = {
   kind: Exclude<SourceAnalysisKind, 'none'>;
   jobId: string;
+  progressPath?: string;
 };
 export type SourceAnalysisIndex = {
   /** `sourceId:sourceVersion` 키별 대표 작업입니다. */
@@ -21,13 +28,6 @@ export type SourceAnalysisIndex = {
 
 /** 읽는 작업 페이지의 상한입니다(페이지당 20건). 초과하면 불완전으로 표시합니다. */
 const maxPages = 20;
-/** 한 원본 판본에 여러 작업이 있을 때의 표시 우선순위입니다. */
-const priority: Record<SourceAnalysis['kind'], number> = {
-  running: 4,
-  complete: 3,
-  attention: 2,
-  pending: 1,
-};
 
 export function sourceAnalysisKey(
   sourceId: string,
@@ -59,6 +59,7 @@ export function sourceAnalysisKind(job: AnalysisJob): SourceAnalysis['kind'] {
 /** 작업 목록을 모두 읽어 원본 판본별 대표 작업을 정합니다. 조회는 새 실행을 만들지 않습니다. */
 export async function readSourceAnalysisIndex(
   connectionId: string,
+  scope?: LibraryScope,
 ): Promise<SourceAnalysisIndex> {
   const best = new Map<string, { entry: SourceAnalysis; createdAt: string }>();
   let cursor: string | null = null;
@@ -83,17 +84,75 @@ export async function readSourceAnalysisIndex(
         jobId: job.job_id,
       };
       const current = best.get(key);
-      if (
-        !current ||
-        priority[entry.kind] > priority[current.entry.kind] ||
-        (priority[entry.kind] === priority[current.entry.kind] &&
-          job.created_at > current.createdAt)
-      )
+      if (!current || job.created_at > current.createdAt)
         best.set(key, { entry, createdAt: job.created_at });
     }
     cursor = value.nextCursor;
     if (cursor === null) break;
     if (page === maxPages - 1) complete = false;
+  }
+  if (scope && hasDocumentTaskBridge()) {
+    try {
+      const records = await documentTasksGateway.list({
+        connectionId,
+        expectedScope: {
+          userId: scope.userId,
+          tenant: scope.tenant,
+          profileId: scope.profileId,
+          policyRevision: scope.policyRevision,
+          ...(scope.accessRevision
+            ? { accessRevision: scope.accessRevision }
+            : {}),
+        },
+      });
+      if (!records.ok) complete = false;
+      else
+        for (const task of records.data.items) {
+          const key = sourceAnalysisKey(
+            task.source.sourceId,
+            task.source.sourceVersion,
+          );
+          const current = best.get(key);
+          if (
+            current &&
+            current.entry.jobId !== task.registration.jobId &&
+            current.createdAt > task.createdAt
+          )
+            continue;
+          const conversion = task.conversions.at(-1);
+          const summary = task.analysisSummary;
+          const kind: SourceAnalysis['kind'] =
+            current?.entry.jobId === task.registration.jobId
+              ? current.entry.kind
+              : task.registration.state === 'unconfirmed'
+                ? 'attention'
+                : conversion &&
+                    ['running', 'cancelling'].includes(conversion.state)
+                  ? 'running'
+                  : conversion && conversion.state !== 'complete'
+                    ? 'attention'
+                    : summary?.resultStatus === 'complete'
+                      ? 'complete'
+                      : summary?.reportedStatus === 'failed' ||
+                          summary?.reportedStatus === 'stopped' ||
+                          summary?.state === 'cancelled' ||
+                          task.registration.state === 'rejected'
+                        ? 'attention'
+                        : task.registration.jobId
+                          ? 'attention'
+                          : 'pending';
+          best.set(key, {
+            createdAt: task.createdAt,
+            entry: {
+              kind,
+              jobId: task.registration.jobId ?? '',
+              progressPath: documentTaskPath(task.taskId),
+            },
+          });
+        }
+    } catch {
+      complete = false;
+    }
   }
   return {
     bySource: new Map(

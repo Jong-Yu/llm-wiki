@@ -1,0 +1,12 @@
+{
+  "extends": "../../config/typescript/tsconfig.main.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@contracts/*": ["../../src/shared/contracts/*"],
+      "@main/*": ["../../src/main/*"],
+      "@renderer/*": ["../../src/renderer/*"]
+    }
+  },
+  "include": ["./verify.ts", "../../src/renderer/env.d.ts"]
+}

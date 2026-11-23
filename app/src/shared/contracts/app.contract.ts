@@ -1,4 +1,5 @@
 import type { KnowledgeComparisonsBridge } from './knowledgeComparisons.contract';
+import type { DocumentTasksBridge } from './documentTasks.contract';
 import type { AiSessionsBridge } from './aiSessions.contract';
 import type { RecoveryBridge } from './recovery.contract';
 import type { ProposalExecutionBridge } from './proposalExecution.contract';
@@ -37,6 +38,7 @@ export type GetAppInfoResult =
     };
 
 export type WikiBridge = {
+  documentTasks?: DocumentTasksBridge;
   templates?: TemplatesBridge;
   knowledgeComparisons?: KnowledgeComparisonsBridge;
   aiSessions?: AiSessionsBridge;

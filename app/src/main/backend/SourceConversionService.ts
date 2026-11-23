@@ -1,4 +1,5 @@
 import { matchesExpectedScope } from './readApi';
+import type { DocumentTaskService } from './DocumentTaskService';
 import { sameAccessRevision } from '@contracts/connection.contract';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +8,9 @@ import { join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import {
   conversionReportSchema,
+  conversionSourceSchema,
   parseSourceConversionResult,
+  sourceConversionRunSchema,
 } from '@contracts/sourceConversion.contract';
 import type {
   SourceConversionReadRequest,
@@ -48,6 +51,9 @@ type StoredRun = {
   value: SourceConversionRun;
   cancelFile: string;
   submitted: boolean;
+  taskId?: string;
+  journal: RecoveryEntry | null;
+  persistence: Promise<void>;
 };
 type Running = {
   record: StoredRun;
@@ -70,6 +76,7 @@ function key(
     request.sourceVersion,
     request.sourceSha256,
     request.registrationRevision,
+    request.taskId ?? null,
   ]);
 }
 /** 명시 실행만 개인 Python 변환기를 시작하고 저장 사실은 별도 GET으로 확인합니다. */
@@ -83,6 +90,7 @@ export class SourceConversionService {
   >;
   #options: SourceConversionServiceOptions;
   #recovery: ProcessRecovery | undefined;
+  #tasks: DocumentTaskService | undefined;
   #runs = new Map<string, StoredRun>();
   #running: Running | null = null;
   #starting = false;
@@ -102,10 +110,12 @@ export class SourceConversionService {
     >,
     options: SourceConversionServiceOptions,
     recovery?: ProcessRecovery,
+    tasks?: DocumentTaskService,
   ) {
     this.#connection = connection;
     this.#options = options;
     this.#recovery = recovery;
+    this.#tasks = tasks;
     connection.onScopeChanged((): void => {
       for (const request of this.#requests) request.abort();
       void this.stop();
@@ -155,6 +165,19 @@ export class SourceConversionService {
     try {
       const context = await this.#context(request, true);
       if ('ok' in context) return context;
+      if (request.taskId) {
+        if (!this.#tasks) throw new Error('task_service_missing');
+        await this.#tasks.assertConversion(context, request.taskId, request);
+        // 새 작업 주소를 만들었다고 구 버전의 미확인 제출 보호를 우회하지 않습니다.
+        const legacy = await this.#legacy(context, request);
+        if (legacy?.value.receiptState === 'unconfirmed')
+          await this.#confirm(legacy);
+        if (legacy?.value.receiptState === 'unconfirmed')
+          return apiFailure(
+            'report_unconfirmed',
+            '이 원본의 이전 변환 보고가 미확인 상태입니다. 기존 보고를 확인하기 전에는 새 변환을 시작하지 않습니다.',
+          );
+      }
       const journal = await this.#restore(context, request);
       const previous = this.#runs.get(key(context, request));
       if (previous?.value.receiptState === 'unconfirmed')
@@ -204,6 +227,9 @@ export class SourceConversionService {
         context,
         cancelFile: join(execution.directory, 'cancel'),
         submitted: false,
+        taskId: request.taskId,
+        journal: journal ?? null,
+        persistence: Promise.resolve(),
         value: {
           requestId: randomUUID().replaceAll('-', ''),
           source: {
@@ -224,14 +250,26 @@ export class SourceConversionService {
         },
       };
       try {
-        await writeProcessJournal(
-          this.#recovery,
+        record.journal = await writeProcessJournal(
+          request.taskId ? this.#tasks?.recovery : this.#recovery,
           context,
           'pending-source-conversion',
-          `source:${request.sourceId}:${request.sourceVersion}`,
-          { requestId: record.value.requestId, source: record.value.source },
+          request.taskId
+            ? `task:${request.taskId}`
+            : `source:${request.sourceId}:${request.sourceVersion}`,
+          {
+            requestId: record.value.requestId,
+            source: record.value.source,
+            snapshot: { ...record.value, report: null },
+          },
           journal?.revision ?? null,
         );
+        if (record.taskId)
+          await this.#tasks?.observeConversion(
+            context,
+            record.taskId,
+            record.value,
+          );
         if (
           epoch !== this.#epoch ||
           !this.#connection.isAnalysisCurrent(context)
@@ -283,10 +321,21 @@ export class SourceConversionService {
           if (old) this.#runs.delete(old[0]);
         }
         return this.#result(record);
-      } catch {
+      } catch (error: unknown) {
+        record.value.state = 'failed';
+        record.value.receiptState = 'not_submitted';
+        record.value.message =
+          '변환 실행기를 시작하지 못했습니다. 원본은 보존됩니다.';
+        record.value.diagnosticCodes = ['conversion_start_failed'];
+        await this.#persist(record);
         await execution.cleanupAuth().catch((): void => {
           record.value.cleanupWarning = true;
         });
+        if (error instanceof Error && error.message === 'recovery_too_large')
+          return apiFailure(
+            'task_storage_full',
+            '이 기기의 작업 기록 저장 공간이 가득 찼습니다. 기존 기록은 보존되며 변환은 시작하지 않았습니다.',
+          );
         return apiFailure(
           'conversion_start_failed',
           '변환 실행기를 시작하지 못했습니다. 설치 경로와 현재 연결을 확인해 주세요.',
@@ -302,6 +351,71 @@ export class SourceConversionService {
       this.#finishStart?.();
       this.#finishStart = undefined;
     }
+  }
+
+  /** 새 작업은 구 버전의 정확한 원본 guard만 찾고 다른 작업의 시도를 가져오지 않습니다. */
+  async #legacy(
+    context: AnalysisContext,
+    request: SourceConversionReadRequest,
+  ): Promise<StoredRun | null> {
+    const entries = await readProcessJournal(
+      this.#recovery,
+      context,
+      'pending-source-conversion',
+    );
+    const entry = entries.find(
+      (item: RecoveryEntry): boolean =>
+        item.key === `source:${request.sourceId}:${request.sourceVersion}`,
+    );
+    if (!entry) return null;
+    const value = z
+      .object({ source: conversionSourceSchema })
+      .parse(JSON.parse(entry.payload));
+    if (
+      value.source.sourceId !== request.sourceId ||
+      value.source.sourceVersion !== request.sourceVersion ||
+      value.source.sourceSha256 !== request.sourceSha256 ||
+      value.source.registrationRevision !== request.registrationRevision
+    )
+      return null;
+    const legacyRequest = { ...request, taskId: undefined };
+    await this.#restore(context, legacyRequest);
+    return this.#runs.get(key(context, legacyRequest)) ?? null;
+  }
+
+  /** 본문 없는 현재 관측을 순서대로 보관하고 실패한 저장은 경고로 남깁니다. */
+  #persist(record: StoredRun): Promise<void> {
+    const value = structuredClone(record.value);
+    record.persistence = record.persistence
+      .then(async (): Promise<void> => {
+        if (record.taskId)
+          await this.#tasks?.observeConversion(
+            record.context,
+            record.taskId,
+            value,
+          );
+        record.journal = await writeProcessJournal(
+          record.taskId ? this.#tasks?.recovery : this.#recovery,
+          record.context,
+          'pending-source-conversion',
+          record.taskId
+            ? `task:${record.taskId}`
+            : `source:${value.source.sourceId}:${value.source.sourceVersion}`,
+          {
+            requestId: value.requestId,
+            source: value.source,
+            snapshot: { ...value, report: null },
+          },
+          record.journal?.revision ?? null,
+        );
+      })
+      .catch((error: unknown): void => {
+        record.value.historyWarning =
+          error instanceof Error && error.message === 'recovery_too_large'
+            ? '이 기기의 작업 기록 저장 공간이 가득 차 최신 진행을 보관하지 못했습니다. 원본·서버 결과는 보존되며 재시작 후 결과 확인이 필요합니다.'
+            : '최신 작업 진행을 이 기기에 보관하지 못했습니다. 원본·서버 결과는 보존되며 재시작 후 결과 확인이 필요합니다.';
+      });
+    return record.persistence;
   }
 
   /** 제한된 JSONL만 해석하고 CLI의 경로·stderr·원본 바이트는 renderer에 노출하지 않습니다. */
@@ -327,6 +441,7 @@ export class SourceConversionService {
             location: event.location,
           };
           if (event.stage === 'submit') record.submitted = true;
+          void this.#persist(record);
         } else if (event.type === 'error') {
           record.value.diagnosticCodes = [event.error.code];
         } else {
@@ -419,6 +534,7 @@ export class SourceConversionService {
               record.value.receiptState === 'unconfirmed'
             )
               await this.#confirm(record);
+            await this.#persist(record);
           })
           .finally((): void => {
             if (this.#running === running) this.#running = null;
@@ -513,15 +629,38 @@ export class SourceConversionService {
     request: SourceConversionReadRequest,
   ): Promise<RecoveryEntry | null> {
     const entries = await readProcessJournal(
-      this.#recovery,
+      request.taskId ? this.#tasks?.recovery : this.#recovery,
       context,
       'pending-source-conversion',
     );
     const entry = entries.find(
       (value: RecoveryEntry): boolean =>
-        value.key === `source:${request.sourceId}:${request.sourceVersion}`,
+        value.key ===
+        (request.taskId
+          ? `task:${request.taskId}`
+          : `source:${request.sourceId}:${request.sourceVersion}`),
     );
-    if (!entry) return null;
+    let attempt =
+      request.taskId && this.#tasks
+        ? await this.#tasks.conversion(context, request.taskId, request)
+        : null;
+    if (!entry && !attempt && request.taskId && this.#tasks) {
+      const legacy = await this.#legacy(context, request);
+      if (legacy) {
+        // 구 guard 파일을 이동·삭제하지 않고 같은 request ID의 관측만 새 작업에 연결합니다.
+        await this.#tasks.observeConversion(
+          context,
+          request.taskId,
+          legacy.value,
+        );
+        attempt = await this.#tasks.conversion(
+          context,
+          request.taskId,
+          request,
+        );
+      }
+    }
+    if (!entry && !attempt) return null;
     const value = z
       .object({
         requestId: z.string().regex(/^[a-f0-9]{32}$/),
@@ -531,8 +670,13 @@ export class SourceConversionService {
           sourceSha256: z.string(),
           registrationRevision: z.string(),
         }),
+        snapshot: sourceConversionRunSchema.nullish(),
       })
-      .parse(JSON.parse(entry.payload));
+      .parse(
+        entry
+          ? JSON.parse(entry.payload)
+          : { requestId: attempt?.requestId, source: attempt?.source },
+      );
     if (
       value.source.sourceId !== request.sourceId ||
       value.source.sourceVersion !== request.sourceVersion ||
@@ -540,26 +684,46 @@ export class SourceConversionService {
       value.source.registrationRevision !== request.registrationRevision
     )
       throw new Error('recovery_basis_changed');
-    if (!this.#runs.has(key(context, request)))
+    if (attempt && attempt.requestId !== value.requestId)
+      throw new Error('recovery_attempt_mismatch');
+    const snapshot =
+      value.snapshot ?? (attempt ? { ...attempt, report: null } : null);
+    if (!this.#runs.has(key(context, request))) {
+      const recovered: SourceConversionRun = snapshot
+        ? sourceConversionRunSchema.parse(snapshot)
+        : {
+            requestId: value.requestId,
+            source: value.source,
+            state: 'report_unconfirmed',
+            format: null,
+            progress: null,
+            report: null,
+            receiptState: 'unconfirmed',
+            reference: null,
+            message: conversionMessage('report_unconfirmed'),
+            diagnosticCodes: [],
+            cleanupWarning: false,
+          };
+      if (
+        ['running', 'cancelling', 'complete', 'partial'].includes(
+          recovered.state,
+        )
+      ) {
+        recovered.state = 'report_unconfirmed';
+        recovered.receiptState = 'unconfirmed';
+        recovered.message = conversionMessage('report_unconfirmed');
+      }
       this.#runs.set(key(context, request), {
         context,
         cancelFile: '',
         submitted: true,
-        value: {
-          requestId: value.requestId,
-          source: value.source,
-          state: 'report_unconfirmed',
-          format: null,
-          progress: null,
-          report: null,
-          receiptState: 'unconfirmed',
-          reference: null,
-          message: conversionMessage('report_unconfirmed'),
-          diagnosticCodes: [],
-          cleanupWarning: false,
-        },
+        taskId: request.taskId,
+        journal: entry ?? null,
+        persistence: Promise.resolve(),
+        value: recovered,
       });
-    return entry;
+    }
+    return entry ?? null;
   }
 
   /** 조회는 프로세스를 시작하지 않으며 미확정 보고만 동일 ID로 다시 확인합니다. */
@@ -580,8 +744,10 @@ export class SourceConversionService {
     if (
       record?.value.receiptState === 'unconfirmed' &&
       this.#running?.record !== record
-    )
+    ) {
       await this.#confirm(record);
+      await this.#persist(record);
+    }
     if (!this.#connection.isAnalysisCurrent(context))
       return apiFailure('scope_changed', '조회 중 연결이 변경되었습니다.');
     return this.#result(record);

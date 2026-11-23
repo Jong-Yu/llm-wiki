@@ -324,6 +324,9 @@ export function ImportDocumentProgress({
             )}
           </div>
         )}
+        {state.conversion?.historyWarning && (
+          <p role="status">{state.conversion.historyWarning}</p>
+        )}
         {state.cleanupWarningCount > 0 && (
           <p className={`${styles.notice} ${styles.warning}`} role="status">
             저장은 완료됐지만 임시 파일 정리 경고가 {state.cleanupWarningCount}

@@ -1,4 +1,21 @@
 import {
+  DOCUMENT_TASK_CHANNELS,
+  documentTaskCreateSchema,
+  documentTaskSessionSchema,
+  documentTaskReadSchema,
+  documentTaskResultSchema,
+  documentTaskListResultSchema,
+  documentTaskDetailResultSchema,
+} from '@contracts/documentTasks.contract';
+import type {
+  DocumentTaskCreateRequest,
+  DocumentTaskSession,
+  DocumentTaskReadRequest,
+  DocumentTaskResult,
+  DocumentTaskListResult,
+  DocumentTaskDetailResult,
+} from '@contracts/documentTasks.contract';
+import {
   UPDATE_CHANNELS,
   updateResultSchema,
 } from '@contracts/update.contract';
@@ -500,6 +517,35 @@ export function createWikiBridge(
       ): Promise<QuestionWebSearchResult> =>
         parseQuestionWebSearchResult(
           await invoke(QUESTION_RUN_CHANNELS.webSearch, request),
+        ),
+    },
+    documentTasks: {
+      create: async (
+        request: DocumentTaskCreateRequest,
+      ): Promise<DocumentTaskResult> =>
+        documentTaskResultSchema.parse(
+          await invoke(
+            DOCUMENT_TASK_CHANNELS.create,
+            documentTaskCreateSchema.parse(request),
+          ),
+        ),
+      list: async (
+        request: DocumentTaskSession,
+      ): Promise<DocumentTaskListResult> =>
+        documentTaskListResultSchema.parse(
+          await invoke(
+            DOCUMENT_TASK_CHANNELS.list,
+            documentTaskSessionSchema.parse(request),
+          ),
+        ),
+      read: async (
+        request: DocumentTaskReadRequest,
+      ): Promise<DocumentTaskDetailResult> =>
+        documentTaskDetailResultSchema.parse(
+          await invoke(
+            DOCUMENT_TASK_CHANNELS.read,
+            documentTaskReadSchema.parse(request),
+          ),
         ),
     },
     sourceConversion: {

@@ -14,6 +14,7 @@ import {
   sourceProcessingSession,
 } from './importProcessingSessions';
 import { baseNameFromTitle, targetWithNumber } from './importTargetName';
+import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
 
 export type RegisteredSource = Extract<DocumentListItem, { kind: 'source' }>;
 export type SourceAnalysisStartResult =
@@ -41,7 +42,8 @@ export function sourceAnalysisProgressPath(
 ): string | null {
   const session = sourceProcessingSession(item, scope);
   if (!session || session.getSnapshot().scopeInvalid) return null;
-  return `/register?${new URLSearchParams({ sourceId: item.sourceId, version: item.sourceVersion })}`;
+  const taskId = session.getSnapshot().taskId;
+  return taskId ? documentTaskPath(taskId) : null;
 }
 
 /** 처리 세션의 최종 상태를 사용자에게 알릴 한 줄로 바꿉니다. */

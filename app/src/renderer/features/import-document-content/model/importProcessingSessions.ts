@@ -4,6 +4,7 @@ import { importScopeKey } from '../api/importRegistration.api';
 import { ImportProcessingSession } from './ImportProcessingSession';
 import type { ImportRegisteredSource } from './importProcessing.types';
 import type { ImportDocumentValues } from './importDocument.schema';
+import type { DocumentTaskDetailResult } from '@contracts/documentTasks.contract';
 
 export type SourceProcessingSession = {
   scope: ImportScope;
@@ -12,6 +13,60 @@ export type SourceProcessingSession = {
   session: ImportProcessingSession;
 };
 const sessions = new Map<string, SourceProcessingSession>();
+const restoredSessions = new Map<string, ImportProcessingSession>();
+
+/** 작업 목록과 상세는 현재 범위에서 같은 실행 세션을 공유합니다. */
+export function listSourceProcessingSessions(
+  scope: SourceConversionScope,
+): readonly SourceProcessingSession[] {
+  return [...sessions.values()].filter(
+    (entry: SourceProcessingSession): boolean =>
+      importScopeKey(entry.scope) === importScopeKey(scope),
+  );
+}
+
+/** 재시작 후에는 보호 기록을 읽어 세션만 복원하며 begin을 호출하지 않습니다. */
+export function restoreProcessingSession(
+  scope: ImportScope,
+  detail: Extract<DocumentTaskDetailResult, { ok: true }>['data'],
+): ImportProcessingSession {
+  const task = detail.task;
+  const key = sessionKey(
+    scope,
+    task.source.sourceId,
+    task.source.sourceVersion,
+  );
+  const existing = sessions.get(key);
+  if (existing?.session.getSnapshot().taskId === task.taskId) {
+    existing.session.observeTask(detail);
+    return existing.session;
+  }
+  const taskKey = JSON.stringify([importScopeKey(scope), task.taskId]);
+  const restored = restoredSessions.get(taskKey);
+  if (restored) {
+    restored.observeTask(detail);
+    return restored;
+  }
+  const registered = { item: task.item, cleanupWarningCount: 0 };
+  const session = new ImportProcessingSession(
+    scope,
+    registered,
+    task.targetDocument,
+    true,
+    undefined,
+    detail,
+  );
+  restoredSessions.set(taskKey, session);
+  // 새 대상의 시도와 과거 작업을 동시에 열어도 원본의 현재 세션을 덮지 않습니다.
+  if (!existing)
+    sessions.set(key, {
+      scope,
+      registered,
+      targetDocument: task.targetDocument,
+      session,
+    });
+  return session;
+}
 
 /** 같은 접근 범위·원본 판본의 등록 후 처리와 목록에서 시작한 처리를 함께 찾습니다. */
 function sessionKey(

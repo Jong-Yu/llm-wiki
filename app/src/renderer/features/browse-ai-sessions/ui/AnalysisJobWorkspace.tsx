@@ -29,12 +29,22 @@ import {
   AnalysisReceiptDetails,
 } from './AnalysisReceiptDetails';
 
-type AnalysisJobWorkspaceProps = { jobId: string | null };
+type AnalysisJobWorkspaceProps = {
+  jobId: string | null;
+  embedded?: boolean;
+  workflowReturnTo?: string;
+  onDetailChange?: (detail: AnalysisDetail) => void;
+  allowExecution?: boolean;
+};
 type JobOperation = 'prepare' | 'execute' | 'stop' | 'cancel';
 
 /** 저장된 분석 작업을 직접 열고 조회·실행 준비·명시 실행·결과 확인을 같은 화면에서 처리합니다. */
 export function AnalysisJobWorkspace({
   jobId,
+  embedded = false,
+  workflowReturnTo,
+  onDetailChange,
+  allowExecution = true,
 }: AnalysisJobWorkspaceProps): JSX.Element {
   const active = useWorkspaceActivity();
   const [detail, setDetail] = useState<AnalysisDetail | null>(null);
@@ -52,6 +62,10 @@ export function AnalysisJobWorkspace({
   const generation = useRef(0);
   const mounted = useRef(true);
   const valid = jobId !== null && /^[a-f0-9]{32}$/.test(jobId);
+  useEffect((): void => {
+    if (detail) onDetailChange?.(detail);
+  }, [detail, onDetailChange]);
+  const resultState = workflowReturnTo ? { workflowReturnTo } : undefined;
 
   const read = useCallback((): Promise<void> => {
     if (!jobId || !/^[a-f0-9]{32}$/.test(jobId) || pending.current)
@@ -131,6 +145,7 @@ export function AnalysisJobWorkspace({
 
   /** 조회한 작업 판본을 고정하고 오류 뒤에는 실행 준비를 다시 요구합니다. */
   async function operate(operation: JobOperation): Promise<void> {
+    if (!allowExecution) return;
     const session = scope.current;
     if (!session || !detail || !jobId || pending.current) return;
     pending.current = true;
@@ -200,12 +215,12 @@ export function AnalysisJobWorkspace({
   }
 
   return (
-    <div className={styles.root}>
+    <div className={embedded ? styles.embedded : styles.root}>
       <WorkspacePage
         title="분석 작업"
         actions={
           <>
-            {valid && (
+            {valid && !embedded && (
               <Button
                 variant="secondary"
                 disabled={busy}
@@ -225,42 +240,50 @@ export function AnalysisJobWorkspace({
           </p>
         ) : (
           <div className={styles.detail}>
-            <p className={styles.pageIntro}>
-              AI가 문서를 분석한 작업의 진행 상태, 저장 결과, 기존 지식과의 대조
-              결과를 확인하는 화면입니다.
-            </p>
+            {!embedded && (
+              <p className={styles.pageIntro}>
+                AI가 문서를 분석한 작업의 진행 상태, 저장 결과, 기존 지식과의
+                대조 결과를 확인하는 화면입니다.
+              </p>
+            )}
             {error && <p role="alert">{error}</p>}
             {busy && !detail && <AnalysisJobSkeleton />}
             {detail && (
               <>
-                <WorkspaceSection title="현재 작업">
+                <WorkspaceSection title={embedded ? '분석 실행' : '현재 작업'}>
                   <div className={styles.jobSummary}>
-                    <div>
-                      <h3
-                        className={styles.jobStatus}
-                        ref={statusHeading}
-                        tabIndex={-1}
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {detail.job.result_summary.status === 'complete' &&
-                        detail.local.status === 'running'
-                          ? '저장 완료 · 후속 AI 작업 진행 중'
-                          : analysisStatus(detail.job)}
-                      </h3>
-                      <p>{detail.local.message}</p>
-                    </div>
+                    {!embedded && (
+                      <div>
+                        <h3
+                          className={styles.jobStatus}
+                          ref={statusHeading}
+                          tabIndex={-1}
+                          aria-live="polite"
+                          aria-atomic="true"
+                        >
+                          {detail.job.result_summary.status === 'complete' &&
+                          detail.local.status === 'running'
+                            ? '저장 완료 · 후속 AI 작업 진행 중'
+                            : analysisStatus(detail.job)}
+                        </h3>
+                        <p>{detail.local.message}</p>
+                      </div>
+                    )}
                     <div className={styles.actions}>
                       <button
                         type="button"
-                        disabled={busy || detail.job.state === 'cancelled'}
+                        disabled={
+                          busy ||
+                          !allowExecution ||
+                          detail.job.state === 'cancelled'
+                        }
                         onClick={(): void => {
                           void operate('prepare');
                         }}
                       >
                         실행 가능 여부 확인
                       </button>
-                      {detail.local.status === 'running' && (
+                      {allowExecution && detail.local.status === 'running' && (
                         <button
                           type="button"
                           disabled={busy}
@@ -271,7 +294,8 @@ export function AnalysisJobWorkspace({
                           이 기기의 실행 중단
                         </button>
                       )}
-                      {detail.job.state !== 'cancelled' &&
+                      {allowExecution &&
+                        detail.job.state !== 'cancelled' &&
                         detail.job.result_summary.status !== 'complete' && (
                           <button
                             ref={cancelTrigger}
@@ -288,35 +312,39 @@ export function AnalysisJobWorkspace({
                         )}
                     </div>
                   </div>
-                  <div className={styles.factChips} aria-label="작업 정보">
-                    {detail.job.targets.map(
-                      (
-                        target: AnalysisDetail['job']['targets'][number],
-                      ): JSX.Element => (
-                        <Link
-                          key={target.document}
-                          className={styles.factChip}
-                          data-kind="link"
-                          to={`/document?path=${encodeURIComponent(target.document)}`}
-                        >
-                          <Icon name="file-text" size={14} />
-                          {documentDisplayName(target.document)}
-                        </Link>
-                      ),
-                    )}
-                    <Link
-                      className={styles.factChip}
-                      data-kind="link"
-                      to={`/source?sourceId=${detail.job.source_ref.source_id}&version=${detail.job.source_ref.source_version}`}
-                    >
-                      <Icon name="external-link" size={14} />
-                      분석 당시 원본 버전 열기
-                    </Link>
-                    <span className={styles.factChip}>
-                      결과 {detail.job.result_summary.saved_count} /{' '}
-                      {detail.job.result_summary.required_count} 저장
-                    </span>
-                  </div>
+                  {!embedded && (
+                    <div className={styles.factChips} aria-label="작업 정보">
+                      {detail.job.targets.map(
+                        (
+                          target: AnalysisDetail['job']['targets'][number],
+                        ): JSX.Element => (
+                          <Link
+                            key={target.document}
+                            className={styles.factChip}
+                            data-kind="link"
+                            to={`/document?path=${encodeURIComponent(target.document)}`}
+                            state={resultState}
+                          >
+                            <Icon name="file-text" size={14} />
+                            {documentDisplayName(target.document)}
+                          </Link>
+                        ),
+                      )}
+                      <Link
+                        className={styles.factChip}
+                        data-kind="link"
+                        to={`/source?sourceId=${detail.job.source_ref.source_id}&version=${detail.job.source_ref.source_version}`}
+                        state={resultState}
+                      >
+                        <Icon name="external-link" size={14} />
+                        분석 당시 원본 버전 열기
+                      </Link>
+                      <span className={styles.factChip}>
+                        결과 {detail.job.result_summary.saved_count} /{' '}
+                        {detail.job.result_summary.required_count} 저장
+                      </span>
+                    </div>
+                  )}
                   {detail.job.blockers.length > 0 &&
                     detail.job.result_summary.status !== 'complete' && (
                       <section className={styles.todo} aria-label="필요한 작업">
@@ -330,7 +358,7 @@ export function AnalysisJobWorkspace({
                         </ul>
                       </section>
                     )}
-                  {inspection && (
+                  {allowExecution && inspection && (
                     <section
                       className={styles.resultGroup}
                       aria-label="실행 준비 결과"
@@ -369,7 +397,7 @@ export function AnalysisJobWorkspace({
                       )}
                     </section>
                   )}
-                  {confirmCancel && (
+                  {allowExecution && confirmCancel && (
                     <section
                       id={cancelConfirmationId}
                       className={styles.resultGroup}
@@ -405,53 +433,57 @@ export function AnalysisJobWorkspace({
                     </section>
                   )}
                 </WorkspaceSection>
-                <WorkspaceSection title="저장 결과">
-                  {detail.receiptErrors.map(
-                    (
-                      failure: AnalysisDetail['receiptErrors'][number],
-                    ): JSX.Element => (
-                      <p role="alert" key={failure.requestId}>
-                        {failure.message}
-                      </p>
-                    ),
-                  )}
-                  {detail.receipts.length === 0 && (
-                    <p>확인된 저장 기록이 없습니다.</p>
-                  )}
-                  {detail.receipts.map(
-                    (
-                      receipt: AnalysisDetail['receipts'][number],
-                    ): JSX.Element => (
-                      <article
-                        className={styles.receipt}
-                        key={receipt.request_id}
-                      >
-                        <p>
-                          {receipt.saved === true
-                            ? '저장됨'
-                            : receipt.saved === false
-                              ? '저장되지 않음'
-                              : '저장 여부 미확인'}
+                <details open={embedded ? undefined : true}>
+                  <summary>분석 처리 기록</summary>
+                  <WorkspaceSection title="저장 결과">
+                    {detail.receiptErrors.map(
+                      (
+                        failure: AnalysisDetail['receiptErrors'][number],
+                      ): JSX.Element => (
+                        <p role="alert" key={failure.requestId}>
+                          {failure.message}
                         </p>
-                        {receipt.receipt && (
-                          <Link
-                            to={`/document?path=${encodeURIComponent(receipt.receipt.document)}`}
-                          >
-                            {documentDisplayName(receipt.receipt.document)}
-                          </Link>
-                        )}
-                        {receipt.cleanup_failures.length > 0 && (
+                      ),
+                    )}
+                    {detail.receipts.length === 0 && (
+                      <p>확인된 저장 기록이 없습니다.</p>
+                    )}
+                    {detail.receipts.map(
+                      (
+                        receipt: AnalysisDetail['receipts'][number],
+                      ): JSX.Element => (
+                        <article
+                          className={styles.receipt}
+                          key={receipt.request_id}
+                        >
                           <p>
-                            저장은 완료됐지만 임시 파일 정리 경고가 있습니다.
-                            저장을 반복하지 마세요.
+                            {receipt.saved === true
+                              ? '저장됨'
+                              : receipt.saved === false
+                                ? '저장되지 않음'
+                                : '저장 여부 미확인'}
                           </p>
-                        )}
-                        <AnalysisReceiptDetails receipt={receipt} />
-                      </article>
-                    ),
-                  )}
-                </WorkspaceSection>
-                <AnalysisJobContext job={detail.job} />
+                          {receipt.receipt && (
+                            <Link
+                              to={`/document?path=${encodeURIComponent(receipt.receipt.document)}`}
+                              state={resultState}
+                            >
+                              {documentDisplayName(receipt.receipt.document)}
+                            </Link>
+                          )}
+                          {receipt.cleanup_failures.length > 0 && (
+                            <p>
+                              저장은 완료됐지만 임시 파일 정리 경고가 있습니다.
+                              저장을 반복하지 마세요.
+                            </p>
+                          )}
+                          <AnalysisReceiptDetails receipt={receipt} />
+                        </article>
+                      ),
+                    )}
+                  </WorkspaceSection>
+                  <AnalysisJobContext job={detail.job} />
+                </details>
                 <KnowledgeComparisons
                   key={jobId}
                   jobId={jobId}

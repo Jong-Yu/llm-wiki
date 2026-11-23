@@ -111,6 +111,15 @@ import { ProposalExecutionService } from '@main/backend/ProposalExecutionService
 import type { ProposalRuntime } from '@main/backend/ProposalExecutionService';
 import { ResultDraftService } from '@main/backend/ResultDraftService';
 import { SourceConversionService } from '@main/backend/SourceConversionService';
+import { DocumentTaskService } from '@main/backend/DocumentTaskService';
+import {
+  DOCUMENT_TASK_CHANNELS,
+  documentTaskCreateSchema,
+  documentTaskSessionSchema,
+  documentTaskReadSchema,
+} from '@contracts/documentTasks.contract';
+import type { SourceConversionReadRequest } from '@contracts/sourceConversion.contract';
+import type { AnalysisReadRequest } from '@contracts/analysis.contract';
 import {
   RecoveryService,
   logoutWithRecovery,
@@ -240,10 +249,16 @@ export async function createWebServices(
   const memory = new WebMemoryRecoveryStore();
   const recovery = new RecoveryService(connection, memory);
   const workspace = new WorkspaceApiService(connection);
+  const taskRecovery = new RecoveryService(
+    connection,
+    new WebMemoryRecoveryStore(),
+  );
+  const documentTasks = new DocumentTaskService(connection, taskRecovery);
   const analysis = new AnalysisService(
     connection,
     recovery,
     join(temporaryRoot, 'analysis'),
+    documentTasks,
   );
   const questions = new QuestionRunService(
     connection,
@@ -293,7 +308,16 @@ export async function createWebServices(
       python: activeSettings.python,
     },
     recovery,
+    documentTasks,
   );
+  documentTasks.connect({
+    conversion: (
+      request: SourceConversionReadRequest,
+    ): ReturnType<SourceConversionService['read']> => conversion.read(request),
+    analysis: (
+      request: AnalysisReadRequest,
+    ): ReturnType<AnalysisService['read']> => analysis.read(request),
+  });
   const handlers = new Map<string, Handler>();
   let closed = false;
 
@@ -544,6 +568,18 @@ export async function createWebServices(
   );
   register(RECOVERY_CHANNELS.execute, 1, (value: unknown): Promise<unknown> =>
     recovery.execute(recoveryRequestSchema.parse(value)),
+  );
+  register(
+    DOCUMENT_TASK_CHANNELS.create,
+    1,
+    (value: unknown): Promise<unknown> =>
+      documentTasks.create(documentTaskCreateSchema.parse(value)),
+  );
+  register(DOCUMENT_TASK_CHANNELS.list, 1, (value: unknown): Promise<unknown> =>
+    documentTasks.list(documentTaskSessionSchema.parse(value)),
+  );
+  register(DOCUMENT_TASK_CHANNELS.read, 1, (value: unknown): Promise<unknown> =>
+    documentTasks.read(documentTaskReadSchema.parse(value)),
   );
   register(
     SOURCE_CONVERSION_CHANNELS.start,

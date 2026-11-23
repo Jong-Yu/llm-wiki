@@ -13,10 +13,18 @@ import type {
 import { connectionGateway } from '@renderer/platform/connection';
 import { sourceConversionGateway } from '@renderer/platform/sourceConversion';
 import { analysisGateway } from '@renderer/platform/analysis';
+import { documentTasksGateway } from '@renderer/platform/documentTasks';
+import type {
+  DocumentTaskResult,
+  DocumentTaskDetailResult,
+  DocumentTaskListResult,
+  DocumentTask,
+} from '@contracts/documentTasks.contract';
 import type {
   ImportProcessingApi,
   ImportProcessingError,
   ImportProcessingResult,
+  ImportRegisteredSource,
 } from '../model/importProcessing.types';
 
 /** 현재 연결의 주체·공간·관점·정책을 고정 입력과 대조합니다. */
@@ -92,22 +100,53 @@ function expectedScope(
   };
 }
 
+/** 구 진행 주소도 보호 기록에서 같은 원본 판본을 조회하며 새 작업을 만들지 않습니다. */
+export async function findSourceTask(
+  scope: SourceConversionScope,
+  sourceId: string,
+  version: string,
+): Promise<ImportProcessingResult<string | null>> {
+  const result = await scoped(
+    scope,
+    false,
+    (): Promise<DocumentTaskListResult> =>
+      documentTasksGateway.list({
+        connectionId: scope.connectionId,
+        expectedScope: expectedScope(scope),
+      }),
+  );
+  if (!result.ok) return result;
+  const task = result.data.items
+    .filter(
+      (value: DocumentTask): boolean =>
+        value.source.sourceId === sourceId &&
+        value.source.sourceVersion === version,
+    )
+    .sort((left: DocumentTask, right: DocumentTask): number =>
+      right.createdAt.localeCompare(left.createdAt),
+    )[0];
+  return { ok: true, data: task?.taskId ?? null };
+}
+
 /** 등록 원본과 변환 보고를 새 단일 Markdown 접수 계약으로 연결합니다. */
 export const importProcessingApi: ImportProcessingApi = {
   conversionRead: (
     scope: SourceConversionScope,
     source: ConversionSource,
+    taskId?: string,
   ): Promise<SourceConversionResult> =>
     scoped(scope, false, (): Promise<SourceConversionResult> =>
       sourceConversionGateway.read({
         ...source,
         connectionId: scope.connectionId,
         expectedScope: expectedScope(scope),
+        ...(taskId ? { taskId } : {}),
       }),
     ),
   conversionStart: (
     scope: SourceConversionScope,
     source: ConversionSource,
+    taskId?: string,
   ): Promise<SourceConversionResult> =>
     scoped(scope, true, (): Promise<SourceConversionResult> =>
       sourceConversionGateway.start({
@@ -116,6 +155,7 @@ export const importProcessingApi: ImportProcessingApi = {
         expectedScope: expectedScope(scope),
         ocr: 'auto',
         ocrLanguage: 'kor+eng',
+        ...(taskId ? { taskId } : {}),
       }),
     ),
   register: (
@@ -124,6 +164,21 @@ export const importProcessingApi: ImportProcessingApi = {
   ): Promise<AnalysisDetailResult> =>
     scoped(scope, true, (): Promise<AnalysisDetailResult> =>
       analysisGateway.start(request),
+    ),
+  conversionCancel: (
+    scope: SourceConversionScope,
+    source: ConversionSource,
+    requestId: string,
+    taskId?: string,
+  ): Promise<SourceConversionResult> =>
+    scoped(scope, true, (): Promise<SourceConversionResult> =>
+      sourceConversionGateway.cancel({
+        ...source,
+        connectionId: scope.connectionId,
+        expectedScope: expectedScope(scope),
+        requestId,
+        ...(taskId ? { taskId } : {}),
+      }),
     ),
   inspectJob: (
     scope: SourceConversionScope,
@@ -147,6 +202,30 @@ export const importProcessingApi: ImportProcessingApi = {
         jobId,
         expectedJobRevision,
         mode,
+      }),
+    ),
+  createTask: (
+    scope: SourceConversionScope,
+    registered: ImportRegisteredSource,
+    targetDocument: string,
+  ): Promise<DocumentTaskResult> =>
+    scoped(scope, true, (): Promise<DocumentTaskResult> =>
+      documentTasksGateway.create({
+        connectionId: scope.connectionId,
+        expectedScope: expectedScope(scope),
+        item: registered.item,
+        targetDocument,
+      }),
+    ),
+  readTask: (
+    scope: SourceConversionScope,
+    taskId: string,
+  ): Promise<DocumentTaskDetailResult> =>
+    scoped(scope, false, (): Promise<DocumentTaskDetailResult> =>
+      documentTasksGateway.read({
+        connectionId: scope.connectionId,
+        expectedScope: expectedScope(scope),
+        taskId,
       }),
     ),
 };

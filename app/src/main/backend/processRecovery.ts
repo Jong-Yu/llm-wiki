@@ -50,7 +50,7 @@ export async function writeProcessJournal(
     JSON.stringify(payload),
     expectedRevision,
   );
-  if (!result.ok) throw new Error('process_recovery_write_failed');
+  if (!result.ok) throw new Error(result.error.code);
   const entry = result.data.entries.find(
     (value: RecoveryEntry): boolean => value.key === key && value.kind === kind,
   );

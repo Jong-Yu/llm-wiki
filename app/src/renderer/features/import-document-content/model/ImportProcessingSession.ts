@@ -15,6 +15,9 @@ import type {
   ImportProcessingError,
   ImportProcessingSnapshot,
 } from './importProcessing.types';
+import type { DocumentTaskDetailResult } from '@contracts/documentTasks.contract';
+
+type RestoredTask = Extract<DocumentTaskDetailResult, { ok: true }>['data'];
 
 /** 화면을 떠나도 동일 세션의 원본·요청·영수증을 유지하는 등록 후 처리 흐름입니다. */
 export class ImportProcessingSession {
@@ -32,6 +35,7 @@ export class ImportProcessingSession {
   #conversionRequested = false;
   #preparationRequested = false;
   #autoExecuted = false;
+  #restored = false;
   #snapshot: ImportProcessingSnapshot;
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -41,6 +45,7 @@ export class ImportProcessingSession {
     targetDocument: string,
     extract: boolean,
     api: ImportProcessingApi = importProcessingApi,
+    restored?: RestoredTask,
   ) {
     this.#scope = scope;
     this.#registered = registered;
@@ -55,6 +60,7 @@ export class ImportProcessingSession {
       registrationRevision: item.registrationRevision,
     };
     this.#snapshot = {
+      taskId: null,
       busy: false,
       phase: 'idle',
       message: '원본을 보관했습니다. 본문 변환을 시작할 수 있습니다.',
@@ -69,10 +75,102 @@ export class ImportProcessingSession {
       document: null,
       cleanupWarningCount: registered.cleanupWarningCount,
     };
+    if (restored) this.#restore(restored);
+  }
+
+  /** 저장된 식별자를 복원하되 조회로 새로운 변환·접수·AI 실행을 시작하지 않습니다. */
+  #restore(data: RestoredTask): void {
+    this.#restored = true;
+    this.#autoExecuted = true;
+    this.#registrationRequestId = data.task.registration.requestId;
+    this.#registrationUnconfirmed =
+      data.task.registration.state === 'unconfirmed';
+    this.#jobId = data.task.registration.jobId;
+    this.#update({ taskId: data.task.taskId, canRefresh: true, error: null });
+    if (data.conversion) {
+      this.#conversionRequested = true;
+      this.#applyConversion(data.conversion);
+    }
+    if (data.analysis) this.#applyDetail(data.analysis);
+    else if (this.#registrationUnconfirmed) {
+      this.#update({
+        phase: 'planning_unconfirmed',
+        canPrepare: false,
+        canRetryConversion: false,
+        message:
+          '분석 접수 결과를 확인해야 합니다. 같은 요청의 저장 상태만 조회합니다.',
+      });
+    } else if (
+      !data.conversion ||
+      (data.conversion.state === 'complete' &&
+        data.conversion.receiptState === 'saved' &&
+        data.conversion.report?.complete)
+    ) {
+      this.#update({
+        phase: 'ready',
+        canPrepare: true,
+        message:
+          '보관한 원본의 미완료 처리를 시작할 수 있습니다. 아직 실행하지 않았습니다.',
+      });
+    }
+    const failures = data.errors.filter(
+      (failure: RestoredTask['errors'][number]): boolean =>
+        failure.code !== 'task_history_write_failed',
+    );
+    if (failures.length)
+      this.#update({
+        error: failures
+          .map(
+            (failure: RestoredTask['errors'][number]): string =>
+              failure.message,
+          )
+          .join(' · '),
+      });
+  }
+
+  /** 실행 요청 전에 보호 기록을 확정해 앱이 종료돼도 같은 접수만 확인합니다. */
+  async #ensureTask(): Promise<boolean> {
+    if (this.#snapshot.taskId || !this.#api.createTask) return true;
+    const result = await this.#api.createTask(
+      this.#scope,
+      this.#registered,
+      this.#targetDocument,
+    );
+    if (!result.ok) {
+      this.#fail(result.error);
+      return false;
+    }
+    this.#registrationRequestId = result.data.registration.requestId;
+    this.#update({ taskId: result.data.taskId });
+    if (
+      result.data.registration.state !== 'not_started' ||
+      result.data.conversions.length
+    ) {
+      if (this.#api.readTask) {
+        const read = await this.#api.readTask(this.#scope, result.data.taskId);
+        if (!read.ok) {
+          this.#fail(read.error);
+          return false;
+        }
+        this.#restore(read.data);
+      }
+    }
+    return true;
   }
 
   /** React 외부 저장소는 변경이 없을 때 같은 snapshot 참조를 반환합니다. */
   getSnapshot = (): ImportProcessingSnapshot => this.#snapshot;
+  /** 복원한 세션만 새 읽기 결과를 반영하고 진행 중인 등록 흐름은 덮지 않습니다. */
+  observeTask = (detail: RestoredTask): void => {
+    if (
+      !this.#snapshot.busy &&
+      (this.#restored ||
+        ['conversion_unconfirmed', 'planning_unconfirmed'].includes(
+          this.#snapshot.phase,
+        ))
+    )
+      this.#restore(detail);
+  };
   /** 구독 해제는 서버 작업을 취소하거나 등록 기록을 지우지 않습니다. */
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
@@ -262,6 +360,7 @@ export class ImportProcessingSession {
             }
           : {}),
       },
+      ...(this.#snapshot.taskId ? { taskId: this.#snapshot.taskId } : {}),
     });
     if (!result.ok) {
       this.#registrationUnconfirmed =
@@ -444,6 +543,13 @@ export class ImportProcessingSession {
   /** 명시 시작에서만 새 로컬 변환을 시작하며 이미 있는 처리 기록은 먼저 읽습니다. */
   begin = async (): Promise<void> => {
     await this.#run(async (): Promise<void> => {
+      if (!(await this.#ensureTask())) return;
+      if (this.#restored && (this.#registrationUnconfirmed || this.#jobId)) {
+        await this.#refresh();
+        return;
+      }
+      if (this.#restored) this.#autoExecuted = false;
+      this.#restored = false;
       this.#preparationRequested = true;
       if (this.#registrationUnconfirmed || this.#jobId) {
         await this.#refresh();
@@ -466,6 +572,7 @@ export class ImportProcessingSession {
       const existing = await this.#api.conversionRead(
         this.#scope,
         this.#source,
+        this.#snapshot.taskId ?? undefined,
       );
       if (!existing.ok) {
         this.#update({ canPrepare: true });
@@ -489,6 +596,7 @@ export class ImportProcessingSession {
       const started = await this.#api.conversionStart(
         this.#scope,
         this.#source,
+        this.#snapshot.taskId ?? undefined,
       );
       if (!started.ok) {
         this.#conversionFailure(started.error);
@@ -529,14 +637,22 @@ export class ImportProcessingSession {
   retryConversion = async (): Promise<void> => {
     if (
       !this.#snapshot.canRetryConversion ||
-      this.#registrationRequestId !== null
+      this.#registrationUnconfirmed ||
+      this.#jobId !== null
     )
       return;
     await this.#run(async (): Promise<void> => {
+      if (!(await this.#ensureTask())) return;
+      this.#restored = false;
+      this.#autoExecuted = false;
       this.#preparationRequested = true;
       this.#conversionRequested = true;
       this.#update({ canRetryConversion: false, phase: 'converting' });
-      const result = await this.#api.conversionStart(this.#scope, this.#source);
+      const result = await this.#api.conversionStart(
+        this.#scope,
+        this.#source,
+        this.#snapshot.taskId ?? undefined,
+      );
       if (!result.ok) {
         this.#conversionFailure(result.error);
         return;
@@ -547,8 +663,42 @@ export class ImportProcessingSession {
       }
     });
   };
+  /** 현재 변환 요청만 중단하며 서버에 보관한 원본·결과와 이전 시도는 남깁니다. */
+  stopConversion = async (): Promise<void> => {
+    const conversion = this.#snapshot.conversion;
+    if (
+      !conversion ||
+      conversion.state !== 'running' ||
+      !this.#api.conversionCancel
+    )
+      return;
+    await this.#run(async (): Promise<void> => {
+      this.#restored = true;
+      this.#preparationRequested = false;
+      this.#autoExecuted = true;
+      const cancel = this.#api.conversionCancel;
+      if (!cancel) return;
+      const result = await cancel(
+        this.#scope,
+        this.#source,
+        conversion.requestId,
+        this.#snapshot.taskId ?? undefined,
+      );
+      if (!result.ok) this.#fail(result.error);
+      else this.#applyConversion(result.data);
+    });
+  };
   /** 중단·응답 유실은 같은 기록을 읽고 미완료 준비 단계만 이어갑니다. */
   async #refresh(): Promise<void> {
+    if (this.#restored && this.#snapshot.taskId && this.#api.readTask) {
+      const result = await this.#api.readTask(
+        this.#scope,
+        this.#snapshot.taskId,
+      );
+      if (!result.ok) this.#fail(result.error);
+      else this.#restore(result.data);
+      return;
+    }
     if (this.#jobId) {
       await this.#inspect();
       return;
@@ -561,7 +711,11 @@ export class ImportProcessingSession {
       await this.#prepare();
       return;
     }
-    const result = await this.#api.conversionRead(this.#scope, this.#source);
+    const result = await this.#api.conversionRead(
+      this.#scope,
+      this.#source,
+      this.#snapshot.taskId ?? undefined,
+    );
     if (!result.ok) {
       this.#fail(result.error);
       return;

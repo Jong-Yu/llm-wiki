@@ -13,6 +13,7 @@ export const recoveryKindSchema = z.enum([
   'pending-question-run',
   'pending-source-conversion',
   'pending-analysis',
+  'document-tasks',
 ]);
 export type RecoveryKind = z.infer<typeof recoveryKindSchema>;
 const key = z.string().regex(/^[a-zA-Z0-9_.:-]{1,160}$/);

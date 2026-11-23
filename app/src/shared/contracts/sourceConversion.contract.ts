@@ -23,6 +23,7 @@ export const conversionSourceSchema = z.strictObject({
 export const sourceConversionReadSchema = conversionSourceSchema.extend({
   connectionId: z.string().min(1).max(4096),
   expectedScope: sourceExpectedScopeSchema,
+  taskId: id.optional(),
 });
 export const sourceConversionStartSchema = sourceConversionReadSchema.extend({
   ocr: z.enum(['auto', 'never', 'always']),
@@ -127,6 +128,7 @@ export const sourceConversionRunSchema = z.object({
     .array(z.string().regex(/^[a-zA-Z0-9_.-]{1,128}$/))
     .max(100),
   cleanupWarning: z.boolean(),
+  historyWarning: z.string().max(2000).optional(),
 });
 const resultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: sourceConversionRunSchema.nullable() }),

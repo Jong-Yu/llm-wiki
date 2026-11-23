@@ -33,7 +33,7 @@ const fileSchema = z.strictObject({
     domain: z.string().nullable(),
     viewpoint: z.string().nullable(),
   }),
-  entries: z.array(recoveryEntrySchema).max(128),
+  entries: z.array(recoveryEntrySchema).max(4096),
   legacySource: z
     .strictObject({
       policyRevision: z.string(),
@@ -86,9 +86,17 @@ export class ProtectedRecoveryStore {
   >();
   readonly directory: string;
   readonly cipher: ConnectionCipher;
-  constructor(directory: string, cipher: ConnectionCipher) {
+  readonly maxEntries: number;
+  constructor(
+    directory: string,
+    cipher: ConnectionCipher,
+    maxEntries: number = 128,
+  ) {
+    if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > 4096)
+      throw new Error('invalid_recovery_capacity');
     this.directory = directory;
     this.cipher = cipher;
+    this.maxEntries = maxEntries;
   }
   /** 같은 앱의 연속 입력은 순서대로 저장하며 다른 앱은 디스크 CAS로 검사합니다. */
   #serial(operation: () => Promise<RecoveryResult>): Promise<RecoveryResult> {
@@ -178,6 +186,7 @@ export class ProtectedRecoveryStore {
         JSON.parse(await this.cipher.decrypt(bytes)),
       );
       if (
+        parsed.entries.length > this.maxEntries ||
         scopeKey(parsed.scope) !== scopeKey(scope) ||
         new Set(
           parsed.entries.map(
@@ -314,6 +323,8 @@ export class ProtectedRecoveryStore {
           });
           next.push(entry);
         }
+        if (next.length > this.maxEntries)
+          throw new RecoveryError('recovery_too_large');
         const plain = JSON.stringify(
           fileSchema.parse({
             version: 1,

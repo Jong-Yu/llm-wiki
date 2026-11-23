@@ -12,6 +12,10 @@ import type {
 } from '@contracts/sourceConversion.contract';
 import type { SourceRegistrationRecord } from '@contracts/sources.contract';
 import type { WorkspaceRecovery } from '@contracts/workspace.contract';
+import type {
+  DocumentTaskResult,
+  DocumentTaskDetailResult,
+} from '@contracts/documentTasks.contract';
 
 export type ImportRegistration = Extract<
   SourceRegistrationRecord,
@@ -34,6 +38,7 @@ export type ImportProcessingResult<T> =
   | { ok: false; error: ImportProcessingError };
 /** 명시 등록 뒤 한 원본 판본의 처리 상태를 유지하며 실행 완료와 저장 완료를 분리합니다. */
 export type ImportProcessingSnapshot = {
+  taskId: string | null;
   busy: boolean;
   phase:
     | 'idle'
@@ -66,10 +71,18 @@ export type ImportProcessingApi = {
   conversionRead: (
     scope: SourceConversionScope,
     source: ConversionSource,
+    taskId?: string,
   ) => Promise<SourceConversionResult>;
   conversionStart: (
     scope: SourceConversionScope,
     source: ConversionSource,
+    taskId?: string,
+  ) => Promise<SourceConversionResult>;
+  conversionCancel?: (
+    scope: SourceConversionScope,
+    source: ConversionSource,
+    requestId: string,
+    taskId?: string,
   ) => Promise<SourceConversionResult>;
   register: (
     scope: SourceConversionScope,
@@ -85,4 +98,13 @@ export type ImportProcessingApi = {
     revision: string,
     mode: 'start' | 'resume',
   ) => Promise<AnalysisDetailResult>;
+  createTask?: (
+    scope: SourceConversionScope,
+    registered: ImportRegisteredSource,
+    targetDocument: string,
+  ) => Promise<DocumentTaskResult>;
+  readTask?: (
+    scope: SourceConversionScope,
+    taskId: string,
+  ) => Promise<DocumentTaskDetailResult>;
 };

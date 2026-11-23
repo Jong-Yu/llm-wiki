@@ -1,4 +1,5 @@
 import { ExecutionStarts } from './ExecutionStarts';
+import type { DocumentTaskService } from './DocumentTaskService';
 import type { AiActivity } from '@contracts/aiSessions.contract';
 import { sameAccessRevision } from '@contracts/connection.contract';
 import type { WorkspaceMembership } from '@contracts/connection.contract';
@@ -126,16 +127,19 @@ export class AnalysisService {
   #creation: Creation | null = null;
   #requests = new Set<AbortController>();
   readonly #privateRoot: string | undefined;
+  readonly #tasks: DocumentTaskService | undefined;
 
   /** 창·연결 수명과 프로세스 수명을 묶되 화면을 닫는 것만으로 새 실행을 만들지 않습니다. */
   constructor(
     connection: ConnectionService,
     recovery?: ProcessRecovery,
     privateRoot?: string,
+    tasks?: DocumentTaskService,
   ) {
     this.#recovery = recovery;
     this.#connection = connection;
     this.#privateRoot = privateRoot;
+    this.#tasks = tasks;
     connection.onScopeChanged((): void => {
       for (const controller of this.#requests) controller.abort();
       void this.stop();
@@ -278,6 +282,7 @@ export class AnalysisService {
     if (!result.ok) return result;
     try {
       const job = this.#job(result.value, context, jobId);
+      await this.#tasks?.observeAnalysis(context, job);
       const receipts: AnalysisReceipt[] = [];
       const receiptErrors: { requestId: string; message: string }[] = [];
       for (const summary of job.result_summary.results) {
@@ -336,7 +341,17 @@ export class AnalysisService {
     const context = await this.#connection.analysisContext(
       request.connectionId,
     );
-    return 'ok' in context ? context : this.#detail(context, request.jobId);
+    if ('ok' in context) return context;
+    const detail = await this.#detail(context, request.jobId);
+    if (detail.ok) {
+      await this.#restoreCreation(context);
+      const creation = this.#creation;
+      if (creation?.requestId === detail.data.job.request_id) {
+        await removeProcessJournal(this.#recovery, context, creation.journal);
+        this.#creation = null;
+      }
+    }
+    return detail;
   }
 
   /** 실행 위치는 main 설정만 사용하며 읽기 화면은 Python 설치 없이도 열립니다. */
@@ -635,25 +650,43 @@ export class AnalysisService {
           await removeProcessJournal(this.#recovery, context, previous.journal);
           this.#creation = null;
         }
-        return detail;
+        // 다른 문서의 명시 접수에 이전 작업을 응답하지 않습니다.
+        if (
+          !detail.ok ||
+          !request.taskId ||
+          previous.requestId === request.registration?.requestId
+        )
+          return detail;
       }
       const runtime = request.registration ? null : await this.#runtime();
       if (runtime && 'ok' in runtime) return runtime;
       const requestId =
         request.registration?.requestId ?? randomUUID().replaceAll('-', '');
-      const journal = await writeProcessJournal(
-        this.#recovery,
-        context,
-        'pending-analysis',
-        'creation',
-        {
-          requestId,
-          sourceId: request.sourceId,
-          sourceVersion: request.sourceVersion,
-          sourceSha256: request.sourceSha256,
-          registrationRevision: request.registrationRevision,
-        },
-      );
+      await this.#tasks?.prepareAnalysis(context, request);
+      let journal: RecoveryEntry | null;
+      try {
+        journal = await writeProcessJournal(
+          this.#recovery,
+          context,
+          'pending-analysis',
+          'creation',
+          {
+            requestId,
+            sourceId: request.sourceId,
+            sourceVersion: request.sourceVersion,
+            sourceSha256: request.sourceSha256,
+            registrationRevision: request.registrationRevision,
+          },
+        );
+      } catch (error: unknown) {
+        if (request.taskId)
+          await this.#tasks?.rejectAnalysis(
+            context,
+            request.taskId,
+            'local_capture_failed',
+          );
+        throw error;
+      }
       this.#creation = { context, requestId, journal };
       const response = await this.#api(
         context,
@@ -699,6 +732,12 @@ export class AnalysisService {
         ) {
           await removeProcessJournal(this.#recovery, context, journal);
           this.#creation = null;
+          if (request.taskId)
+            await this.#tasks?.rejectAnalysis(
+              context,
+              request.taskId,
+              response.error.code,
+            );
         }
         return response;
       }

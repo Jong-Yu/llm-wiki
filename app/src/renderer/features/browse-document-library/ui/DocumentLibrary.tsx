@@ -508,13 +508,14 @@ export function DocumentLibrary({
                           {item.kind === 'source' &&
                             ((): JSX.Element | null => {
                               const view = analysis.viewOf(item);
-                              if (view.progressPath && !view.jobId)
+                              if (view.progressPath)
                                 return (
                                   <Link
                                     className={styles.textButton}
                                     to={view.progressPath}
+                                    state={{ workflowReturnTo: '/documents' }}
                                   >
-                                    진행·오류 보기
+                                    작업 보기
                                   </Link>
                                 );
                               if (view.kind === 'none')

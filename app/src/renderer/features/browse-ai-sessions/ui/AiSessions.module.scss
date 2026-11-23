@@ -6,6 +6,9 @@
     var(--wiki-font-family-ui);
   min-width: 0;
 }
+.embedded {
+  min-width: 0;
+}
 .note {
   color: var(--wiki-color-text-secondary);
   margin: 0;
