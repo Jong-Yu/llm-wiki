@@ -1,6 +1,7 @@
 import type {
   QuestionCommentary,
   QuestionDetail,
+  QuestionLocal,
 } from '@contracts/questionRuns.contract';
 import { isAiRuntimePreparationFailure } from '@contracts/runtime.contract';
 import { chatRunActive, chatRunUncertain, chatTurns } from './chatState';
@@ -15,7 +16,30 @@ export type ChatRunFailure = {
 /** AI 설명을 아직 받지 못했을 때의 대기와 사용자가 요청한 중지만 알립니다. */
 export function chatRunProgress(run: QuestionDetail | null): string {
   if (run?.local.status === 'stopping') return '답변 생성을 멈추고 있어요';
+  if (run?.local.preview) return '답변을 작성하고 있어요';
   return '답변을 준비하고 있어요';
+}
+
+/** 같은 실행의 더 새 미저장 본문만 합치며 서버가 확정한 종료·답변은 되돌리지 않습니다. */
+export function mergeChatRunLocal(
+  detail: QuestionDetail | null,
+  runId: string | undefined,
+  local: QuestionLocal | undefined,
+): QuestionDetail | null {
+  if (
+    !detail ||
+    !local ||
+    detail.id !== runId ||
+    (detail.status !== 'queued' && detail.status !== 'running') ||
+    detail.answers.length > 0 ||
+    detail.receipts.some(
+      (receipt: QuestionDetail['receipts'][number]): boolean =>
+        receipt.saved === true,
+    ) ||
+    (local.sequence ?? 0) <= (detail.local.sequence ?? 0)
+  )
+    return detail;
+  return { ...detail, local };
 }
 
 /** 현재 실행의 공개 작업 설명만 보여 주며 완료·중단과 다음 질문에는 남기지 않습니다. */

@@ -9,6 +9,7 @@ export const QUESTION_RUN_CHANNELS = {
   creationReceipt: 'question-runs:creation-receipt',
   list: 'question-runs:list',
   read: 'question-runs:read',
+  readLocal: 'question-runs:read-local',
   start: 'question-runs:start',
   cancel: 'question-runs:cancel',
   resumable: 'question-runs:resumable',
@@ -29,6 +30,7 @@ export const questionCreateSchema = questionSessionSchema.extend({
   conversationId: id,
   questionTurnId: id,
   conversationRevision: revision,
+  interactionContract: z.literal('user-input-v1').optional(),
 });
 export const questionCreationReceiptSchema = questionSessionSchema.extend({
   requestId: id,
@@ -147,6 +149,8 @@ export type QuestionEvidence = {
   sourceVersion: string | null;
 };
 export type QuestionLocal = {
+  /** 이번 앱 프로세스에서 로컬 변경을 정렬하는 번호입니다. 저장 판본은 아닙니다. */
+  sequence?: number;
   status: 'idle' | 'running' | 'stopping' | 'exited' | 'failed';
   phase: string;
   preview: string;
@@ -173,10 +177,75 @@ export const questionCommentarySchema = z.object({
     .refine((value: string): boolean => !!value.trim()),
 });
 export type QuestionCommentary = z.infer<typeof questionCommentarySchema>;
+const questionClarificationOptionDetailSchema = z.strictObject({
+  option: z.string().min(1).max(200),
+  description: z
+    .string()
+    .min(1)
+    .max(400)
+    .refine(
+      (value: string): boolean =>
+        !!value.trim() &&
+        !value.includes('[[') &&
+        !value.includes('wiki-template-result'),
+    ),
+  recommended: z.boolean(),
+});
+export type QuestionClarificationOptionDetail = z.infer<
+  typeof questionClarificationOptionDetailSchema
+>;
+/** 서버가 저장한 추가 질문만 입력 대기로 표시하며 공개 진행 문장과 구분합니다. */
+export const questionClarificationSchema = z
+  .strictObject({
+    options: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(200)
+          .refine((value: string): boolean => !!value.trim()),
+      )
+      .max(3),
+    option_details: z
+      .array(questionClarificationOptionDetailSchema)
+      .max(3)
+      .optional(),
+  })
+  .refine(
+    (value: {
+      options: string[];
+      option_details?: QuestionClarificationOptionDetail[];
+    }): boolean => {
+      if (value.option_details === undefined) return true;
+      const details = value.option_details;
+      return (
+        new Set(value.options).size === value.options.length &&
+        value.options.every(
+          (option: string): boolean =>
+            !option.includes('[[') && !option.includes('wiki-template-result'),
+        ) &&
+        details.every((detail: QuestionClarificationOptionDetail): boolean =>
+          value.options.includes(detail.option),
+        ) &&
+        new Set(
+          details.map(
+            (detail: QuestionClarificationOptionDetail): string =>
+              detail.option,
+          ),
+        ).size === details.length &&
+        details.filter(
+          (detail: QuestionClarificationOptionDetail): boolean =>
+            detail.recommended,
+        ).length <= 1
+      );
+    },
+  );
+export type QuestionClarification = z.infer<typeof questionClarificationSchema>;
 export type QuestionAnswer = {
   turnId: string;
   content: string;
   citations: KnowledgeValue[];
+  clarification?: QuestionClarification;
 };
 export type QuestionDetail = {
   id: string;
@@ -196,6 +265,10 @@ export type QuestionDetail = {
   local: QuestionLocal;
 };
 export type QuestionDetailResult = QuestionOutcome<QuestionDetail>;
+export type QuestionLocalResult = QuestionOutcome<{
+  runId: string;
+  local: QuestionLocal;
+} | null>;
 export type QuestionPage = {
   items: { id: string; title: string; created_at: string }[];
   nextCursor: string | null;
@@ -209,6 +282,7 @@ export type QuestionRunsBridge = {
   ) => Promise<QuestionDetailResult>;
   list: (request: QuestionListRequest) => Promise<QuestionPageResult>;
   read: (request: QuestionReadRequest) => Promise<QuestionDetailResult>;
+  readLocal: (request: QuestionReadRequest) => Promise<QuestionLocalResult>;
   start: (request: QuestionStartRequest) => Promise<QuestionDetailResult>;
   cancel: (request: QuestionCancelRequest) => Promise<QuestionDetailResult>;
   resumable: (
@@ -222,6 +296,18 @@ export type QuestionRunsBridge = {
   ) => Promise<QuestionWebSearchResult>;
 };
 
+const questionLocalSchema = z.object({
+  sequence: z.number().int().nonnegative().optional(),
+  status: z.enum(['idle', 'running', 'stopping', 'exited', 'failed']),
+  phase: z.string(),
+  preview: z.string(),
+  commentaries: z.array(questionCommentarySchema).max(20).optional(),
+  requestId: id.nullable(),
+  errorCode: z.string().nullable(),
+  cleanupWarning: z.boolean(),
+  resumeFailed: z.boolean().optional(),
+  historyReplayed: z.boolean().optional(),
+});
 const questionDetailSchema = z.object({
   id,
   conversationId: id,
@@ -250,20 +336,11 @@ const questionDetailSchema = z.object({
       turnId: id,
       content: z.string(),
       citations: z.array(knowledgeValueSchema),
+      clarification: questionClarificationSchema.optional(),
     }),
   ),
   answerReadError: z.string().nullable(),
-  local: z.object({
-    status: z.enum(['idle', 'running', 'stopping', 'exited', 'failed']),
-    phase: z.string(),
-    preview: z.string(),
-    commentaries: z.array(questionCommentarySchema).max(20).optional(),
-    requestId: id.nullable(),
-    errorCode: z.string().nullable(),
-    cleanupWarning: z.boolean(),
-    resumeFailed: z.boolean().optional(),
-    historyReplayed: z.boolean().optional(),
-  }),
+  local: questionLocalSchema,
 });
 const questionFailureSchema = z.object({
   ok: z.literal(false),
@@ -274,6 +351,18 @@ const questionFailureSchema = z.object({
     traceId: z.string().optional(),
   }),
 });
+/** 서버 답변과 분리한 실행 중 미저장 스냅샷을 검사합니다. */
+export function parseQuestionLocalResult(value: unknown): QuestionLocalResult {
+  return z
+    .union([
+      z.object({
+        ok: z.literal(true),
+        data: z.object({ runId: id, local: questionLocalSchema }).nullable(),
+      }),
+      questionFailureSchema,
+    ])
+    .parse(value);
+}
 /** main 응답도 preload에서 검사해 알 수 없는 IPC 객체를 화면으로 넘기지 않습니다. */
 export function parseQuestionDetailResult(
   value: unknown,

@@ -2,6 +2,7 @@ import { ATTACHMENT_COUNT_LIMIT } from './attachments';
 import { z } from 'zod';
 import { knowledgeValueSchema } from '@contracts/knowledge.contract';
 import type { QuestionDetail } from '@contracts/questionRuns.contract';
+import { questionClarificationSchema } from '@contracts/questionRuns.contract';
 import { isDocumentPath } from '@contracts/documents.contract';
 
 const id = z.string().regex(/^[a-f0-9]{32}$/);
@@ -32,6 +33,8 @@ export const chatTurnSchema = z.object({
   citations: z.array(knowledgeValueSchema).optional(),
   basis: knowledgeValueSchema.optional(),
   reply_to: id.nullable().optional(),
+  clarification: questionClarificationSchema.optional(),
+  clarification_turn_id: id.optional(),
 });
 export const chatEnvelopeSchema = z.object({
   record: z.object({
@@ -156,6 +159,17 @@ export function chatTurns(record: ChatEnvelope | null): ChatTurn[] {
   return record.record.events.map((event: unknown): ChatTurn =>
     chatTurnSchema.parse(event),
   );
+}
+/** 마지막 저장 메시지가 추가 질문일 때만 같은 작업의 사용자 답변을 기다립니다. */
+export function chatAwaitingClarification(
+  record: ChatEnvelope | null,
+): ChatTurn | null {
+  const last = chatTurns(record).at(-1);
+  return last?.role === 'assistant' &&
+    last.clarification &&
+    last.status !== 'failed'
+    ? last
+    : null;
 }
 /** 답변 저장 결과가 미확인인 실행은 새 요청으로 우회하지 않습니다. */
 export function chatRunUncertain(run: QuestionDetail): boolean {

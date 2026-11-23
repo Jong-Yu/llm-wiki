@@ -31,6 +31,7 @@ import {
 import type { AnswerArtifact, ChatAccess } from '../api/knowledgeChat.api';
 import {
   chatEnvelopeSchema,
+  chatAwaitingClarification,
   chatId,
   chatQuestionSchema,
   chatRunActive,
@@ -46,7 +47,11 @@ import type {
   ChatThread,
   ChatTurn,
 } from './chatState';
-import { canAdvanceChatDraft, rememberChatRunNotice } from './chatRunFeedback';
+import {
+  canAdvanceChatDraft,
+  mergeChatRunLocal,
+  rememberChatRunNotice,
+} from './chatRunFeedback';
 import { visibleSubmittedQuestion } from './chatTranscript';
 import type {
   SubmittedChatDraft,
@@ -58,6 +63,8 @@ export type KnowledgeChatModel = {
   threads: ChatThread[];
   conversation: ChatEnvelope | null;
   run: QuestionDetail | null;
+  /** 마지막 서버 메시지가 명시한 추가 질문입니다. 진행 문장으로 추측하지 않습니다. */
+  clarification: ChatTurn | null;
   /** 서버 저장 전에도 방금 보낸 질문을 보여 주는 표시 전용 상태입니다. */
   submittedQuestion: SubmittedChatQuestion | null;
   busy: boolean;
@@ -173,7 +180,9 @@ export function useKnowledgeChat(
   }
   /** 같은 질문의 종료 상태를 보호 저장에 남겨 다음 질문 뒤에도 확인할 수 있게 합니다. */
   function acceptRun(detail: QuestionDetail | null): void {
-    setRun(detail);
+    setRun((previous: QuestionDetail | null): QuestionDetail | null =>
+      mergeChatRunLocal(detail, previous?.id, previous?.local),
+    );
     if (!detail) return;
     const current = stateRef.current.threads.find(
       (item: ChatThread): boolean => item.id === stateRef.current.activeId,
@@ -340,6 +349,7 @@ export function useKnowledgeChat(
             conversationId: current.record.id,
             questionTurnId,
             conversationRevision: current.revision,
+            interactionContract: 'user-input-v1',
           }),
         );
       },
@@ -367,6 +377,65 @@ export function useKnowledgeChat(
     patchThread({ startUnconfirmed: false });
   }
 
+  /** 서버가 저장한 추가 질문에 원문 답변을 붙이며 근거·자료·템플릿은 서버가 승계합니다. */
+  async function replyToClarification(clarification: ChatTurn): Promise<void> {
+    if (!thread.conversationId)
+      throw new Error('답변할 대화를 다시 확인해 주세요.');
+    const content = thread.draft;
+    if (content.length > 16000)
+      throw new Error('답변은 16,000자 이내로 입력해 주세요.');
+    const questionTurnId = chatId();
+    readSerial.current += 1;
+    setSubmitted({ id: questionTurnId, content, threadId: thread.id });
+    setFoundCount(null);
+    setPhase('답변을 보내고 있어요');
+    let current = await readConversation(thread.conversationId);
+    if (
+      chatAwaitingClarification(current)?.id !== clarification.id ||
+      (thread.draftRevision && thread.draftRevision !== current.revision)
+    ) {
+      acceptConversation(current);
+      throw new Error(
+        '답변 작성 중 대화가 변경되었습니다. 갱신된 대화를 확인한 뒤 다시 보내 주세요.',
+      );
+    }
+    current = await write(
+      {
+        ...session,
+        operation: 'appendTurn',
+        input: {
+          record_id: current.record.id,
+          request_id: questionTurnId,
+          expected_revision: thread.draftRevision ?? current.revision,
+          role: 'user',
+          content,
+          status: 'complete',
+          clarification_turn_id: clarification.id,
+        },
+      },
+      {
+        step: 'question',
+        sentQuestion: content,
+        requestId: questionTurnId,
+        recordId: current.record.id,
+        threadId: thread.id,
+      },
+    );
+    patchThread({
+      draft: '',
+      draftRevision: null,
+      questionTurnId,
+      runId: null,
+    });
+    if (alive.current) {
+      acceptConversation(current);
+      acceptRun(null);
+      setSubmitted(null);
+    }
+    await preservePending(null);
+    await createRun(current, questionTurnId);
+  }
+
   /** 검색과 고정 근거 준비가 성공한 질문만 저장 후 명시 실행합니다. */
   async function send(): Promise<void> {
     await perform(async (): Promise<void> => {
@@ -382,6 +451,11 @@ export function useKnowledgeChat(
       const question = chatQuestionSchema.parse({
         question: thread.draft,
       }).question;
+      const clarification = chatAwaitingClarification(conversationRef.current);
+      if (clarification) {
+        await replyToClarification(clarification);
+        return;
+      }
       const attachments = thread.attachments;
       // 저장·전송하는 질문은 붙여넣은 자료를 구분 표지와 함께 포함하고, 제목과 검색에는 질문 문장을 씁니다.
       const template = templateById(thread.template);
@@ -632,30 +706,35 @@ export function useKnowledgeChat(
         ...(pending.step === 'question'
           ? {
               questionTurnId: pending.requestId,
-              ...((registeredTemplateId(thread.template) &&
-                pending.sentQuestion &&
-                splitQuestion(pending.sentQuestion).question ===
-                  thread.draft.trim() &&
-                JSON.stringify(
-                  splitQuestion(pending.sentQuestion).attachments,
-                ) === JSON.stringify(thread.attachments)) ||
-              [false, true].some(
-                (noEvidence: boolean): boolean =>
-                  composeQuestion(
-                    thread.draft.trim(),
-                    thread.attachments,
-                    templateById(thread.template),
-                    noEvidence,
-                    thread.webEnabled,
-                  ) === pending.sentQuestion,
-              )
-                ? {
-                    draft: '',
-                    attachments: [],
-                    template: '',
-                    draftRevision: null,
-                  }
-                : {}),
+              ...(chatTurns(saved).some(
+                (turn: ChatTurn): boolean =>
+                  turn.id === pending.requestId && !!turn.clarification_turn_id,
+              ) && pending.sentQuestion === thread.draft
+                ? { draft: '', draftRevision: null }
+                : (registeredTemplateId(thread.template) &&
+                      pending.sentQuestion &&
+                      splitQuestion(pending.sentQuestion).question ===
+                        thread.draft.trim() &&
+                      JSON.stringify(
+                        splitQuestion(pending.sentQuestion).attachments,
+                      ) === JSON.stringify(thread.attachments)) ||
+                    [false, true].some(
+                      (noEvidence: boolean): boolean =>
+                        composeQuestion(
+                          thread.draft.trim(),
+                          thread.attachments,
+                          templateById(thread.template),
+                          noEvidence,
+                          thread.webEnabled,
+                        ) === pending.sentQuestion,
+                    )
+                  ? {
+                      draft: '',
+                      attachments: [],
+                      template: '',
+                      draftRevision: null,
+                    }
+                  : {}),
               runId: null,
             }
           : {}),
@@ -933,13 +1012,68 @@ export function useKnowledgeChat(
       readSerial.current += 1;
     };
   }, [state.activeId, ready]);
+  const activeRunId = run?.id;
+  const activeRun = chatRunActive(run);
   useEffect((): (() => void) | undefined => {
-    if (!run || busy || invalidScope || !chatRunActive(run)) return;
-    const timer = setTimeout((): void => {
-      void refreshFromEffect();
+    if (!activeRunId || busy || invalidScope || !activeRun) return;
+    let reading = false;
+    // 본문 갱신으로 타이머를 다시 만들지 않아 저장 영수증 조회가 밀리지 않습니다.
+    const timer = setInterval((): void => {
+      if (reading) return;
+      reading = true;
+      void refreshFromEffect().finally((): void => {
+        reading = false;
+      });
     }, 1500);
-    return (): void => clearTimeout(timer);
-  }, [run, busy, invalidScope]);
+    return (): void => clearInterval(timer);
+  }, [activeRunId, activeRun, busy, invalidScope]);
+
+  useEffect((): (() => void) | undefined => {
+    if (!activeRunId || busy || invalidScope || !activeRun) return;
+    const runId = activeRunId;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const threadId = state.activeId;
+    /** 서버 재조회와 별도로 현재 프로세스의 생성 중 본문만 빠르게 받습니다. */
+    async function readLocal(): Promise<void> {
+      const serial = readSerial.current;
+      try {
+        const result = await chatRunsApi.readLocal({
+          ...session,
+          questionRunId: runId,
+        });
+        if (
+          disposed ||
+          !alive.current ||
+          locked.current ||
+          serial !== readSerial.current ||
+          stateRef.current.activeId !== threadId ||
+          !result.ok ||
+          !result.data ||
+          result.data.runId !== activeRunId
+        )
+          return;
+        const data = result.data;
+        setRun((current: QuestionDetail | null): QuestionDetail | null =>
+          mergeChatRunLocal(current, data.runId, data.local),
+        );
+      } catch {
+        // 로컬 전달 실패는 서버의 정상 답변 확인·기존 오류 경로를 바꾸지 않습니다.
+      } finally {
+        if (!disposed)
+          timer = setTimeout((): void => {
+            void readLocal();
+          }, 250);
+      }
+    }
+    timer = setTimeout((): void => {
+      void readLocal();
+    }, 250);
+    return (): void => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [activeRunId, activeRun, busy, invalidScope, session, state.activeId]);
 
   const resumable = useSessionAvailability(
     conversation?.record.id,
@@ -950,7 +1084,12 @@ export function useKnowledgeChat(
   // 파일 선택이나 변환 도중 다른 대화를 열면 이전 결과를 새 대화에 넣지 않는다.
   function currentAttachments(): ChatAttachment[] | undefined {
     const latest = stateRef.current;
-    if (!alive.current || locked.current || latest.activeId !== state.activeId)
+    if (
+      !alive.current ||
+      locked.current ||
+      latest.activeId !== state.activeId ||
+      chatAwaitingClarification(conversationRef.current)
+    )
       return;
     return latest.threads.find(
       (item: ChatThread): boolean => item.id === latest.activeId,
@@ -963,6 +1102,9 @@ export function useKnowledgeChat(
     threads: state.threads,
     conversation,
     run,
+    clarification: invalidScope
+      ? null
+      : chatAwaitingClarification(conversation),
     submittedQuestion: invalidScope
       ? null
       : visibleSubmittedQuestion(
@@ -982,9 +1124,18 @@ export function useKnowledgeChat(
     runtime,
     pending: state.pending,
     ensureAnswerArtifact,
-    setTemplate: (value: string): void => patchThread({ template: value }),
-    setWebEnabled: (value: boolean): void => patchThread({ webEnabled: value }),
-    setWebQuery: (value: string): void => patchThread({ webQuery: value }),
+    setTemplate: (value: string): void => {
+      if (!chatAwaitingClarification(conversationRef.current))
+        patchThread({ template: value });
+    },
+    setWebEnabled: (value: boolean): void => {
+      if (!chatAwaitingClarification(conversationRef.current))
+        patchThread({ webEnabled: value });
+    },
+    setWebQuery: (value: string): void => {
+      if (!chatAwaitingClarification(conversationRef.current))
+        patchThread({ webQuery: value });
+    },
     attachmentRoom: (): number => {
       const items = currentAttachments();
       return items ? remainingCapacity(items) : 0;
@@ -1005,12 +1156,14 @@ export function useKnowledgeChat(
       patchThread({ attachments: [...items, fitted] });
       return fitted.truncated ? 'truncated' : 'added';
     },
-    removeAttachment: (id: string): void =>
-      patchThread({
-        attachments: thread.attachments.filter(
-          (item: ChatAttachment): boolean => item.id !== id,
-        ),
-      }),
+    removeAttachment: (id: string): void => {
+      if (!chatAwaitingClarification(conversationRef.current))
+        patchThread({
+          attachments: thread.attachments.filter(
+            (item: ChatAttachment): boolean => item.id !== id,
+          ),
+        });
+    },
     setDraft: (value: string): void =>
       patchThread({
         draft: value,
@@ -1045,7 +1198,12 @@ export function useKnowledgeChat(
     selectChat,
     openConversation,
     clearDocumentScope: (): void => {
-      if (!locked.current && !stateRef.current.pending && !chatRunActive(run))
+      if (
+        !locked.current &&
+        !stateRef.current.pending &&
+        !chatRunActive(run) &&
+        !chatAwaitingClarification(conversationRef.current)
+      )
         patchThread({
           documents: [],
           noEvidenceQuestion: null,

@@ -1,11 +1,11 @@
 import { test, expect } from './fixtures';
 import { answered, ask, composer, conversation, failure } from './chat';
 
-/** [시나리오, 기대 오류 코드]. D-109에 따라 검증되지 않은 원시 응답은 표시하지 않습니다. */
+/** [시나리오, 기대 오류 코드]. D-145의 미완료 본문과 저장된 답변을 구분합니다. */
 const cases: Array<[string, string]> = [
   ['로그인실패', 'ai_login_or_execution_failed'],
-  ['비정상종료', 'ai_login_or_execution_failed'],
-  ['이벤트오류', 'ai_login_or_execution_failed'],
+  ['비정상종료', 'ai_incomplete_turn'],
+  ['이벤트오류', 'ai_execution_failed'],
   ['도구호출', 'ai_unexpected_tool_activity'],
   ['미완료', 'ai_incomplete_turn'],
   ['빈답변', 'ai_invalid_result'],
@@ -35,6 +35,8 @@ test.describe('AI 실행 실패', () => {
           ? '도구 실행이 허용되지 않아 답변을 중단했어요'
           : code === 'ai_incomplete_turn'
             ? '답변이 끝나기 전에 실행이 종료됐어요'
+            : code === 'ai_execution_failed'
+              ? '답변 처리 중 오류가 발생했어요'
             : '답변 결과를 확인하지 못했어요';
       await expect(failure(page)).toContainText(title);
       await expect(failure(page)).not.toContainText(code);
@@ -54,11 +56,16 @@ test.describe('AI 실행 실패', () => {
       }
       // 질문은 사라지지 않고 대화에 남아 있어야 한다.
       await expect(conversation(page)).toContainText(`#${scenario}`);
-      // 실패한 원시 응답은 미리보기·확정 답변으로 노출하지 않고 질문과 오류만 보존한다.
+      // 공개 본문을 받은 뒤 실패하면 부분 내용만 표시하며 JSON·근거·확정 답변으로 승격하지 않는다.
       await expect(conversation(page)).not.toContainText('저장 미확인');
+      const partial = ['미완료', '깨진JSON', '인용위조'].includes(scenario);
+      if (partial)
+        await expect(conversation(page)).toContainText('오류 전 생성된 내용');
+      await expect(conversation(page)).not.toContainText('"action"');
+      await expect(conversation(page)).not.toContainText('[[s999:');
       await expect(
         conversation(page).getByText('AI', { exact: true }),
-      ).toHaveCount(0);
+      ).toHaveCount(partial ? 1 : 0);
       await expect(conversation(page).getByRole('article')).toHaveCount(1);
       await expect(
         conversation(page).getByRole('button', { name: /근거 \d 확인/ }),

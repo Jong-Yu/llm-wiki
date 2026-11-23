@@ -17,6 +17,7 @@ from core.modules.access.policy import AccessDenied, PolicyError
 from . import workflow_io
 from .web_evidence import WEB_SOURCE_FIELDS
 from .question_basis import is_basis_reference
+from .question_interaction import INTERACTION_CONTRACT, MAX_EXCHANGES, continuation_for, validate_clarification
 from .template_grounding import source_prefetch_contract, TEMPLATE_MAX_EVIDENCE_READS
 from .question_grounding import (QuestionGrounding, CONTRACT, PREFETCH_CONTRACT, GROUNDED_CONTRACTS,
     PREFETCH_INSTRUCTIONS, INSTRUCTIONS, MAX_EVIDENCE_READS,
@@ -136,7 +137,7 @@ class QuestionRunStore(QuestionGrounding):
         # 과거 v2 작업의 고정 입력은 그대로 두고 새 작업에만 대화 문맥을 포함한다.
         if "conversation_context" in data:
             value["conversation_context"] = deepcopy(data["conversation_context"])
-        for key in ("template_ref", "source_prefetch"):
+        for key in ("template_ref", "source_prefetch", "interaction_contract", "continuation"):
             if key in data:
                 value[key] = deepcopy(data[key])
         if data["input_contract_version"] == PREFETCH_CONTRACT:
@@ -155,10 +156,15 @@ class QuestionRunStore(QuestionGrounding):
         if basis["status"] != "current":
             raise PersonalConflictError()
 
-    def create(self, *, request_id, conversation_id, question_turn_id, expected_conversation_revision, before_commit):
+    def create(self, *, request_id, conversation_id, question_turn_id, expected_conversation_revision, before_commit,
+               interaction_contract=None):
         """이미 저장한 질문 하나를 고정해 실행 대기 기록을 만든다."""
         payload = {"conversation_id": conversation_id, "question_turn_id": question_turn_id,
                    "expected_conversation_revision": expected_conversation_revision}
+        if interaction_contract is not None:
+            if interaction_contract != INTERACTION_CONTRACT:
+                raise ValueError("Unsupported question interaction contract")
+            payload["interaction_contract"] = interaction_contract
         try:
             old = self.personal.receipt("question-runs", request_id, payload=payload)
             return {**self._project(old["record"]), "replayed": True}
@@ -172,6 +178,9 @@ class QuestionRunStore(QuestionGrounding):
             if item["id"] == question_turn_id and item["role"] == "user"), None)
         if question is None:
             raise ValueError("Select a stored user question")
+        root, continuation = continuation_for(conversation["record"], question)
+        if continuation is not None and interaction_contract != INTERACTION_CONTRACT:
+            raise ValueError("A clarification response needs the user-input-v1 contract")
         preceding = []
         for turn in conversation["record"]["events"]:
             if turn["id"] == question_turn_id:
@@ -180,7 +189,7 @@ class QuestionRunStore(QuestionGrounding):
                 preceding.append({key: deepcopy(turn[key]) for key in
                     ("id", "role", "content", "hash", "reply_to") if key in turn})
         data = {"conversation_id": conversation_id, "question_turn_id": question_turn_id,
-            "title": question["content"][:200], "question": question["content"], "basis": question["basis"], "question_hash": question["hash"],
+            "title": root["content"][:200], "question": root["content"], "basis": root["basis"], "question_hash": question["hash"],
             "conversation_context": {"conversation_id": conversation_id,
                 "revision": expected_conversation_revision, "turns": preceding,
                 "purpose": "dialogue_context_only", "complete": True},
@@ -190,6 +199,10 @@ class QuestionRunStore(QuestionGrounding):
             "output_contract": ({**deepcopy(OUTPUT_CONTRACT), "citation_references": _citation_references(question["basis"])}
                                 if not is_basis_reference(question["basis"]) else {}),
             "origin": "client_reported", "human_approval": False}
+        if interaction_contract is not None:
+            data["interaction_contract"] = interaction_contract
+        if continuation is not None:
+            data["continuation"] = continuation
         if "template_ref" in question:
             data["template_ref"] = deepcopy(question["template_ref"])
         if is_basis_reference(question["basis"]):
@@ -222,6 +235,8 @@ class QuestionRunStore(QuestionGrounding):
                     data["initial_citation_encoding"] = INITIAL_CITATION_ENCODING
                 if self.user_dialogue:
                     data["input_instructions"] += " " + USER_DIALOGUE_INSTRUCTIONS
+        if interaction_contract is not None and data["input_contract_version"] not in GROUNDED_CONTRACTS:
+            raise ValueError("User input requires an on-demand question")
         if self.compact_initial_citations and data["input_contract_version"] != PREFETCH_CONTRACT:
             raise ValueError("Initial citation encoding requires the prefetch contract")
         def guard():
@@ -332,6 +347,15 @@ class QuestionRunStore(QuestionGrounding):
             conversation = self.personal._read("conversations", conversation_id)
             if canonical_json_hash(conversation) != payload["expected_conversation_revision"]:
                 raise PersonalConflictError()
+            clarification = payload.get("clarification")
+            if clarification is not None:
+                if record["data"].get("interaction_contract") != INTERACTION_CONTRACT:
+                    raise ValueError("This run did not opt in to user input")
+                validate_clarification(payload["content"], clarification)
+                if len(record["data"].get("continuation", {}).get("exchanges", [])) >= MAX_EXCHANGES:
+                    raise ValueError("A question can request user input at most five times")
+                if conversation["events"][-1]["id"] != record["data"]["question_turn_id"]:
+                    raise PersonalConflictError()
             path, intent = workflow_io.start_request(self.personal, "question-answers", question_run_id,
                 request_id, payload, {"conversation_id": conversation_id, "run_id": runtime["run_id"]})
             event = {"role": "assistant", "content": payload["content"], "status": "complete",
@@ -339,6 +363,8 @@ class QuestionRunStore(QuestionGrounding):
                 "citations": citations, "execution": {**execution, "origin": "client_reported"},
                 "question_run_id": question_run_id, "origin": "client_reported", "human_approval": False,
                 "semantic_validation": "not_run", "citation_validation": "frozen_source_and_policy_references"}
+            if clarification is not None:
+                event["clarification"] = deepcopy(clarification)
             try:
                 # 근거를 마지막으로 검사한 뒤 답변이 기록될 때까지 원문·그래프 쓰기를 막는다.
                 with self.scope.store._write_lock():

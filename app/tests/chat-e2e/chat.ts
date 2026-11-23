@@ -2,9 +2,9 @@ import { expect } from '@playwright/test';
 import type { ElectronApplication, Locator, Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
-/** 질문 입력창입니다. 접근 가능한 이름("질문")으로 찾아 디자인 변경에 덜 민감하게 합니다. */
+/** 일반 질문과 추가 질문 카드의 직접 답변 입력을 접근 가능한 이름으로 찾습니다. */
 export const composer = (page: Page): Locator =>
-  page.getByRole('textbox', { name: '질문' });
+  page.getByRole('textbox', { name: /^(질문|답변)$/ });
 /** 대화(질문·답변) 영역입니다. */
 export const conversation = (page: Page): Locator =>
   page.getByRole('log', { name: '질문과 답변' });

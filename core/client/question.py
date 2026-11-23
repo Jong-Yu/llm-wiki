@@ -18,6 +18,7 @@ from core.client.analysis import _identifier, _private_directory, server_url
 from core.client.transport import AnalysisClientError
 from core.client.question_ai import AnswerPreview, assemble_question, answer_payload, question_answer_schema
 from core.client.question_commentary import QuestionCommentary
+from core.client.question_streaming import GroundedAnswerPreview
 from core.client.question_sessions import QuestionSessions
 from core.client.supervision import supervise
 from core.client.ai.contracts import AIAdapterError
@@ -223,19 +224,29 @@ class _QuestionExecution:
                 self.emit("phase", phase="heartbeat", saved=False)
                 next_heartbeat = asyncio.get_running_loop().time() + self.heartbeat_seconds
 
-    async def guarded_model(self, adapter, prompt, schema, *, directory=None, session_id=None, allow_preview=True):
+    async def guarded_model(self, adapter, prompt, schema, *, directory=None, session_id=None, allow_preview=True,
+                            stream_answer=False, output_schema=None):
         """취소/원격 취소/사용권 실패가 먼저 오면 어댑터가 자기 자식만 종료할 때까지 기다린다."""
-        # 단계별 초안/내부ID는 표시하지 않고 검사·렌더가 끝난 v5 답변만 전달한다.
-        # 공개 작업 설명은 최종 답변과 분리해 전달한다.
+        # 일반 v5/v6의 답변 단계만 별도 파서로 부분 표시한다. 초안/조회/원시 ID는 내보내지 않는다.
+        # 공개 작업 설명과 기존 v1~v4 미리보기 계약은 그대로 둔다.
         preview = AnswerPreview(self.emit) if allow_preview else None
         options = {"prompt": prompt, "schema": schema, "directory": directory or self.directory / "invocation"}
         if session_id is not None:
             options["session_id"] = session_id
         old_callback = getattr(adapter, "on_event", None)
         parameters = inspect.signature(adapter.run).parameters
+        if output_schema is not None and ("output_schema" in parameters or any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())):
+            options["output_schema"] = output_schema
         state = self.state if isinstance(self.state, dict) else {}
         data = state.get("record", {}).get("data", {})
         contract = data.get("input_contract_version")
+        if (stream_answer and contract in {"personal-question-v5", "personal-question-v6"}
+                and data.get("template_ref") is None):
+            preview = GroundedAnswerPreview(self.emit)
+            if ("stream_answer" in parameters or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())):
+                options["stream_answer"] = True
         commentary = QuestionCommentary(self.emit) if contract in {"personal-question-v5", "personal-question-v6"} else None
         callback = preview
         if commentary is not None:

@@ -358,42 +358,62 @@ test.describe('등록 템플릿과 실제 산출물', (): void => {
     expect(await readFile(restoredOutput)).toEqual(await readFile(output));
   });
 
-  test('모호한 요청은 질문, 잘못된 작성 영역은 생성 실패로 표시', async ({
-    launch,
-    openChat,
-    app,
-    workRoot,
-  }): Promise<void> => {
-    const page = await launch();
-    await openChat(page);
-    const source = join(workRoot, '권한설계.txt');
-    await writeFile(source, '잠금 문서의 편집 권한: {{권한}}');
-    await register(
-      page,
-      app(),
-      source,
-      '권한 설계',
-      '잠금 정책 충돌은 먼저 질문하세요.',
-    );
-    await page.getByRole('button', { name: 'AI 채팅에서 사용' }).click();
-    await ask(page, '잠금 정책을 확인해 주세요. #템플릿질문');
-    let answer = await templateAnswer(page);
-    await expect(answer).toContainText('검토자 예외를 이번 설계에 적용할까요?');
-    await expect(
-      answer.getByRole('button', { name: '내려받기', exact: true }),
-    ).toHaveCount(0);
-    await ask(page, '검토자 예외를 적용하지 마세요. #템플릿오류');
-    answer = await templateAnswer(page);
-    await expect(
-      answer.getByRole('button', { name: '파일 다시 만들기' }),
-    ).toBeVisible({ timeout: 30000 });
-    await expect(
-      answer.getByRole('button', { name: '내려받기', exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      answer.getByText('이 요청에 적용한 템플릿·지침', { exact: true }),
-    ).toBeVisible();
-  });
+  for (const invalidField of [false, true]) {
+    test(`템플릿 추가 질문에 답한 뒤 ${invalidField ? '잘못된 작성 영역은 생성 실패로 표시' : '원래 양식으로 파일 생성'}`, async ({
+      launch,
+      openChat,
+      app,
+      workRoot,
+    }): Promise<void> => {
+      const page = await launch();
+      await openChat(page);
+      const source = join(workRoot, '권한설계.txt');
+      await writeFile(source, '잠금 문서의 편집 권한: {{권한}}');
+      await register(
+        page,
+        app(),
+        source,
+        '권한 설계',
+        '잠금 정책 충돌은 먼저 질문하세요.',
+      );
+      await page.getByRole('button', { name: 'AI 채팅에서 사용' }).click();
+      await ask(page, '잠금 정책을 확인해 주세요. #템플릿질문');
+      const waiting = page.locator('[data-chat-awaiting-input]');
+      await expect(waiting).toContainText(
+        '검토자 예외를 이번 설계에 적용할까요?',
+      );
+      await expect(
+        waiting.getByRole('button', { name: '내려받기', exact: true }),
+      ).toHaveCount(0);
+      const reply = `검토자 예외를 적용하지 마세요.${invalidField ? ' #템플릿오류' : ''}`;
+      await composer(page).fill(reply);
+      await page
+        .getByRole('button', { name: '답변 보내기', exact: true })
+        .click();
+      const answer = await templateAnswer(page);
+      await expect(page.locator('[data-chat-awaiting-input]')).toHaveCount(0);
+      await expect(
+        answer.getByText('이 요청에 적용한 템플릿·지침', { exact: true }),
+      ).toBeVisible();
+      if (invalidField) {
+        await expect(
+          answer.getByRole('button', { name: '파일 다시 만들기' }),
+        ).toBeVisible({ timeout: 30000 });
+        await expect(
+          answer.getByRole('button', { name: '내려받기', exact: true }),
+        ).toHaveCount(0);
+      } else {
+        const output = join(workRoot, '권한설계-결과.txt');
+        await saveTo(app(), output);
+        await answer
+          .getByRole('button', { name: '내려받기', exact: true })
+          .click();
+        await expect
+          .poll(async () => readFile(output, 'utf8').catch(() => ''))
+          .toContain(reply);
+      }
+    });
+  }
 
   test('충돌 시 초안 유지·최신 변경 반영·파일 교체·메뉴 왕복', async ({
     launch,

@@ -15,7 +15,8 @@ from pydantic import JsonValue
 from core.modules.access.policy import AccessDenied
 from core.modules.personal.store import PersonalStore, PersonalConflictError
 from core.modules.personal.question_basis import is_basis_reference
-from core.modules.personal.workflow_io import materialize_basis
+from core.modules.personal.question_interaction import pending_clarification
+from core.modules.personal.workflow_io import materialize_basis, observe_basis
 from core.modules.knowledge.aggregation import prepare_question
 from core.modules.reviews.store import ReviewStore
 from .schemas import (PersonalProfile, PersonalList, PersonalReceipt, CreateConversation, AppendTurn,
@@ -112,27 +113,37 @@ async def append_turn(request: Request, tenant: str, record_id: RecordId, token:
     def operation(scope, body):
         store = PersonalStore(scope)
         template_scope = (reauthorize(request, tenant, token, "read", body.profile)
-                          if body.template_ref is not None else None)
+                          if body.template_ref is not None or body.clarification_turn_id is not None else None)
         replay = _replayed(store, "conversations", body, record_id)
         if replay is not None:
             return replay
         record = store.read("conversations", record_id)["record"]
-        if body.template_ref is not None:
+        root = (pending_clarification(record, body.clarification_turn_id)
+                if body.clarification_turn_id is not None else None)
+        template_ref = root.get("template_ref") if root is not None else (
+            body.template_ref.model_dump() if body.template_ref is not None else None)
+        if template_ref is not None:
             from core.modules.templates.store import TemplateStore
-            TemplateStore(template_scope).read(body.template_ref.id, body.template_ref.revision)
-        basis = _basis(scope, body.context_request, question=body.content) if body.role == "user" else None
+            TemplateStore(template_scope).read(template_ref["id"], template_ref["revision"])
+        basis = (root["basis"] if root is not None else _basis(scope, body.context_request, question=body.content)
+                 if body.role == "user" else None)
         if body.role == "assistant":
             basis = _turn(record, body.reply_to, role="user")["basis"]
         event = {"role": body.role, "content": body.content, "status": body.status, "reply_to": body.reply_to,
             "basis": basis, "origin": "client_reported", "human_approval": False, "basis_storage": "embedded_full_snapshot"}
         if is_basis_reference(basis):
             event["basis_storage"] = "immutable_snapshot_reference"
-        if body.template_ref is not None:
-            event["template_ref"] = body.template_ref.model_dump()
+        if template_ref is not None:
+            event["template_ref"] = template_ref
+        if root is not None:
+            event["clarification_turn_id"] = body.clarification_turn_id
         def guard():
             _guard(request, tenant, token, "conversation_write", scope)()
-            if body.template_ref is not None:
+            if template_ref is not None or root is not None:
                 _guard(request, tenant, token, "read", scope)()
+            if root is not None and observe_basis(scope.store, basis, access_value(scope),
+                    coordination_locked=True)["status"] != "current":
+                raise PersonalConflictError()
         return store.append("conversations", record_id, body.request_id, body.expected_revision,
             body.model_dump(), event, access_value(scope),
             before_commit=guard)
@@ -164,8 +175,8 @@ async def save_result(request: Request, tenant: str, token: Annotated[str, Depen
         if body.conversation_id is not None:
             conversation = store.read("conversations", body.conversation_id)["record"]
             turn = _turn(conversation, body.turn_id, role="assistant")
-            if turn["status"] != "complete":
-                raise ValueError("A failed answer is not a completed result")
+            if turn["status"] != "complete" or turn.get("clarification") is not None:
+                raise ValueError("Only a completed final answer can become a saved result")
             content, basis = turn["content"], turn["basis"]
             answer_provenance = {"conversation_id": body.conversation_id, "answer_turn_id": body.turn_id,
                 "question_turn_id": turn["reply_to"], "turn_hash": turn["hash"],

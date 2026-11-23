@@ -302,6 +302,37 @@ class QuestionCliProfileTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls[0][0], calls[1][0])
             self.assertEqual(results[0], results[1])
 
+    async def test_claude_answer_stream_is_explicit_and_checks_the_partial_flag(self):
+        calls = []
+        help_output = b"--append-system-prompt <prompt> --include-partial-messages"
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute",
+                mock_claude_execute(calls, help_output=help_output)):
+            result = await claude().run(prompt="frozen", schema=SCHEMA, directory=Path(root).resolve() / "stream",
+                                        question_profile=True, stream_answer=True)
+            self.assertIn("--include-partial-messages", calls[-1][0])
+            self.assertTrue(calls[-1][1]["event_parser"].stream_answer)
+            self.assertEqual(result["execution"]["answer_stream"],
+                             {"transport": "stream-json", "partial_messages": True})
+            self.assertEqual(result["value"], VALUE)
+
+    async def test_claude_answer_stream_rejects_unsupported_cli_before_model_call(self):
+        calls = []
+        with TemporaryDirectory() as root, patch("core.client.ai.claude._execute", mock_claude_execute(calls)):
+            with self.assertRaises(AIAdapterError) as caught:
+                await claude().run(prompt="frozen", schema=SCHEMA, directory=Path(root).resolve() / "unsupported",
+                                   question_profile=True, stream_answer=True)
+            self.assertEqual(caught.exception.code, "ai_cli_incompatible")
+            self.assertTrue(all(arguments[1:] == ["--help"] for arguments, _ in calls))
+
+    async def test_claude_answer_stream_requires_question_profile_and_exact_boolean(self):
+        with TemporaryDirectory() as root:
+            for index, options in enumerate(({"stream_answer": True},
+                                             {"stream_answer": 1, "question_profile": True})):
+                with self.assertRaises(AIAdapterError) as caught:
+                    await claude().run(prompt="frozen", schema=SCHEMA, directory=Path(root).resolve() / str(index),
+                                       **options)
+                self.assertEqual(caught.exception.code, "ai_invalid_input")
+
     async def test_claude_profile_preserves_input_and_isolation_and_records_exact_instructions(self):
         calls = []
         callback = lambda _: None

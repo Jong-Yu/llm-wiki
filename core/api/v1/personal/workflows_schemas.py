@@ -4,10 +4,11 @@ revision은 '읽었던 내용이 아직 같은가'를 확인하는 지문이다.
 실제 저장 성공·사람 승인 여부는 입력으로 받지 않고 서버가 판단한다.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import Field, model_validator, model_serializer
 from core.api.schemas import Model
 from core.modules.personal.web_evidence import public_web_url, web_retrieved_at
+from core.modules.personal.question_interaction import validate_clarification
 from .schemas import PersonalProfile
 
 
@@ -38,6 +39,14 @@ class RunCreate(PersonalProfile):
     conversation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     question_turn_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     expected_conversation_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    interaction_contract: Literal["user-input-v1"] | None = None
+
+    @model_serializer(mode="wrap")
+    def compatible_payload(self, handler):
+        value = handler(self)
+        if self.interaction_contract is None:
+            value.pop("interaction_contract", None)
+        return value
 
 
 class RunCommand(PersonalProfile):
@@ -158,6 +167,25 @@ class AnswerExecution(Model):
     output_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class ClarificationOptionDetail(Model):
+    option: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=400)
+    recommended: bool = Field(strict=True)
+
+
+class Clarification(Model):
+    options: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(max_length=3)
+    option_details: list[ClarificationOptionDetail] | None = Field(None, max_length=3)
+
+    @model_serializer(mode="wrap")
+    def compatible_payload(self, handler):
+        """선택지 설명이 없으면 기존 질문 제출과 같은 요청 지문을 유지한다."""
+        value = handler(self)
+        if self.option_details is None:
+            value.pop("option_details", None)
+        return value
+
+
 class RunAnswer(RunCommand):
     run_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     expected_conversation_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -165,6 +193,13 @@ class RunAnswer(RunCommand):
     citations: list[AnswerCitation] = Field(default_factory=list, max_length=100)
     execution: AnswerExecution
     evidence_ids: list[str] | None = Field(None, max_length=64)
+    clarification: Clarification | None = None
+
+    @model_validator(mode="after")
+    def clarification_content(self):
+        if self.clarification is not None:
+            validate_clarification(self.content, self.clarification.model_dump())
+        return self
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -172,4 +207,6 @@ class RunAnswer(RunCommand):
         value = handler(self)
         if self.evidence_ids is None:
             value.pop("evidence_ids", None)
+        if self.clarification is None:
+            value.pop("clarification", None)
         return value

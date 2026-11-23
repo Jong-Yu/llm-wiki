@@ -15,6 +15,7 @@ import {
 } from '@contracts/questionRuns.contract';
 import type {
   QuestionDetailResult,
+  QuestionLocalResult,
   QuestionPageResult,
   QuestionResumableResult,
   QuestionSearchTermsResult,
@@ -24,6 +25,7 @@ import { isAppSender } from './isAppSender';
 
 type Result =
   | QuestionDetailResult
+  | QuestionLocalResult
   | QuestionPageResult
   | QuestionResumableResult
   | QuestionSearchTermsResult
@@ -88,6 +90,11 @@ export function registerQuestionRunHandlers(
   );
   register(QUESTION_RUN_CHANNELS.read, (value: unknown): Promise<Result> =>
     service.read(questionReadSchema.parse(value)),
+  );
+  register(
+    QUESTION_RUN_CHANNELS.readLocal,
+    async (value: unknown): Promise<Result> =>
+      service.readLocal(questionReadSchema.parse(value)),
   );
   register(QUESTION_RUN_CHANNELS.start, (value: unknown): Promise<Result> =>
     service.start(questionStartSchema.parse(value)),

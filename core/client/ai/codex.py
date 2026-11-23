@@ -354,13 +354,14 @@ class CodexAdapter:
         self._question_profile_checked = True
 
     async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None,
-                  web_search=False, question_profile=False, template_profile=False):
+                  web_search=False, question_profile=False, template_profile=False, stream_answer=False):
         """전체 prompt/schema로 한 번 실행해 {'value': 결과 dict, 'execution': 관측 기록}을 반환한다."""
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
                 or output_schema is not None and not isinstance(output_schema, dict)
                 or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)
                 or type(question_profile) is not bool
                 or type(template_profile) is not bool or template_profile and not question_profile
+                or type(stream_answer) is not bool or stream_answer and (not question_profile or template_profile)
                 or question_profile and (self.persist_session or session_id is not None or web_search)):
             raise AIAdapterError("ai_invalid_input")
         prompt_bytes = prompt.encode("utf-8")
@@ -434,16 +435,30 @@ class CodexAdapter:
         if template_profile:
             metadata["template_profile"] = {"version": TEMPLATE_VERSION, "settings": dict(TEMPLATE_SETTINGS),
                                              "provider_effective_settings": "not_reported"}
+        if stream_answer:
+            metadata["answer_stream"] = {"transport": "app-server", "config_verified": False}
         started = time.monotonic()
         output = stderr = None
         try:
             if question_profile:
                 await self._check_question_profile(executable, environment)
                 profile_metadata["feature_support_checked"] = True
-            code, output, stderr = await _execute(arguments, directory=directory, environment=environment,
-                prompt=prompt_bytes, timeout=self.timeout_seconds, result_path=result_path,
-                on_event=on_event if on_event is not None else self.on_event)
+            if stream_answer:
+                from .codex_app_server import execute
+                output, stream_metadata = await execute(executable, directory=directory, environment=environment,
+                    prompt=prompt, schema=effective_schema, model=self.model, timeout=self.timeout_seconds,
+                    on_event=on_event if on_event is not None else self.on_event)
+                metadata["answer_stream"] = stream_metadata
+                code, stderr = 0, b""
+            else:
+                code, output, stderr = await _execute(arguments, directory=directory, environment=environment,
+                    prompt=prompt_bytes, timeout=self.timeout_seconds, result_path=result_path,
+                    on_event=on_event if on_event is not None else self.on_event)
             metadata.update(returncode=code, stdout_sha256=sha256(output).hexdigest(), stderr_sha256=sha256(stderr).hexdigest())
+            if stream_answer:
+                metadata["normalized_events_sha256"] = metadata["stdout_sha256"]
+                metadata["stdout_sha256"] = stream_metadata.get("raw_stdout_sha256")
+                metadata["stderr_sha256"] = stream_metadata.get("raw_stderr_sha256")
             if code != 0:
                 # 로그인은 사용자가 별도로 수행한다. 여기서 자격 증명을 읽거나 자동 로그인하지 않는다.
                 raise AIAdapterError("ai_login_or_execution_failed")

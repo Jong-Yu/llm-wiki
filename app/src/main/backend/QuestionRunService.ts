@@ -38,6 +38,7 @@ import type {
   QuestionDetailResult,
   QuestionPageResult,
   QuestionLocal,
+  QuestionLocalResult,
   QuestionCommentary,
   QuestionResumableRequest,
   QuestionResumableResult,
@@ -156,6 +157,7 @@ export class QuestionRunService {
   #starts = new ExecutionStarts();
   #epoch = 0;
   #local = new Map<string, QuestionLocal>();
+  #localSequence = 0;
   #requests = new Set<AbortController>();
 
   /** 공통 연결을 재사용해 같은 창·주체의 요청만 처리합니다. */
@@ -184,6 +186,28 @@ export class QuestionRunService {
     if ('ok' in context) return context;
     if (!matchesExpectedScope(session.expectedScope, context)) return changed();
     return context;
+  }
+
+  /** 로컬 변경 순서를 붙여 늦은 서버 조회가 더 새 본문을 덮지 않게 합니다. */
+  #setLocal(key: string, value: QuestionLocal): void {
+    this.#local.set(key, { ...value, sequence: ++this.#localSequence });
+  }
+
+  /** 실행할 때 확인한 동일 범위의 임시 본문만 읽으며 서버 GET은 만들지 않습니다. */
+  readLocal(request: QuestionReadRequest): QuestionLocalResult {
+    const key = keyFor(request, request.questionRunId);
+    const running = this.#running.get(key);
+    if (!running) return { ok: true, data: null };
+    if (
+      !this.#connection.isAnalysisCurrent(running.context) ||
+      !matchesExpectedScope(request.expectedScope, running.context)
+    )
+      return changed();
+    const local = this.#local.get(key);
+    return {
+      ok: true,
+      data: local ? { runId: request.questionRunId, local } : null,
+    };
   }
 
   /** 관점은 모든 GET/POST에 고정하며 반환된 접근 범위도 재검사합니다. */
@@ -348,7 +372,7 @@ export class QuestionRunService {
       })
       .parse(JSON.parse(entry.payload));
     if (value.runId !== runId) throw new Error('recovery_mismatch');
-    this.#local.set(key, {
+    this.#setLocal(key, {
       ...idleQuestionLocal(),
       status: 'exited',
       phase: 'receipt-check',
@@ -391,6 +415,9 @@ export class QuestionRunService {
             conversationId: request.conversationId,
             questionTurnId: request.questionTurnId,
             conversationRevision: request.conversationRevision,
+            ...(request.interactionContract
+              ? { interactionContract: request.interactionContract }
+              : {}),
           },
         );
     } catch {
@@ -404,6 +431,9 @@ export class QuestionRunService {
       conversation_id: request.conversationId,
       question_turn_id: request.questionTurnId,
       expected_conversation_revision: request.conversationRevision,
+      ...(request.interactionContract
+        ? { interaction_contract: request.interactionContract }
+        : {}),
     });
     if (!result.ok) return result;
     try {
@@ -574,7 +604,7 @@ export class QuestionRunService {
     if (!running.stopping) {
       running.stopping = true;
       const local = this.#local.get(key);
-      if (local) this.#local.set(key, { ...local, status: 'stopping' });
+      if (local) this.#setLocal(key, { ...local, status: 'stopping' });
     }
     await stopPersonalProcess(running.child, running.closed);
   }
@@ -787,7 +817,7 @@ export class QuestionRunService {
       throw new Error('question_spawn_failed');
     }
     const key = keyFor(request, request.questionRunId);
-    this.#local.set(key, {
+    this.#setLocal(key, {
       ...idleQuestionLocal(),
       status: 'running',
       phase: 'starting',
@@ -812,6 +842,7 @@ export class QuestionRunService {
         const local = this.#local.get(key);
         if (!local || !this.#connection.isAnalysisCurrent(context)) return;
         const next = applyQuestionCliEvent(local, value, request.questionRunId);
+        if (next === local) return;
         if (next.requestId && next.requestId !== local.requestId) {
           journalWrites = journalWrites
             .then(async (): Promise<void> => {
@@ -833,11 +864,11 @@ export class QuestionRunService {
             .catch((): void => {
               const latest = this.#local.get(key);
               if (latest)
-                this.#local.set(key, { ...latest, cleanupWarning: true });
+                this.#setLocal(key, { ...latest, cleanupWarning: true });
               void this.stop();
             });
         }
-        this.#local.set(key, {
+        this.#setLocal(key, {
           ...next,
           preview: next.preview.replaceAll(context.token, '[인증정보 비공개]'),
           commentaries: next.commentaries?.map(
@@ -854,7 +885,7 @@ export class QuestionRunService {
       onError: (): void => {
         const local = this.#local.get(key);
         if (local)
-          this.#local.set(key, {
+          this.#setLocal(key, {
             ...local,
             status: 'failed',
             errorCode: 'question_cli_unavailable',
@@ -863,7 +894,7 @@ export class QuestionRunService {
       onClose: (code: number | null): void => {
         const local = this.#local.get(key);
         if (local)
-          this.#local.set(key, {
+          this.#setLocal(key, {
             ...local,
             status: code === 0 || running.stopping ? 'exited' : 'failed',
           });
@@ -874,7 +905,7 @@ export class QuestionRunService {
       },
       onCleanupError: (): void => {
         const latest = this.#local.get(key);
-        if (latest) this.#local.set(key, { ...latest, cleanupWarning: true });
+        if (latest) this.#setLocal(key, { ...latest, cleanupWarning: true });
       },
       onFinished: (): void => {
         if (this.#running.get(key) === running) this.#running.delete(key);

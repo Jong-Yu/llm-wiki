@@ -229,11 +229,22 @@ export function ChatRunFeedback({
             ))}
           {preview && (
             <>
+              {working && (
+                <small
+                  role="status"
+                  className={styles.previewStatus}
+                  data-chat-streaming
+                >
+                  답변을 작성하고 있어요
+                </small>
+              )}
               {!working && (
                 <small className={styles.previewStatus}>
                   {run?.status === 'cancelled'
                     ? '중단 전 생성된 내용'
-                    : '응답 일부 · 저장 미확인'}
+                    : run?.status === 'failed' || run?.local.status === 'failed'
+                      ? '오류 전 생성된 내용'
+                      : '응답 일부 · 저장 미확인'}
                 </small>
               )}
               <ChatAnswer content={preview} />

@@ -4,6 +4,10 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow } from 'electron';
+import { buildChatTranscript } from '@renderer/features/chat-with-knowledge/model/chatTranscript';
+import { workspaceRequestSchema } from '@contracts/workspace.contract';
+import { questionClarificationSchema } from '@contracts/questionRuns.contract';
+import { NO_EVIDENCE_MARKER } from '@renderer/features/chat-with-knowledge/model/externalMaterial';
 /** 테스트 자료는 실행기가 만든 새 임시 경로로만 한정합니다. */
 function testRoot(): string {
   const value = process.env.WIKI_CHAT_IA_ROOT;
@@ -51,6 +55,20 @@ async function click(label: string): Promise<void> {
     `(() => { const b=[...document.querySelectorAll('button')].find(x=>(x.textContent.trim()===${JSON.stringify(label)}||x.getAttribute('aria-label')===${JSON.stringify(label)})&&x.getBoundingClientRect().width>0); if(!b||b.disabled)throw new Error('Button unavailable'); b.focus(); b.click(); })()`,
   );
 }
+/** 추가 질문 카드의 세로 선택 목록은 네이티브 라디오로 고릅니다. */
+async function chooseAnswer(label: string): Promise<void> {
+  const selector = `[...document.querySelectorAll('[data-chat-awaiting-input] input[type=radio]')].find(x=>(x.getAttribute('aria-labelledby')?.split(' ').map(id=>document.getElementById(id)?.textContent).join(' ') ?? x.closest('label')?.textContent.trim())===${JSON.stringify(label)})`;
+  await until(`Boolean(${selector})`);
+  await js(
+    `(() => { const input=${selector}; if(input.disabled)throw new Error('Answer unavailable'); input.focus(); input.click(); })()`,
+  );
+}
+/** 입력 원문의 공백과 줄바꿈을 보존하며 실제 React 입력 경로를 거칩니다. */
+async function setDraft(value: string): Promise<void> {
+  await js(
+    `(() => { const t=document.querySelector('textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(t,${JSON.stringify(value)}); t.dispatchEvent(new Event('input',{bubbles:true})); })()`,
+  );
+}
 /** 내려받기 메뉴에서 형식을 명시 선택해 현행 파일 저장 동작을 실행합니다. */
 async function downloadMarkdown(): Promise<void> {
   await click('다른 형식으로');
@@ -70,6 +88,140 @@ async function expectProgress(phase: string, message: string): Promise<void> {
   );
 }
 async function verify(): Promise<void> {
+  const legacyClarification = { options: ['상한 초과', '하한 미달'] };
+  const optionDetail = {
+    option: '하한 미달',
+    description:
+      '  하한값보다 낮을 때의 조건을 정리합니다.\n예외도 확인합니다.  ',
+    recommended: true,
+  };
+  assert.deepEqual(
+    questionClarificationSchema.parse(legacyClarification),
+    legacyClarification,
+  );
+  for (const details of [
+    [],
+    [optionDetail],
+    [{ ...optionDetail, recommended: false }],
+  ]) {
+    const clarification = { ...legacyClarification, option_details: details };
+    assert.deepEqual(
+      questionClarificationSchema.parse(clarification),
+      clarification,
+    );
+  }
+  const invalidDetails: unknown[] = [
+    null,
+    [optionDetail, optionDetail],
+    [{ ...optionDetail, option: '없는 선택지' }],
+    [{ ...optionDetail, option: '하한 미달 ' }],
+    [optionDetail, { ...optionDetail, option: '상한 초과' }],
+    [{ ...optionDetail, description: ' \n ' }],
+    [{ ...optionDetail, description: '가'.repeat(401) }],
+    [{ ...optionDetail, description: '원문 [[evidence:1]]' }],
+    [{ ...optionDetail, description: 'wiki-template-result 내부 내용' }],
+    [{ ...optionDetail, recommended: 'true' }],
+    [{ ...optionDetail, extra: '숨은 값' }],
+  ];
+  for (const details of invalidDetails)
+    assert.equal(
+      questionClarificationSchema.safeParse({
+        ...legacyClarification,
+        option_details: details,
+      }).success,
+      false,
+    );
+  assert.equal(
+    questionClarificationSchema.safeParse({
+      options: [],
+      option_details: [optionDetail],
+    }).success,
+    false,
+  );
+  for (const options of [
+    ['하한 미달', '하한 미달'],
+    ['하한 미달', '[[evidence:1]]'],
+    ['하한 미달', 'wiki-template-result'],
+  ]) {
+    assert.equal(
+      questionClarificationSchema.safeParse({ options }).success,
+      true,
+    );
+    assert.equal(
+      questionClarificationSchema.safeParse({ options, option_details: [] })
+        .success,
+      false,
+    );
+    assert.equal(
+      questionClarificationSchema.safeParse({
+        options,
+        option_details: [optionDetail],
+      }).success,
+      false,
+    );
+  }
+  console.log(
+    'PASS 선택지 설명·추천 계약: 기존/희소 메타데이터 보존·잘못된 참조/중복/추천/설명 거부',
+  );
+  const clarificationInput = {
+    connectionId: 'fixture',
+    operation: 'appendTurn',
+    input: {
+      record_id: 'a'.repeat(32),
+      request_id: 'b'.repeat(32),
+      expected_revision: 'f'.repeat(64),
+      role: 'user',
+      content: '자유 응답',
+      clarification_turn_id: 'c'.repeat(32),
+    },
+  };
+  assert.equal(
+    workspaceRequestSchema.safeParse(clarificationInput).success,
+    true,
+  );
+  for (const changed of [
+    { context_request: { allow_empty: true } },
+    { template_ref: { id: 'd'.repeat(32), revision: 'f'.repeat(64) } },
+    { content: ' '.repeat(2) },
+    { content: '가'.repeat(16001) },
+  ])
+    assert.equal(
+      workspaceRequestSchema.safeParse({
+        ...clarificationInput,
+        input: { ...clarificationInput.input, ...changed },
+      }).success,
+      false,
+    );
+  const lineage = buildChatTranscript(
+    [
+      { id: '1'.repeat(32), role: 'user', content: '원래 요청의 자료와 양식' },
+      {
+        id: '2'.repeat(32),
+        role: 'assistant',
+        content: '어느 조건인가요?',
+        reply_to: '1'.repeat(32),
+        clarification: { options: [] },
+      },
+      {
+        id: '3'.repeat(32),
+        role: 'user',
+        content: '하한 조건' + NO_EVIDENCE_MARKER,
+        clarification_turn_id: '2'.repeat(32),
+      },
+      {
+        id: '4'.repeat(32),
+        role: 'assistant',
+        content: '최종 결과',
+        reply_to: '3'.repeat(32),
+      },
+    ],
+    [],
+  );
+  assert.equal(
+    lineage[2]?.question?.question,
+    '하한 조건' + NO_EVIDENCE_MARKER,
+  );
+  assert.equal(lineage[3]?.question?.question, '원래 요청의 자료와 양식');
   await app.whenReady();
   window = new BrowserWindow({
     show: false,
@@ -130,6 +282,39 @@ async function verify(): Promise<void> {
       ),
       false,
     );
+    // 서버 대화 조회가 늦어도 생성 중 본문은 로컬 채널로 도착하며 오래된 조회로 되돌아가지 않습니다.
+    await js(
+      'window.__chatChecks.conversationDelayed=false; window.__chatChecks.delayConversation=true',
+    );
+    await until('window.__chatChecks.conversationDelayed');
+    const serverReads = await js('window.__chatChecks.runReads');
+    const localReads = Number(await js('window.__chatChecks.localReads'));
+    await js(
+      "window.__chatChecks.run.preview='## 실시간 답변\\n\\n첫 문장이 도착했습니다.'",
+    );
+    await until("document.body.innerText.includes('첫 문장이 도착했습니다.')");
+    assert.equal(await js('window.__chatChecks.runReads'), serverReads);
+    assert.ok(Number(await js('window.__chatChecks.localReads')) > localReads);
+    assert.equal(
+      await js("document.querySelectorAll('[data-chat-streaming]').length"),
+      1,
+    );
+    await js(
+      "window.__chatChecks.run.preview+='\\n\\n다음 문장을 이어서 보여줍니다.'",
+    );
+    await until(
+      "document.body.innerText.includes('다음 문장을 이어서 보여줍니다.')",
+    );
+    await js(
+      'window.__chatChecks.delayConversation=false; window.__chatChecks.releaseConversation(); new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))',
+    );
+    assert.equal(
+      await js(
+        "document.body.innerText.includes('다음 문장을 이어서 보여줍니다.')",
+      ),
+      true,
+    );
+    console.log('PASS 로컬 본문 실시간 갱신·서버 조회 분리·늦은 스냅샷 차단');
     await js(
       "window.__chatChecks.run.preview='A에서 생성 중인 임시 답변입니다.'",
     );
@@ -207,6 +392,12 @@ async function verify(): Promise<void> {
       "document.body.innerText.includes('응답 대기 시간이 지났어요')",
     );
     assert.equal(
+      await js(
+        "document.body.innerText.includes('오류 전 생성된 내용') && document.body.innerText.includes('A에서 생성 중인 임시 답변입니다.') && !document.body.innerText.includes('응답 일부 · 저장 미확인')",
+      ),
+      true,
+    );
+    assert.equal(
       await js("document.querySelector('[data-chat-progress]')===null"),
       true,
     );
@@ -250,14 +441,18 @@ async function verify(): Promise<void> {
     await until(
       "document.querySelectorAll('[data-chat-commentary]').length===2",
     );
-    await js('window.__chatChecks.delayConversation=true');
+    await js(
+      'window.__chatChecks.conversationDelayed=false; window.__chatChecks.delayConversation=true',
+    );
     await until('window.__chatChecks.conversationDelayed');
+    await js('window.__chatChecks.delayLocal=true');
+    await until('window.__chatChecks.localDelayed');
     await js('window.__chatChecks.cancelEnabled=true');
     await click('응답 중단');
     await until("document.body.innerText.includes('중단 전 생성된 내용')");
     // 취소가 화면에 반영된 뒤 이전 폴링의 대화 조회를 풀어 늦은 응답을 도착시킵니다.
     await js(
-      'window.__chatChecks.releaseConversation(); new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))',
+      'window.__chatChecks.releaseConversation(); window.__chatChecks.releaseLocal(); new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))',
     );
     assert.equal(await js('window.__chatChecks.cancels'), 1);
     assert.equal(
@@ -272,7 +467,7 @@ async function verify(): Promise<void> {
       true,
     );
     console.log(
-      'PASS 취소 전 실행 조회가 늦게 도착해도 취소 상태와 설명 숨김 유지',
+      'PASS 취소 전 서버·로컬 조회가 늦게 도착해도 취소 상태와 설명 숨김 유지',
     );
     // 아래 기존 이동·내려받기 사례는 처음의 정상 fixture로 다시 시작합니다.
     await window.loadURL(
@@ -612,6 +807,348 @@ async function verify(): Promise<void> {
       false,
     );
     console.log('PASS 없는 대화 주소를 기존 대화로 대체하지 않음');
+
+    const clarificationUrl =
+      pathToFileURL(join(root, 'renderer/index.html')).href +
+      '?clarification=1#/chat?conversationId=' +
+      'a'.repeat(32);
+    await window.loadURL(clarificationUrl);
+    await until(
+      "document.querySelector('[data-chat-awaiting-input]') && document.querySelector('textarea')?.placeholder==='답변을 입력하세요'",
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-chat-clarification]')?.innerText.includes('답변을 기다리고 있어요')",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "document.querySelectorAll('[data-chat-clarification] input[type=radio]').length",
+      ),
+      3,
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-chat-clarification]')?.closest('article')===null",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-chat-clarification]')?.innerText.includes('내려받기')",
+      ),
+      false,
+    );
+    assert.equal(
+      await js(
+        "document.querySelectorAll('[data-chat-awaiting-input] input[type=radio][aria-describedby]').length===0 && !document.querySelector('[data-chat-awaiting-input]').innerText.includes('AI 추천')",
+      ),
+      true,
+    );
+    await chooseAnswer('하한 미달');
+    assert.equal(
+      await js(
+        "document.querySelector('[data-chat-awaiting-input] input:checked')?.closest('label')?.textContent.trim()==='하한 미달' && document.querySelector('textarea')===null",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        'window.__chatChecks.creates.length + window.__chatChecks.starts.length',
+      ),
+      0,
+    );
+    assert.equal(
+      await js(
+        "window.__chatChecks.calls.filter(x=>x.operation==='appendTurn'||x.operation==='questionContext').length",
+      ),
+      0,
+    );
+    await captureVisual('clarification-awaiting-input');
+    await auditAccessibility(window, 'chat-clarification-awaiting');
+    await js("location.hash='/chat?conversationId='+'b'.repeat(32)");
+    await until("document.querySelector('textarea')?.value==='B의 초안'");
+    assert.equal(
+      await js("document.querySelector('[data-chat-awaiting-input]')===null"),
+      true,
+    );
+    await js("location.hash='/chat?conversationId='+'a'.repeat(32)");
+    await until(
+      "document.querySelector('[data-chat-awaiting-input] input:checked')?.closest('label')?.textContent.trim()==='하한 미달' && document.querySelector('textarea')===null",
+    );
+    // 재마운트 때도 서버의 clarification으로 대기 상태만 복원하며 AI를 자동 실행하지 않습니다.
+    await window.loadURL(
+      clarificationUrl.replace('?clarification=1', '?clarification=1&reload=1'),
+    );
+    await until(
+      "document.querySelector('[data-chat-awaiting-input]') && document.querySelector('textarea')?.placeholder==='답변을 입력하세요'",
+    );
+    assert.equal(
+      await js(
+        'window.__chatChecks.creates.length + window.__chatChecks.starts.length',
+      ),
+      0,
+    );
+    const reply = '  하한 미달 조건만 정리해 주세요.\n예외도 포함해 주세요.  ';
+    await setDraft(reply);
+    await js('window.__chatChecks.delayReply=true');
+    await click('답변 보내기');
+    await until('window.__chatChecks.replyDelayed');
+    await js(
+      "document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))",
+    );
+    assert.equal(
+      await js(
+        "window.__chatChecks.calls.filter(x=>x.operation==='appendTurn').length",
+      ),
+      1,
+    );
+    assert.equal(await js('window.__chatChecks.creates.length'), 0);
+    await js('window.__chatChecks.releaseReply()');
+    await until(
+      "document.body.innerText.includes('하한 미달 조건을 원래 자료에서 확인했습니다.') && !document.querySelector('[data-chat-awaiting-input]')",
+    );
+    assert.deepEqual(
+      await js(
+        "window.__chatChecks.calls.filter(x=>x.operation==='appendTurn').map(x=>({content:x.input.content,clarification_turn_id:x.input.clarification_turn_id,context:'context_request' in x.input,template:'template_ref' in x.input}))",
+      ),
+      [
+        {
+          content: reply,
+          clarification_turn_id: 'e'.repeat(32),
+          context: false,
+          template: false,
+        },
+      ],
+    );
+    assert.equal(
+      await js(
+        "window.__chatChecks.calls.filter(x=>x.operation==='questionContext').length",
+      ),
+      0,
+    );
+    assert.deepEqual(
+      await js('window.__chatChecks.creates.map(x=>x.interactionContract)'),
+      ['user-input-v1'],
+    );
+    assert.equal(await js('window.__chatChecks.starts.length'), 1);
+    assert.equal(
+      await js(
+        "document.querySelectorAll('[data-chat-clarification]').length===1 && document.querySelectorAll('[data-chat-clarification] button').length===0",
+      ),
+      true,
+    );
+    console.log(
+      'PASS 저장된 추가 질문·선택/자유 입력·대화/재시작 복원·명시 답변 1회·원래 작업 계속',
+    );
+
+    await window.loadURL(
+      clarificationUrl.replace('?clarification=1', '?clarification=1&reload=2'),
+    );
+    await until("!!document.querySelector('[data-chat-awaiting-input]')");
+    await setDraft('충돌 뒤에도 보존할 답변');
+    await js("window.__chatChecks.clarificationRevision='1'.repeat(64)");
+    await click('답변 보내기');
+    await until(
+      "document.body.innerText.includes('답변 작성 중 대화가 변경되었습니다')",
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('textarea')?.value==='충돌 뒤에도 보존할 답변'",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "window.__chatChecks.calls.filter(x=>x.operation==='appendTurn').length + window.__chatChecks.creates.length",
+      ),
+      0,
+    );
+    console.log('PASS 추가 질문 응답의 대화 판본 충돌 시 초안 보존·전송 없음');
+
+    await window.loadURL(
+      clarificationUrl.replace('?clarification=1', '?clarification=1&reload=3'),
+    );
+    await until("!!document.querySelector('[data-chat-awaiting-input]')");
+    await js(
+      "window.__chatChecks.clarificationOptions=[]; location.hash='/chat?conversationId='+'b'.repeat(32)",
+    );
+    await until("document.querySelector('textarea')?.value==='B의 초안'");
+    await js("location.hash='/chat?conversationId='+'a'.repeat(32)");
+    await until("!!document.querySelector('[data-chat-awaiting-input]')");
+    assert.equal(
+      await js(
+        "document.querySelectorAll('[data-chat-clarification] input[type=radio]').length",
+      ),
+      0,
+    );
+    await setDraft('선택지 없이 직접 답합니다.');
+    await js('window.__chatChecks.loseReplyResponse=true');
+    await click('답변 보내기');
+    await until(
+      "document.body.innerText.includes('저장 결과를 확인해야 해요')",
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('textarea')?.value==='선택지 없이 직접 답합니다.'",
+      ),
+      true,
+    );
+    assert.equal(await js('window.__chatChecks.creates.length'), 0);
+    await click('같은 요청 확인');
+    await until(
+      "!document.body.innerText.includes('저장 결과를 확인해야 해요') && !document.querySelector('[data-chat-awaiting-input]')",
+    );
+    assert.equal(
+      await js(
+        "window.__chatChecks.calls.filter(x=>x.operation==='appendTurn').length",
+      ),
+      1,
+    );
+    assert.equal(
+      await js(
+        'window.__chatChecks.creates.length + window.__chatChecks.starts.length',
+      ),
+      0,
+    );
+    assert.equal(await js("document.querySelector('textarea')?.value"), '');
+    console.log(
+      'PASS 선택지 없는 추가 질문·저장 응답 유실 확인·중복 전송/자동 AI 재시작 없음',
+    );
+
+    window.setContentSize(320, 800);
+    await window.loadURL(
+      clarificationUrl.replace(
+        '?clarification=1',
+        '?clarification=1&option-details=recommended',
+      ),
+    );
+    await until(
+      "!!document.querySelector('[data-chat-awaiting-input] input[aria-describedby]')",
+    );
+    assert.deepEqual(
+      await js(
+        "[...document.querySelectorAll('[data-chat-awaiting-input] input[aria-labelledby]')].map(x=>({name:document.getElementById(x.getAttribute('aria-labelledby')).textContent,description:x.getAttribute('aria-describedby').split(' ').map(id=>document.getElementById(id).textContent).join(' ')}))",
+      ),
+      [
+        {
+          name: '상한 초과',
+          description: '상한값보다 높을 때 발생하는 경고와 예외를 정리합니다.',
+        },
+        {
+          name: '하한 미달',
+          description:
+            '하한값보다 낮을 때 발생하는 경고와 예외를 정리합니다. AI 추천',
+        },
+      ],
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-chat-awaiting-input] input:checked')?.value==='direct' && document.querySelector('textarea')?.value==='' && window.__chatChecks.creates.length + window.__chatChecks.starts.length===0",
+      ),
+      true,
+    );
+    await chooseAnswer('상한 초과');
+    window.webContents.focus();
+    window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' });
+    window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Down' });
+    await until(
+      "document.querySelector('[data-chat-awaiting-input] input:checked')?.value==='하한 미달'",
+    );
+    assert.equal(
+      await js(
+        'window.__chatChecks.creates.length + window.__chatChecks.starts.length',
+      ),
+      0,
+    );
+    await captureVisual('clarification-option-details-narrow');
+    await auditAccessibility(window, 'chat-clarification-option-details');
+    window.setContentSize(1400, 900);
+    await auditAccessibility(
+      window,
+      'chat-clarification-option-details-light',
+      {
+        zoom: true,
+      },
+    );
+    await js(
+      "(document.querySelector('.wiki-theme') ?? document.body).dataset.wikiTheme='dark'",
+    );
+    assert.equal(
+      await js(
+        "getComputedStyle(document.querySelector('[data-chat-awaiting-input]')).colorScheme",
+      ),
+      'dark',
+    );
+    await auditAccessibility(window, 'chat-clarification-option-details-dark', {
+      zoom: true,
+    });
+    await js(
+      "(document.querySelector('.wiki-theme') ?? document.body).dataset.wikiTheme='light'",
+    );
+    window.setContentSize(320, 800);
+    await click('답변 보내기');
+    await until(
+      "!document.querySelector('[data-chat-awaiting-input]') && window.__chatChecks.replyFinal",
+    );
+    assert.equal(await js('window.__chatChecks.replyContent'), '하한 미달');
+    assert.equal(
+      await js(
+        "document.querySelector('[data-chat-clarification]')?.innerText.includes('AI 추천') || document.querySelector('[data-chat-clarification]')?.innerText.includes('하한값보다 낮을 때')",
+      ),
+      false,
+    );
+    console.log(
+      'PASS 선택지 설명·추천 접근성 이름/설명 분리·추천 자동선택 없음·방향키 선택·선택지 이름만 전송',
+    );
+
+    await window.loadURL(
+      clarificationUrl.replace(
+        '?clarification=1',
+        '?clarification=1&option-details=description',
+      ),
+    );
+    await until(
+      "!!document.querySelector('[data-chat-awaiting-input] input[aria-describedby]')",
+    );
+    await js(
+      "window.__chatChecks.clarificationOptionDetails[1].description='긴 설명을 줄바꿈하여 읽고 직접 선택할 수 있습니다. '.repeat(10); location.hash='/chat?conversationId='+'b'.repeat(32)",
+    );
+    await until("document.querySelector('textarea')?.value==='B의 초안'");
+    await js("location.hash='/chat?conversationId='+'a'.repeat(32)");
+    await until(
+      "document.querySelector('[data-chat-awaiting-input]')?.innerText.includes('긴 설명을 줄바꿈')",
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-chat-awaiting-input]').innerText.includes('AI 추천')",
+      ),
+      false,
+    );
+    assert.deepEqual(
+      await js(
+        "(() => { const card=document.querySelector('[data-chat-awaiting-input]'); const submit=card.querySelector('button[type=submit]').getBoundingClientRect(); return {cardFits:card.scrollWidth<=card.clientWidth,choicesFit:[...card.querySelectorAll('label:has(input[type=radio])')].every(x=>x.scrollWidth<=x.clientWidth),submitFits:submit.left>=0 && submit.right<=innerWidth && submit.bottom<=innerHeight}; })()",
+      ),
+      { cardFits: true, choicesFit: true, submitFits: true },
+    );
+    await chooseAnswer('하한 미달');
+    await chooseAnswer('직접 입력');
+    await setDraft('하한 미달');
+    assert.equal(
+      await js("document.querySelector('textarea')?.value==='하한 미달'"),
+      true,
+    );
+    await setDraft('하한 미달 조건과 예외를 함께 정리해 주세요.');
+    assert.equal(
+      await js(
+        'window.__chatChecks.creates.length + window.__chatChecks.starts.length',
+      ),
+      0,
+    );
+    console.log(
+      'PASS 추천 없는 설명만 표시·320px 긴 설명 줄바꿈/제출 접근·직접 입력 초안 유지',
+    );
 
     window.setContentSize(1600, 1000);
     await window.loadURL(

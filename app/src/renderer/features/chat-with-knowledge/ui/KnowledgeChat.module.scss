@@ -312,6 +312,149 @@
     margin: 0;
   }
 }
+.clarification {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-12);
+  padding: var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  > p {
+    margin: 0;
+    font-weight: 600;
+  }
+}
+.clarificationDock {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 960px;
+  min-height: 0;
+  max-height: min(65vh, 580px);
+  padding: 0;
+  overflow: hidden;
+  margin-inline: auto;
+  background-color: var(--wiki-color-surface-panel);
+}
+.clarificationHeader {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--wiki-space-4) var(--wiki-space-12);
+  flex-shrink: 0;
+  padding: var(--wiki-space-16) var(--wiki-space-16) 0;
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  > :first-child {
+    font-weight: 600;
+  }
+}
+.clarificationBody {
+  min-height: 0;
+  padding: 0 var(--wiki-space-16) var(--wiki-space-8);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.clarificationChoices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wiki-space-8);
+  min-width: 0;
+  margin: var(--wiki-space-16) 0 0;
+  padding: 0;
+  border: 0;
+}
+.clarificationChoice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--wiki-space-12);
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: var(--wiki-space-10) var(--wiki-space-12);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  > input {
+    width: 16px;
+    height: 16px;
+    margin: 2px 0 0;
+    accent-color: var(--wiki-color-action-primary);
+  }
+  &[data-selected] {
+    border-color: var(--wiki-color-action-primary);
+    background-color: var(--wiki-color-action-surface);
+  }
+  &:hover:not(:has(input:disabled)):not([data-selected]) {
+    background-color: var(--wiki-color-surface-hover);
+  }
+  &:has(input:focus-visible) {
+    outline: 2px solid var(--wiki-color-action-primary);
+    outline-offset: 2px;
+    input {
+      outline: none;
+    }
+  }
+  &:has(input:disabled) {
+    color: var(--wiki-color-text-secondary);
+    cursor: not-allowed;
+  }
+}
+.clarificationChoiceText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--wiki-space-4);
+}
+.clarificationChoiceHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wiki-space-4) var(--wiki-space-8);
+  > :first-child {
+    min-width: 0;
+  }
+}
+.clarificationDescription {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  white-space: pre-wrap;
+}
+.clarificationRecommendation {
+  flex-shrink: 0;
+  padding: 0 var(--wiki-space-4);
+  border-radius: var(--wiki-component-control-radius);
+  background-color: var(--wiki-color-action-surface);
+  color: var(--wiki-color-action-primary);
+  font-size: var(--wiki-font-size-12);
+  font-weight: 600;
+}
+.clarificationInput {
+  margin-top: var(--wiki-space-12);
+  > textarea {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 80px;
+    max-height: min(176px, 28vh);
+    padding: var(--wiki-space-10) var(--wiki-space-12);
+    border: 1px solid var(--wiki-color-border-control);
+    border-radius: var(--wiki-component-control-radius);
+    background-color: var(--wiki-color-surface-panel);
+    color: var(--wiki-color-text-primary);
+    font-size: var(--wiki-font-size-14);
+    line-height: var(--wiki-space-24);
+    resize: vertical;
+  }
+}
+.clarificationFooter {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding: var(--wiki-space-12) var(--wiki-space-16);
+  border-top: 1px solid var(--wiki-color-border-default);
+}
 .answer {
   min-width: 0;
 }

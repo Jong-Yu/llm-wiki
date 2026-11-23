@@ -18,7 +18,11 @@ try {
         ? ['web-research']
         : process.argv.includes('--live-usage')
           ? ['live-usage']
-          : ['verify', 'lifetime', 'cli-connection']) {
+          : process.argv.includes('--cli-connection')
+            ? ['cli-connection']
+            : process.argv.includes('--verify')
+              ? ['verify']
+              : ['verify', 'lifetime', 'cli-connection']) {
     await build({
       configFile: false,
       root: appRoot,

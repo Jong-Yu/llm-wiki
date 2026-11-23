@@ -49,6 +49,9 @@ export function buildChatTranscript(
   answers: readonly QuestionAnswer[],
 ): ChatMessage[] {
   const questions = new Map<string, ChatTurn>();
+  const messages = new Map(
+    turns.map((turn: ChatTurn): [string, ChatTurn] => [turn.id, turn]),
+  );
   const citations = new Map<string, KnowledgeValue[]>();
   const parsed = new Map<ChatTurn, QuestionContent>();
   for (const turn of turns) {
@@ -63,9 +66,33 @@ export function buildChatTranscript(
   function questionContent(turn: ChatTurn): QuestionContent {
     const cached = parsed.get(turn);
     if (cached) return cached;
-    const question = splitQuestion(turn.content);
+    // 추가 질문의 응답은 별도 첨부/템플릿 규약을 합치지 않은 사용자 원문입니다.
+    const question: QuestionContent = turn.clarification_turn_id
+      ? {
+          question: turn.content,
+          attachments: [],
+          template: null,
+          noEvidence: false,
+        }
+      : splitQuestion(turn.content);
     parsed.set(turn, question);
     return question;
+  }
+  /** 추가 질문의 응답도 원래 질문에 고정한 첨부·템플릿 표시를 이어 받습니다. */
+  function originalQuestion(turn: ChatTurn): ChatTurn {
+    let current = turn;
+    const seen = new Set<string>();
+    while (current.clarification_turn_id && !seen.has(current.id)) {
+      seen.add(current.id);
+      const clarification = messages.get(current.clarification_turn_id);
+      const parent =
+        clarification?.clarification && clarification.reply_to
+          ? questions.get(clarification.reply_to)
+          : undefined;
+      if (!parent) break;
+      current = parent;
+    }
+    return current;
   }
   let previous: ChatTurn | null = null;
   return turns.map((turn: ChatTurn): ChatMessage => {
@@ -83,7 +110,7 @@ export function buildChatTranscript(
     return {
       kind: 'answer',
       turn,
-      question: question ? questionContent(question) : null,
+      question: question ? questionContent(originalQuestion(question)) : null,
       questionTurnId: question?.id ?? null,
       citations: citations.get(turn.id) ?? turn.citations ?? [],
     };

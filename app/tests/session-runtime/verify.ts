@@ -43,7 +43,9 @@ const access = {
   policy_revision: revision,
 };
 const actor = { ...access, domain: null, viewpoint: null };
+let serverRequests = 0;
 const server = createServer((req, res) => {
+  serverRequests += 1;
   const id =
     req.url?.match(/(?:question-runs|analysis-jobs)\/([a-f0-9]{32})/)?.[1] ||
     one;
@@ -136,7 +138,11 @@ const context: AnalysisContext = {
   selection: { tenant: 'fixture', profile: 'default' },
 };
 const connection = new ConnectionService();
-connection.analysisContext = async () => context;
+let contextReads = 0;
+connection.analysisContext = async () => {
+  contextReads += 1;
+  return context;
+};
 connection.isAnalysisCurrent = () => current;
 connection.onScopeChanged = (listener: () => void): void => {
   listeners.push(listener);
@@ -156,6 +162,7 @@ const runtime = {
   python,
   ai: { provider: 'codex' as const, cli: 'fixture-cli', model: 'default' },
   privateRoot: join(temp, 'questions'),
+  sessionRoot: join(temp, 'question-sessions'),
 };
 const questions = new QuestionRunService(connection, async () => runtime);
 const analysis = new AnalysisService(
@@ -208,6 +215,46 @@ try {
   assert.equal(q2.ok, true, JSON.stringify(q2));
   assert.equal(questions.activities().length, 2);
   assert.equal(questions.activities()[0].conversationId, conversation);
+  const beforeLocalRequests = serverRequests;
+  const beforeLocalContexts = contextReads;
+  for (let index = 0; index < 10; index += 1) {
+    const local = questions.readLocal({ ...session, questionRunId: one });
+    assert.equal(local.ok, true);
+    assert.ok(local.ok && local.data);
+    if (local.ok && local.data) {
+      assert.equal(local.data.runId, one);
+      assert.equal(local.data.local.status, 'running');
+      assert.ok((local.data.local.sequence ?? 0) > 0);
+    }
+  }
+  assert.equal(serverRequests, beforeLocalRequests);
+  assert.equal(contextReads, beforeLocalContexts);
+  assert.deepEqual(questions.readLocal({ ...session, questionRunId: three }), {
+    ok: true,
+    data: null,
+  });
+  assert.deepEqual(
+    questions.readLocal({
+      ...session,
+      connectionId: 'another-connection',
+      questionRunId: one,
+    }),
+    { ok: true, data: null },
+  );
+  assert.deepEqual(
+    questions.readLocal({
+      ...session,
+      expectedScope: { ...scope, userId: 'another-user' },
+      questionRunId: one,
+    }),
+    { ok: true, data: null },
+  );
+  current = false;
+  assert.equal(
+    questions.readLocal({ ...session, questionRunId: one }).ok,
+    false,
+  );
+  current = true;
   const duplicate = await questions.start({
     ...session,
     questionRunId: one,
@@ -224,6 +271,13 @@ try {
   assert.deepEqual(
     questions.activities().map((item) => item.id),
     [two],
+  );
+  assert.deepEqual(questions.readLocal({ ...session, questionRunId: one }), {
+    ok: true,
+    data: null,
+  });
+  console.log(
+    'PASS question local stream scope/run isolation, closed run, zero server/context requests',
   );
   const [a1, a2] = await Promise.all(
     [one, two].map((jobId) =>

@@ -100,6 +100,7 @@ import type {
 import {
   QUESTION_RUN_CHANNELS,
   parseQuestionDetailResult,
+  parseQuestionLocalResult,
   parseQuestionPageResult,
   parseQuestionResumableResult,
   parseQuestionSearchTermsResult,
@@ -113,6 +114,7 @@ import type {
   QuestionStartRequest,
   QuestionCancelRequest,
   QuestionDetailResult,
+  QuestionLocalResult,
   QuestionPageResult,
   QuestionResumableRequest,
   QuestionResumableResult,
@@ -456,6 +458,13 @@ export function createWikiBridge(
       ): Promise<QuestionDetailResult> =>
         parseQuestionDetailResult(
           await invoke(QUESTION_RUN_CHANNELS.read, request),
+        ),
+      /** 실행 중 본문은 서버 재조회 없이 main의 현재 미저장 상태만 읽습니다. */
+      readLocal: async (
+        request: QuestionReadRequest,
+      ): Promise<QuestionLocalResult> =>
+        parseQuestionLocalResult(
+          await invoke(QUESTION_RUN_CHANNELS.readLocal, request),
         ),
       /** 명시 동작에서만 개인 CLI를 시작합니다. */
       start: async (

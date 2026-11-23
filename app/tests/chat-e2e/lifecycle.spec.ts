@@ -6,9 +6,219 @@ import {
   conversation,
   failure,
   lingeringFakeAi,
+  resize,
 } from './chat';
 
 test.describe('진행 중 상태·취소·복원', () => {
+  for (const withDetails of [false, true]) {
+    test(`추가 질문에서 답변을 기다리고 재시작 후 원래 작업을 이어간다${withDetails ? ' — 상황별 설명과 추천' : ''}`, async ({
+      launch,
+      openChat,
+      app,
+      shot,
+      aiCalls,
+    }) => {
+      const first = await launch();
+      await openChat(first);
+      await ask(
+        first,
+        `센서 경고 조건을 정리해 줘 #추가질문${withDetails ? ' #설명추천' : ''}`,
+      );
+      const waiting = first.locator('[data-chat-awaiting-input]');
+      await expect(waiting).toBeVisible();
+      await expect(waiting).toContainText('답변을 기다리고 있어요');
+      await expect(waiting).toContainText(
+        '상한 초과와 하한 미달 중 어떤 조건을 정리할까요?',
+      );
+      await expect(waiting.getByText('AI 추천', { exact: true })).toHaveCount(
+        withDetails ? 1 : 0,
+      );
+      if (withDetails) {
+        await expect(waiting).toContainText(
+          '낮은 값에서 발생한 경고를 확인하려는 상황',
+        );
+        await expect(
+          waiting.getByRole('radio', { name: '하한 미달', exact: true }),
+        ).not.toBeChecked();
+        await expect(
+          waiting.getByRole('radio', { name: '하한 미달', exact: true }),
+        ).toHaveAccessibleDescription(
+          /말씀하신 낮은 값의 경고 상황에 맞춰 정리합니다/,
+        );
+      }
+      await expect(
+        first.getByRole('button', { name: '응답 중단' }),
+      ).toHaveCount(0);
+      await expect.poll(lingeringFakeAi).toBe(0);
+      expect(await aiCalls()).toHaveLength(1);
+      await shot(first, '추가질문-사용자답변-대기');
+      await app().evaluate(({ BrowserWindow }): void => {
+        BrowserWindow.getAllWindows()[0]?.setMinimumSize(320, 480);
+      });
+      await resize(app(), 320, 800);
+      await shot(first, '추가질문-입력창위-좁은화면');
+      await resize(app(), 1400, 900);
+      await app().close();
+
+      const page = await launch();
+      await page
+        .getByRole('link', { name: 'AI 채팅' })
+        .click({ timeout: 30_000 });
+      await page
+        .getByRole('button', { name: /센서 경고 조건을 정리해 줘/ })
+        .click();
+      const chat = conversation(page);
+      const restored = page.locator('[data-chat-awaiting-input]');
+      await expect(restored).toBeVisible();
+      await expect(restored.getByText('AI 추천', { exact: true })).toHaveCount(
+        withDetails ? 1 : 0,
+      );
+      expect(await aiCalls()).toHaveLength(1);
+      await restored
+        .getByRole('radio', { name: '하한 미달', exact: true })
+        .check();
+      await expect(
+        restored.getByRole('radio', { name: '하한 미달', exact: true }),
+      ).toBeChecked();
+      await expect(composer(page)).toHaveCount(0);
+      expect(await aiCalls()).toHaveLength(1);
+      await shot(page, '추가질문-선택한답변');
+      await restored
+        .getByRole('radio', { name: '하한 미달', exact: true })
+        .press('ArrowDown');
+      await expect(
+        restored.getByRole('radio', { name: '직접 입력', exact: true }),
+      ).toBeChecked();
+      await expect(composer(page)).toBeFocused();
+      await composer(page).fill('하한 미달');
+      await expect(composer(page)).toHaveValue('하한 미달');
+      await composer(page).dispatchEvent('keydown', {
+        key: 'Enter',
+        isComposing: true,
+      });
+      expect(await aiCalls()).toHaveLength(1);
+      await composer(page).fill('하한 미달만 정리해 줘');
+      await shot(page, '추가질문-답변작성');
+      await page
+        .getByRole('button', { name: '답변 보내기', exact: true })
+        .click();
+      const finalAnswer = await answered(page);
+      await expect(
+        finalAnswer.getByRole('heading', { name: '요청하신 조건' }),
+      ).toBeVisible();
+      await expect(finalAnswer).toContainText(
+        '하한 미달만 정리해 줘 조건으로 정리했습니다.',
+      );
+      await expect(
+        finalAnswer.getByText('AI 추천', { exact: true }),
+      ).toHaveCount(0);
+      if (withDetails) {
+        await expect(finalAnswer).toContainText(
+          '선택할 때 보신 설명도 이어받았습니다',
+        );
+      }
+      await expect(chat.locator('[data-chat-streaming]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: '응답 중단' })).toHaveCount(
+        0,
+      );
+      await expect(page.locator('[data-chat-awaiting-input]')).toHaveCount(0);
+      await expect(chat).toContainText(
+        '상한 초과와 하한 미달 중 어떤 조건을 정리할까요?',
+      );
+      expect(await aiCalls()).toHaveLength(2);
+      expect((await aiCalls())[1]?.question).toContain(
+        '센서 경고 조건을 정리해 줘 #추가질문',
+      );
+      await shot(page, '추가질문-원래작업-완료');
+    });
+  }
+
+  test('실시간 본문이 늘어나고 저장된 최종 답변으로 교체된다', async ({
+    launch,
+    openChat,
+    shot,
+    aiCalls,
+  }) => {
+    const page = await launch();
+    await openChat(page);
+    await ask(page, '센서 경고를 설명해 줘 #실시간');
+    const chat = conversation(page);
+    const streaming = chat.locator('[data-chat-streaming]');
+    await expect(streaming).toBeVisible();
+    await expect(
+      chat.getByRole('article').filter({ hasText: '답변' }),
+    ).toHaveCount(0);
+    await expect(chat.locator('[data-chat-commentary]')).toHaveCount(2);
+    await expect(
+      chat.getByRole('heading', { name: '확인한 내용' }),
+    ).toBeVisible();
+    await expect(chat).not.toContainText(
+      '경고 해제 조건은 문서에서 확인되지 않았습니다.',
+    );
+    await shot(page, '실시간-첫-본문');
+    await expect(
+      chat.getByRole('listitem').filter({ hasText: '상한 초과' }),
+    ).toBeVisible();
+    await expect(streaming).toBeVisible();
+    await expect(
+      chat.getByRole('article').filter({ hasText: '답변' }),
+    ).toHaveCount(0);
+    await expect(chat).not.toContainText('"action"');
+    await expect(chat).not.toContainText('[[wiki-work-update]]');
+    await shot(page, '실시간-이어지는-본문');
+    const answer = await answered(page);
+    await expect(answer).toContainText(
+      '경고 해제 조건은 문서에서 확인되지 않았습니다.',
+    );
+    await expect(streaming).toHaveCount(0);
+    await expect(chat.locator('[data-chat-commentary]')).toHaveCount(0);
+    await expect(
+      chat.getByRole('heading', { name: '확인한 내용' }),
+    ).toHaveCount(1);
+    await expect(
+      chat.getByRole('article').filter({ hasText: '답변' }),
+    ).toHaveCount(1);
+    await shot(page, '실시간-저장된-최종답변');
+    expect(
+      (await aiCalls()).filter((call) => call.scenario === '실시간'),
+    ).toHaveLength(1);
+  });
+
+  test('실시간 생성 중 중단하면 부분 본문을 구분하고 다음 질문에 섞지 않는다', async ({
+    launch,
+    openChat,
+    shot,
+  }) => {
+    const page = await launch();
+    await openChat(page);
+    await ask(page, '일부 생성 후 멈추기 #스트림중단');
+    const chat = conversation(page);
+    await expect(
+      chat.getByRole('heading', { name: '중단할 답변' }),
+    ).toBeVisible();
+    await expect(chat.locator('[data-chat-streaming]')).toBeVisible();
+    await page.getByRole('button', { name: '응답 중단' }).click();
+    await expect(page.getByRole('button', { name: '응답 중단' })).toBeHidden();
+    await expect(chat).toContainText('중단 전 생성된 내용');
+    await expect(
+      chat.getByRole('article').filter({ hasText: '답변' }),
+    ).toHaveCount(0);
+    await expect(chat.locator('[data-chat-streaming]')).toHaveCount(0);
+    await expect(chat.locator('[data-chat-commentary]')).toHaveCount(0);
+    await expect.poll(lingeringFakeAi).toBe(0);
+    await shot(page, '실시간-중단된-부분본문');
+    await ask(page, '중단 후 새 질문 #정상');
+    const answer = await answered(page);
+    await expect(answer).toContainText('문서에 따르면 센서는');
+    await expect(
+      chat.getByRole('heading', { name: '중단할 답변' }),
+    ).toHaveCount(0);
+    await expect(
+      chat.getByRole('article').filter({ hasText: '답변' }),
+    ).toHaveCount(1);
+    await shot(page, '실시간-중단후-새답변');
+  });
+
   test('AI 작업 설명을 순서대로 보여주고 최종 답변으로 전환한다', async ({
     launch,
     openChat,
@@ -208,6 +418,49 @@ test.describe('진행 중 상태·취소·복원', () => {
     await page.getByRole('button', { name: /복원 확인/ }).click();
     await expect(conversation(page)).toContainText('문서에 따르면 센서는');
     await shot(page, '재시작-후-대화');
+  });
+
+  test('앱을 완전히 종료해도 AI 호출 확인을 유지하고 바로 질문한다', async ({
+    launch,
+    openChat,
+    app,
+    shot,
+    aiCalls,
+  }) => {
+    const first = await launch();
+    await openChat(first);
+    await first.getByRole('link', { name: '설정', exact: true }).click();
+    await first.getByRole('tab', { name: /AI/u }).click();
+    await first
+      .getByRole('button', { name: 'AI 호출 확인', exact: true })
+      .click();
+    const initialCard = first.locator('[data-level="verified"]');
+    await expect(initialCard).toBeVisible();
+    const verifiedAt = await initialCard
+      .locator('time')
+      .getAttribute('datetime');
+    expect(verifiedAt).toBeTruthy();
+    await app().close();
+
+    const page = await launch();
+    await page.getByRole('link', { name: '설정', exact: true }).click();
+    await page.getByRole('tab', { name: /AI/u }).click();
+    const restoredCard = page.locator('[data-level="verified"]');
+    await expect(restoredCard).toBeVisible();
+    await expect(restoredCard.locator('time')).toHaveAttribute(
+      'datetime',
+      verifiedAt!,
+    );
+    await expect(
+      page.getByRole('button', { name: 'AI 호출 확인', exact: true }),
+    ).toHaveCount(0);
+    await shot(page, '재시작-호출확인-복원');
+    await page.getByRole('link', { name: 'AI 채팅', exact: true }).click();
+    await ask(page, '재시작 후 추가 확인 없이 질문 #정상');
+    await answered(page);
+    await expect(conversation(page)).toContainText('문서에 따르면 센서는');
+    expect(await aiCalls()).toHaveLength(1);
+    await shot(page, '재시작-직후-질문');
   });
 
   test('실패한 대화도 앱 재시작 뒤 질문이 보존된다', async ({

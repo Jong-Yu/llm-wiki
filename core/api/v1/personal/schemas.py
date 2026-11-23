@@ -39,6 +39,7 @@ class AppendTurn(PersonalProfile):
     context_request: QuestionContextRequest | None = None
     reply_to: str | None = Field(None, pattern=r"^[0-9a-f]{32}$")
     template_ref: TemplateReference | None = None
+    clarification_turn_id: str | None = Field(None, pattern=r"^[0-9a-f]{32}$")
 
     @model_serializer(mode="wrap")
     def compatible_payload(self, handler):
@@ -46,15 +47,22 @@ class AppendTurn(PersonalProfile):
         value = handler(self)
         if self.template_ref is None:
             value.pop("template_ref", None)
+        if self.clarification_turn_id is None:
+            value.pop("clarification_turn_id", None)
         return value
 
     @model_validator(mode="after")
     def role_basis(self):
         """새 질문은 근거를 준비하고 답변은 실제 저장된 질문 하나를 참조한다."""
         if self.role == "user":
-            if self.context_request is None or self.reply_to is not None or self.status != "complete" or not self.content:
+            if ((self.context_request is None) == (self.clarification_turn_id is None)
+                    or self.reply_to is not None or self.status != "complete" or not self.content):
                 raise ValueError("A question needs explicit context")
+            if self.clarification_turn_id is not None and (self.template_ref is not None
+                    or not self.content.strip() or len(self.content) > 16000):
+                raise ValueError("A clarification response inherits context and contains at most 16000 characters")
         elif (self.reply_to is None or self.context_request is not None or self.template_ref is not None
+              or self.clarification_turn_id is not None
               or (not self.content and self.status != "failed")):
             raise ValueError("An answer needs a stored question reference")
         return self

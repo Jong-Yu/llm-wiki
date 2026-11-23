@@ -53,6 +53,7 @@ import { getAiConnectionPresentation } from '@renderer/shared/lib/useAiConnectio
 import { sessionContinuationHint } from '../model/sessionContinuation';
 import { ChatComposer } from './ChatComposer';
 import { ChatReply } from './ChatReply';
+import { ChatClarification } from './ChatClarification';
 import { ChatQuestionMessage } from './ChatQuestionMessage';
 import { useChatPanes } from './useChatPanes';
 import { ChatHistoryPanel } from './ChatHistoryPanel';
@@ -213,8 +214,8 @@ function ConnectedKnowledgeChat({
   // 같은 동작은 본문·예시·모델·범위 제어에서 같은 잠금 판단을 재사용합니다.
   const actionsDisabled = disabled || running;
   const pending = model.pending !== null;
-  const modelDisabled = actionsDisabled || pending;
-  const scopeDisabled = modelDisabled || uncertain;
+  const scopeDisabled = actionsDisabled || pending || uncertain;
+  const modelDisabled = scopeDisabled || !!model.clarification;
   // 연결 여부는 다른 화면과 같은 공통 훅으로 판단합니다. 진단 점검 항목은 실패 사유 안내에만 씁니다.
   const ai = useAiConnection();
   const aiUnavailable = ai.status === 'required';
@@ -581,7 +582,7 @@ function ConnectedKnowledgeChat({
                   </div>
                 </div>
               )}
-              {transcript.map((message: ChatMessage): JSX.Element => {
+              {transcript.map((message: ChatMessage): JSX.Element | null => {
                 const { turn, question } = message;
                 if (message.kind === 'question')
                   return (
@@ -604,6 +605,16 @@ function ConnectedKnowledgeChat({
                         ))}
                     </Fragment>
                   );
+                if (turn.clarification && model.clarification?.id === turn.id)
+                  return null;
+                if (turn.clarification)
+                  return (
+                    <ChatClarification
+                      key={turn.id}
+                      turn={turn}
+                      awaiting={false}
+                    />
+                  );
                 return (
                   <ChatReply
                     key={turn.id}
@@ -622,7 +633,11 @@ function ConnectedKnowledgeChat({
                     templateSnapshot={question?.registeredTemplate}
                     templateSession={access.session}
                     downloading={downloading}
-                    disabled={actionsDisabled || !question?.question}
+                    disabled={
+                      actionsDisabled ||
+                      !!model.clarification ||
+                      !question?.question
+                    }
                     onAsk={(): void => {
                       model.setDraft(question?.question ?? '');
                       if (question?.registeredTemplate)
@@ -646,7 +661,16 @@ function ConnectedKnowledgeChat({
               {model.submittedQuestion && (
                 <ChatQuestionMessage
                   key={model.submittedQuestion.id}
-                  question={splitQuestion(model.submittedQuestion.content)}
+                  question={
+                    model.clarification
+                      ? {
+                          question: model.submittedQuestion.content,
+                          attachments: [],
+                          template: null,
+                          noEvidence: false,
+                        }
+                      : splitQuestion(model.submittedQuestion.content)
+                  }
                 />
               )}
               <ChatRunFeedback
@@ -741,94 +765,112 @@ function ConnectedKnowledgeChat({
                 }
               />
             )}
-            <ChatComposer
-              key={model.thread.id}
-              draft={model.thread.draft}
-              onDraft={model.setDraft}
-              attachments={model.thread.attachments}
-              onAddAttachment={(text: string): 'added' | 'truncated' | 'full' =>
-                model.addAttachment({ kind: 'text', text })
-              }
-              onPickFile={
-                supportsFileAttachment()
-                  ? (): Promise<string | null> => attachChatFiles(model)
-                  : undefined
-              }
-              onDropFiles={
-                supportsAttachmentDrop()
-                  ? (files: File[]): Promise<string | null> =>
-                      attachChatFiles(model, files)
-                  : undefined
-              }
-              onRemoveAttachment={model.removeAttachment}
-              template={model.thread.template}
-              registeredTemplates={templates.data?.items ?? []}
-              templateNotice={
-                templates.error
-                  ? '등록한 템플릿을 읽지 못했습니다. 연결을 확인해 주세요.'
-                  : templates.isPending
-                    ? '템플릿을 읽고 있습니다.'
+            {model.clarification ? (
+              <ChatClarification
+                key={model.clarification.id}
+                turn={model.clarification}
+                awaiting
+                draft={model.thread.draft}
+                onDraft={model.setDraft}
+                disabled={scopeDisabled || !canWrite || aiUnavailable}
+                canSend={canSend}
+                onSend={sendQuestion}
+                textareaRef={textarea}
+                onKeyDown={handleKey}
+              />
+            ) : (
+              <ChatComposer
+                key={model.thread.id}
+                draft={model.thread.draft}
+                onDraft={model.setDraft}
+                attachments={model.thread.attachments}
+                onAddAttachment={(
+                  text: string,
+                ): 'added' | 'truncated' | 'full' =>
+                  model.addAttachment({ kind: 'text', text })
+                }
+                onPickFile={
+                  supportsFileAttachment()
+                    ? (): Promise<string | null> => attachChatFiles(model)
                     : undefined
-              }
-              onTemplate={model.setTemplate}
-              webEnabled={model.thread.webEnabled}
-              onWebEnabled={model.setWebEnabled}
-              providerName={provider}
-              models={modelOptions}
-              currentModel={currentModel}
-              onModel={(value: string): void => {
-                void model.selectModel(value);
-              }}
-              modelDisabled={modelDisabled}
-              scope={
-                model.thread.documents.length > 0
-                  ? {
-                      names: model.thread.documents.map(
-                        (path: string): string => documentDisplayName(path),
-                      ),
-                      onClear: model.clearDocumentScope,
-                      clearDisabled: scopeDisabled,
-                    }
-                  : null
-              }
-              locked={aiUnavailable}
-              disabled={
-                model.busy ||
-                !model.ready ||
-                model.invalidScope ||
-                aiUnavailable
-              }
-              canSend={canSend}
-              running={running}
-              inConversation={turns.length > 0}
-              afterError={!!(model.error || failedRun)}
-              sessionHint={sessionContinuationHint({
-                messages: turns.length,
-                unavailable:
-                  aiUnavailable ||
-                  !!problem ||
-                  !!model.pending ||
-                  loading ||
-                  !canWrite,
-                working,
-                resumable: model.resumable,
-                replaying: running && model.run?.local.historyReplayed === true,
-                restarted:
-                  model.run?.local.resumeFailed === true &&
-                  (!model.busy || running),
-              })}
-              fileHint={
-                latest?.role === 'assistant' &&
-                splitOutputDirective(latest.content).format !== null
-              }
-              stopping={model.run?.local.status === 'stopping'}
-              onSend={sendQuestion}
-              onStop={(): void => {
-                void model.cancel();
-              }}
-              textareaRef={textarea}
-              onKeyDown={handleKey}
-            />
+                }
+                onDropFiles={
+                  supportsAttachmentDrop()
+                    ? (files: File[]): Promise<string | null> =>
+                        attachChatFiles(model, files)
+                    : undefined
+                }
+                onRemoveAttachment={model.removeAttachment}
+                template={model.thread.template}
+                registeredTemplates={templates.data?.items ?? []}
+                templateNotice={
+                  templates.error
+                    ? '등록한 템플릿을 읽지 못했습니다. 연결을 확인해 주세요.'
+                    : templates.isPending
+                      ? '템플릿을 읽고 있습니다.'
+                      : undefined
+                }
+                onTemplate={model.setTemplate}
+                webEnabled={model.thread.webEnabled}
+                onWebEnabled={model.setWebEnabled}
+                providerName={provider}
+                models={modelOptions}
+                currentModel={currentModel}
+                onModel={(value: string): void => {
+                  void model.selectModel(value);
+                }}
+                modelDisabled={modelDisabled}
+                scope={
+                  model.thread.documents.length > 0
+                    ? {
+                        names: model.thread.documents.map(
+                          (path: string): string => documentDisplayName(path),
+                        ),
+                        onClear: model.clearDocumentScope,
+                        clearDisabled: scopeDisabled || !!model.clarification,
+                      }
+                    : null
+                }
+                locked={aiUnavailable}
+                disabled={
+                  model.busy ||
+                  !model.ready ||
+                  model.invalidScope ||
+                  aiUnavailable
+                }
+                canSend={canSend}
+                running={running}
+                inConversation={turns.length > 0}
+                afterError={!!(model.error || failedRun)}
+                sessionHint={sessionContinuationHint({
+                  messages: turns.length,
+                  unavailable:
+                    aiUnavailable ||
+                    !!problem ||
+                    !!model.pending ||
+                    loading ||
+                    !canWrite,
+                  working,
+                  resumable: model.resumable,
+                  replaying:
+                    running && model.run?.local.historyReplayed === true,
+                  restarted:
+                    model.run?.local.resumeFailed === true &&
+                    (!model.busy || running),
+                })}
+                fileHint={
+                  latest?.role === 'assistant' &&
+                  splitOutputDirective(latest.content).format !== null
+                }
+                stopping={model.run?.local.status === 'stopping'}
+                onSend={sendQuestion}
+                onStop={(): void => {
+                  void model.cancel();
+                }}
+                textareaRef={textarea}
+                onKeyDown={handleKey}
+              />
+            )}
             {downloadError && (
               <StatusNotice
                 variant="box"

@@ -233,6 +233,28 @@ function runReport(
 }
 /** 같은 제공자의 자동 로그인 확인 사이 최소 간격입니다. */
 const AUTO_CHECK_INTERVAL_MS = 30_000;
+const aiVerificationSchema = z
+  .object({
+    version: z.literal(1),
+    key: z.string().regex(/^[a-f0-9]{64}$/u),
+    verifiedAt: z.iso.datetime(),
+  })
+  .strict();
+type AiVerification = z.infer<typeof aiVerificationSchema>;
+/** 실제 호출에 사용한 제공자·모델·실행 경로가 같을 때만 이전 성공 기록을 재사용합니다. */
+function verificationKey(settings: RuntimeSettings): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        settings.provider,
+        settings.models[settings.provider],
+        settings[settings.provider],
+        settings.root,
+        settings.python,
+      ]),
+    )
+    .digest('hex');
+}
 /** 설정 파일의 전체 기준을 고정해 다른 인스턴스의 변경을 덮어쓰지 않습니다. */
 function digest(bytes: Buffer | null): string | null {
   return bytes ? createHash('sha256').update(bytes).digest('hex') : null;
@@ -249,6 +271,10 @@ export class RuntimeSettingsService {
   #issue: string | null = null;
   #checks: RuntimeCheck[] = [];
   #connection: CliConnection | null = null;
+  #verifiedSettingsKey: string | null = null;
+  #verification: AiVerification | null = null;
+  #verificationRevision: string | null = null;
+  #verificationWritable = true;
   #diagnostic: DiagnosticReport | null = null;
   readonly #bundled: BundledRuntimePaths | null;
   readonly #openReport: OpenReport;
@@ -307,8 +333,8 @@ export class RuntimeSettingsService {
     this.#initial = { ...this.#settings };
   }
   /** 기존 파일의 형식·링크·크기를 검사한 뒤 읽습니다. */
-  async #bytes(): Promise<Buffer | null> {
-    const path = join(this.#directory, 'runtime.json');
+  async #bytes(name: string = 'runtime.json'): Promise<Buffer | null> {
+    const path = join(this.#directory, name);
     try {
       const stat = await lstat(path);
       if (
@@ -354,6 +380,19 @@ export class RuntimeSettingsService {
       this.#initial = { ...this.#settings };
       if (bytes) this.#savedSettings = { ...this.#settings };
       this.applyEnvironment();
+      // 구버전 앱·진단기가 읽는 runtime.json은 유지하고 비밀 없는 성공 기록만 따로 읽습니다.
+      try {
+        const verification = await this.#bytes('ai-verification.json');
+        this.#verificationRevision = digest(verification);
+        this.#verification = verification
+          ? aiVerificationSchema.parse(
+              JSON.parse(verification.toString('utf8')),
+            )
+          : null;
+      } catch {
+        // 보조 기록의 손상이 실행 설정 복원을 막거나 기존 파일 덮어쓰기로 이어지지 않게 합니다.
+        this.#verificationWritable = false;
+      }
     } catch {
       this.#issue = '저장 설정을 읽을 수 없습니다. 기존 파일을 보존했습니다.';
     }
@@ -405,7 +444,17 @@ export class RuntimeSettingsService {
         JSON.stringify(this.#settings) === JSON.stringify(this.#savedSettings),
       issue: this.#issue,
       checks: [...this.#checks],
-      ...(this.#connection ? { cliConnection: { ...this.#connection } } : {}),
+      ...(this.#connection
+        ? {
+            cliConnection: {
+              ...this.#connection,
+              verifiedAt:
+                this.#verifiedSettingsKey === verificationKey(this.#settings)
+                  ? this.#connection.verifiedAt
+                  : null,
+            },
+          }
+        : {}),
       ...(this.#diagnostic
         ? { diagnosticReport: { ...this.#diagnostic } }
         : {}),
@@ -489,6 +538,9 @@ export class RuntimeSettingsService {
     verifiedAt: string | null = null,
     event: string | null = null,
   ): void {
+    this.#verifiedSettingsKey = verifiedAt
+      ? verificationKey(this.#settings)
+      : null;
     this.#connection = {
       provider: this.#settings.provider,
       status,
@@ -497,6 +549,19 @@ export class RuntimeSettingsService {
       verifiedAt,
       ...(event ? { event } : {}),
     };
+  }
+  /** 현재 CLI 로그인 확인 뒤에만 같은 실행 설정의 지난 호출 성공 시각을 표시합니다. */
+  #setLoggedIn(provider: AiProvider): void {
+    const verifiedAt =
+      this.#verification?.key === verificationKey(this.#settings)
+        ? this.#verification.verifiedAt
+        : null;
+    this.#setConnection(
+      'connected',
+      `${provider === 'claude' ? 'Claude Code' : 'Codex'} 로그인이 확인되었습니다.`,
+      null,
+      verifiedAt,
+    );
   }
   /** 실행 파일을 찾고 로그인되어 있지 않으면 사용자 터미널에서 로그인을 시작합니다. */
   async connectCli(): Promise<RuntimeSnapshot> {
@@ -508,7 +573,7 @@ export class RuntimeSettingsService {
       await this.#resolveDefaultCli(provider);
       const login = await checkCliLogin(provider, this.#settings[provider]);
       if (login.status === 'logged_in') {
-        this.#setConnection('connected', `${name} 로그인이 확인되었습니다.`);
+        this.#setLoggedIn(provider);
         await this.#activateProvider(provider);
       } else if (login.status === 'logged_out') {
         try {
@@ -547,7 +612,7 @@ export class RuntimeSettingsService {
       const name = provider === 'claude' ? 'Claude Code' : 'Codex';
       const login = await checkCliLogin(provider, this.#settings[provider]);
       if (login.status === 'logged_in') {
-        this.#setConnection('connected', `${name} 로그인이 확인되었습니다.`);
+        this.#setLoggedIn(provider);
         await this.#activateProvider(provider);
       } else if (login.status === 'logged_out')
         this.#setConnection(
@@ -588,10 +653,7 @@ export class RuntimeSettingsService {
         this.#settings.provider === provider &&
         this.#connection === null
       ) {
-        this.#setConnection(
-          'connected',
-          `${provider === 'claude' ? 'Claude Code' : 'Codex'} 로그인이 확인되었습니다.`,
-        );
+        this.#setLoggedIn(provider);
         await this.#activateProvider(provider);
       }
     } finally {
@@ -652,20 +714,34 @@ export class RuntimeSettingsService {
             settings,
           ),
         );
-      if (raw.ok)
+      if (raw.ok) {
+        await this.#activateProvider(provider);
+        const verifiedAt = new Date().toISOString();
+        const verification: AiVerification = {
+          version: 1,
+          key: verificationKey(settings),
+          verifiedAt,
+        };
+        const saved =
+          verification.key ===
+            verificationKey(this.#savedSettings ?? this.#initial) &&
+          (await this.#writeVerification(verification));
         this.#setConnection(
           'connected',
-          `${name}를 실제로 호출해 응답을 확인했습니다.`,
-          null,
-          new Date().toISOString(),
+          saved
+            ? `${name}를 실제로 호출해 응답을 확인했습니다.`
+            : `${name}의 응답은 확인했지만 기록을 저장하지 못했습니다. 변경한 실행 설정을 저장한 뒤 다시 확인해 주세요.`,
+          saved ? null : 'ai_verification_not_saved',
+          verifiedAt,
         );
-      else {
+      } else {
+        const cleared = await this.#clearVerification();
         const code = raw.error?.code ?? 'ai_test_failed';
         // 형식이 맞는 이름표만 보여 주고 다른 값은 버립니다.
         const event = aiCliEventSchema.safeParse(raw.error?.event);
         this.#setConnection(
           'error',
-          code === 'ai_cli_event_rejected'
+          (code === 'ai_cli_event_rejected'
             ? `${name}가 앱이 허용하지 않는 동작(훅·하위 작업 등)을 보내 호출을 멈췄습니다. 문제 상세의 메시지 종류를 확인해 주세요.`
             : code === 'ai_cli_unavailable'
               ? `${name} 실행 파일을 실행하지 못했습니다. 설치 위치를 ‘프로그램 위치 변경’에서 다시 선택해 주세요.`
@@ -673,16 +749,23 @@ export class RuntimeSettingsService {
                 ? `${name} 설치나 로그인 문제가 아니라 앱이 호출을 준비하는 단계(프로세스·작업 폴더 보호)에서 실패했습니다. 문제 상세의 오류 코드를 확인해 주세요.`
                 : code === 'ai_rate_limited'
                   ? `${name}의 사용 한도에 도달했습니다. 한도가 풀린 뒤 다시 시험해 주세요.`
-                  : `${name} 로그인은 확인됐지만 실제 호출에 실패했습니다. 터미널에서 ${provider}가 응답하는지 확인해 주세요.`,
+                  : `${name} 로그인은 확인됐지만 실제 호출에 실패했습니다. 터미널에서 ${provider}가 응답하는지 확인해 주세요.`) +
+            (cleared
+              ? ''
+              : ' 이전 성공 기록을 지우지 못해 재시작하면 지난 확인 시각이 표시될 수 있습니다.'),
           code,
           null,
           event.success ? event.data : null,
         );
       }
     } catch {
+      const cleared = await this.#clearVerification();
       this.#setConnection(
         'error',
-        `${name}를 호출해 보지 못했습니다. Python·프로젝트 폴더 설정과 ${name} 설치를 확인해 주세요.`,
+        `${name}를 호출해 보지 못했습니다. Python·프로젝트 폴더 설정과 ${name} 설치를 확인해 주세요.` +
+          (cleared
+            ? ''
+            : ' 이전 성공 기록을 지우지 못해 재시작하면 지난 확인 시각이 표시될 수 있습니다.'),
         'ai_test_unavailable',
       );
     } finally {
@@ -845,6 +928,57 @@ export class RuntimeSettingsService {
       await lock.close();
       await unlink(lockPath);
     }
+  }
+  /** 설정과 같은 잠금으로 성공 기록을 교체하며 다른 앱의 설정·기록 변경은 보존합니다. */
+  async #writeVerification(value: AiVerification | null): Promise<boolean> {
+    if (!this.#verificationWritable || this.#issue) return false;
+    try {
+      await mkdir(this.#directory, { recursive: true, mode: 0o700 });
+      const info = await lstat(this.#directory);
+      if (!info.isDirectory() || info.isSymbolicLink()) return false;
+      const lockPath = join(this.#directory, 'runtime.lock');
+      const lock = await open(lockPath, 'wx', 0o600);
+      const temporary = join(
+        this.#directory,
+        `.verification-${randomUUID()}.tmp`,
+      );
+      const destination = join(this.#directory, 'ai-verification.json');
+      try {
+        if (
+          digest(await this.#bytes()) !== this.#revision ||
+          digest(await this.#bytes('ai-verification.json')) !==
+            this.#verificationRevision
+        )
+          return false;
+        const bytes = value ? Buffer.from(JSON.stringify(value)) : null;
+        if (bytes) {
+          const file = await open(temporary, 'wx', 0o600);
+          try {
+            await file.writeFile(bytes);
+            await file.sync();
+          } finally {
+            await file.close();
+          }
+          await rename(temporary, destination);
+        } else if (this.#verificationRevision !== null)
+          await unlink(destination);
+        this.#verificationRevision = digest(bytes);
+        this.#verification = value;
+        return true;
+      } finally {
+        await unlink(temporary).catch((): void => {});
+        await lock.close();
+        await unlink(lockPath);
+      }
+    } catch {
+      return false;
+    }
+  }
+  /** 새 호출이 실패하면 지난 성공을 다시 복원하지 않도록 기록을 해제합니다. */
+  async #clearVerification(): Promise<boolean> {
+    if (!this.#verification && this.#verificationRevision === null) return true;
+    this.#verification = null;
+    return this.#writeVerification(null);
   }
   /** 기존 읽기 전용 진단을 호출하며 모델·로그인·설치를 시작하지 않습니다. */
   async diagnose(): Promise<RuntimeSnapshot> {

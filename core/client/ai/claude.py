@@ -80,7 +80,7 @@ def _check_argument_size(arguments, env):
 class _Events:
     """공개 답변만 미리 보여 주고 원시 추론/오류/계정 정보는 보존하지 않는다."""
 
-    def __init__(self, *, web_search=False):
+    def __init__(self, *, web_search=False, stream_answer=False):
         self.trace, self.structured_ids = [], set()
         self.result, self.model = None, None
         self.token_usage = None
@@ -89,6 +89,90 @@ class _Events:
         self.web_tool_ids, self.web_completed_ids = set(), set()
         self.web_inputs, self.web_queries = {}, []
         self.web_queries_complete = True
+        self.stream_answer = stream_answer
+        self.stream_message = None
+        self.stream_blocks = {}
+
+    def _stream_event(self, event, callback):
+        """공개 텍스트·구조화 답변의 부분 값만 누적하며 추론과 다른 도구 입력은 내보내지 않는다."""
+        if not self.stream_answer or event.get("parent_tool_use_id") is not None:
+            raise AIAdapterError("ai_cli_event_rejected", event="type:stream_event")
+        value = event["event"]
+        kind = value["type"]
+        if kind == "message_start":
+            message = value["message"]
+            if (self.stream_message is not None or message.get("role") != "assistant"
+                    or not isinstance(message.get("id"), str) or not 1 <= len(message["id"]) <= 256):
+                raise AIAdapterError("ai_invalid_events")
+            self.stream_message = message["id"]
+            self.stream_blocks = {}
+            return
+        if self.stream_message is None:
+            raise AIAdapterError("ai_invalid_events")
+        if kind == "message_stop":
+            if self.stream_blocks:
+                raise AIAdapterError("ai_invalid_events")
+            self.stream_message = None
+            return
+        if kind == "message_delta":
+            return
+        index = value.get("index")
+        if type(index) is not int or not 0 <= index < 128:
+            raise AIAdapterError("ai_invalid_events")
+        if kind == "content_block_start":
+            if index in self.stream_blocks:
+                raise AIAdapterError("ai_invalid_events")
+            block = value["content_block"]
+            block_type = block["type"]
+            item_id = f"{self.stream_message}:{index}"
+            text = ""
+            if block_type == "text":
+                text = block.get("text", "")
+                if not isinstance(text, str):
+                    raise AIAdapterError("ai_invalid_events")
+                output_kind = "public_text"
+            elif block_type == "tool_use" and block.get("name") == "StructuredOutput":
+                item_id = block.get("id")
+                if not isinstance(item_id, str) or not 1 <= len(item_id) <= 256 or block.get("input") != {}:
+                    raise AIAdapterError("ai_invalid_events")
+                output_kind = "structured_output"
+            elif block_type in {"thinking", "redacted_thinking"}:
+                output_kind = None
+            else:
+                raise AIAdapterError("ai_unexpected_tool_activity")
+            self.stream_blocks[index] = {"kind": output_kind, "type": block_type,
+                                         "text": text, "id": item_id}
+            if text:
+                self._emit_stream(self.stream_blocks[index], callback)
+            return
+        block = self.stream_blocks.get(index)
+        if block is None:
+            raise AIAdapterError("ai_invalid_events")
+        if kind == "content_block_stop":
+            del self.stream_blocks[index]
+            return
+        if kind != "content_block_delta":
+            raise AIAdapterError("ai_invalid_events")
+        delta = value["delta"]
+        if block["kind"] is None:
+            if delta.get("type") not in {"thinking_delta", "signature_delta"}:
+                raise AIAdapterError("ai_invalid_events")
+            return
+        expected, field = (("text_delta", "text") if block["kind"] == "public_text"
+                           else ("input_json_delta", "partial_json"))
+        if delta.get("type") != expected or not isinstance(delta.get(field), str):
+            raise AIAdapterError("ai_invalid_events")
+        block["text"] += delta[field]
+        self._emit_stream(block, callback)
+
+    @staticmethod
+    def _emit_stream(block, callback):
+        """부분 이벤트도 기존 전체 교체 스냅샷 계약과 출력 크기 한도를 지킨다."""
+        if len(block["text"].encode("utf-8")) > MAX_RESULT_BYTES:
+            raise AIAdapterError("ai_output_limit")
+        if block["text"]:
+            callback({"type": "agent_message", "kind": block["kind"], "text": block["text"],
+                      "event": "item.updated", "item_id": block["id"]})
 
     def __call__(self, line, callback):
         if not line.strip():
@@ -98,7 +182,7 @@ class _Events:
             kind = event["type"]
             if self.result is not None:
                 raise AIAdapterError("ai_invalid_events")
-            if kind not in {"system", "assistant", "user", "result", "rate_limit_event"}:
+            if kind not in {"system", "assistant", "user", "result", "rate_limit_event", "stream_event"}:
                 raise AIAdapterError("ai_cli_event_rejected", event="type:" + _event_name(kind))
             self.trace.append({"type": kind})
             if event.get("session_id") is not None:
@@ -106,7 +190,9 @@ class _Events:
                 if self.session_id is not None and observed_id != self.session_id:
                     raise AIAdapterError("ai_session_mismatch")
                 self.session_id = observed_id
-            if kind == "system":
+            if kind == "stream_event":
+                self._stream_event(event, callback)
+            elif kind == "system":
                 # 훅·하위 작업·명령 실행 등은 고정 입력 분석에 끼어든 것이므로 거부한다. 진행을 멈추라는
                 # 표시가 붙은 메시지도 거부한다. 그 밖의 안내(새 종류 포함)는 이름만 기록하고 통과시킨다.
                 subtype = _event_name(event.get("subtype"))
@@ -160,6 +246,8 @@ class _Events:
                     elif block["type"] != "tool_result" or block.get("tool_use_id") not in self.structured_ids:
                         raise AIAdapterError("ai_unexpected_tool_activity")
             elif kind == "result":
+                if self.stream_answer and self.stream_message is not None:
+                    raise AIAdapterError("ai_incomplete_turn")
                 if event.get("subtype") != "success" or event.get("is_error") is not False:
                     raise AIAdapterError("ai_execution_failed")
                 if event.get("permission_denials"):
@@ -224,11 +312,13 @@ class ClaudeAdapter(CodexAdapter):
         self._question_profile_checked = True
 
     async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None, web_search=False,
-                  question_profile=False):
+                  question_profile=False, stream_answer=False):
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
                 or output_schema is not None and not isinstance(output_schema, dict)
                 or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)
                 or type(question_profile) is not bool
+                or type(stream_answer) is not bool
+                or stream_answer and not question_profile
                 or question_profile and (session_id is not None or self.persist_session or web_search)):
             raise AIAdapterError("ai_invalid_input")
         prompt_bytes, original_schema = prompt.encode("utf-8"), canonical_json_bytes(schema)
@@ -255,6 +345,8 @@ class ClaudeAdapter(CodexAdapter):
             arguments.append("--no-session-persistence")
         if self.model is not None:
             arguments.extend(["--model", self.model])
+        if stream_answer:
+            arguments.append("--include-partial-messages")
         instructions = None
         if question_profile:
             from .question_profile import VERSION, FILENAME, INSTRUCTIONS
@@ -284,12 +376,19 @@ class ClaudeAdapter(CodexAdapter):
             metadata["question_profile"] = {"version": VERSION, "instructions_file": FILENAME,
                 "instructions_sha256": sha256(instructions).hexdigest(),
                 "instructions_argument": "--append-system-prompt", "feature_support_checked": False}
-        events, started = _Events(web_search=web_search), time.monotonic()
+        if stream_answer:
+            metadata["answer_stream"] = {"transport": "stream-json", "partial_messages": True}
+        events, started = _Events(web_search=web_search, stream_answer=stream_answer), time.monotonic()
         callback = on_event if on_event is not None else self.on_event
         try:
             if question_profile:
                 await self._check_question_profile(executable, env)
                 metadata["question_profile"]["feature_support_checked"] = True
+            if stream_answer and not getattr(self, "_answer_stream_checked", False):
+                code, help_output, _ = await _execute([*executable, "--help"], directory=None, environment=env)
+                if code != 0 or b"--include-partial-messages" not in help_output:
+                    raise AIAdapterError("ai_cli_incompatible")
+                self._answer_stream_checked = True
             code, output, stderr = await _execute(arguments, directory=execution_directory, environment=env,
                 prompt=prompt_bytes, timeout=self.timeout_seconds, on_event=callback or (lambda _: None), event_parser=events)
             metadata.update(returncode=code, stdout_sha256=sha256(output).hexdigest(), stderr_sha256=sha256(stderr).hexdigest(),

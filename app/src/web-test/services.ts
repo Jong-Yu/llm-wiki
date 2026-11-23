@@ -479,6 +479,12 @@ export async function createWebServices(
   register(QUESTION_RUN_CHANNELS.read, 1, (value: unknown): Promise<unknown> =>
     questions.read(questionReadSchema.parse(value)),
   );
+  register(
+    QUESTION_RUN_CHANNELS.readLocal,
+    1,
+    async (value: unknown): Promise<unknown> =>
+      questions.readLocal(questionReadSchema.parse(value)),
+  );
   register(QUESTION_RUN_CHANNELS.start, 1, (value: unknown): Promise<unknown> =>
     questions.start(questionStartSchema.parse(value)),
   );

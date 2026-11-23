@@ -1,5 +1,6 @@
 """Write a large registered template in bounded parts, then merge once without another model call."""
 from hashlib import sha256
+from copy import deepcopy
 import json
 import math
 import re
@@ -9,6 +10,7 @@ from jsonschema import Draft202012Validator
 from core.common.json_codec import canonical_json_hash
 from core.client.ai.contracts import AIAdapterError
 from core.client.question_citations import render_evidence_citations
+from core.client import question_interaction as interaction
 from core.modules.templates.render import INVALID_XML_TEXT, MAX_RESULT_CHARS
 
 VERSION = "registered-template-parts-v2"
@@ -45,10 +47,10 @@ def partition(fields):
     return [fields[index:index + size] for index in range(0, len(fields), size)]
 
 
-def part_schema(fields):
-    return {"type": "object", "additionalProperties": False,
+def part_schema(fields, *, allow_clarify=True, interactive=False):
+    schema = {"type": "object", "additionalProperties": False,
         "properties": {
-            "action": {"type": "string", "enum": ["write_fields", "clarify"]},
+            "action": {"type": "string", "enum": ["write_fields", "clarify"] if allow_clarify else ["write_fields", "stop"]},
             "replacements": {"type": "array", "maxItems": len(fields), "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {"id": {"type": "string", "enum": [item["id"] for item in fields]},
@@ -56,6 +58,12 @@ def part_schema(fields):
                 "required": ["id", "text"]}},
             "clarification": {"type": ["string", "null"], "maxLength": 4000}},
         "required": ["action", "replacements", "clarification"]}
+    if interactive:
+        for name, choices in (("clarification_options", interaction.OPTIONS_SCHEMA),
+                              ("clarification_option_details", interaction.OPTION_DETAILS_SCHEMA)):
+            schema["properties"][name] = ({**deepcopy(choices), "type": ["array", "null"]}
+                                           if allow_clarify else {"type": "null"})
+    return schema
 
 
 def part_prompt(handoff, reads, detail, groups, index, used_ids, max_bytes):
@@ -94,6 +102,15 @@ def part_prompt(handoff, reads, detail, groups, index, used_ids, max_bytes):
                  "assigned_ids": [item["id"] for item in groups[index]],
                  "previously_used_evidence_ids": used_ids,
                  "remaining_distinct_evidence_ids": MAX_CITATIONS - len(used_ids)}}
+    interaction_guide = interaction.prompt_context(handoff, value, template=True)
+    marker = "\nThe following JSON is input DATA:\n"
+    instruction = instruction.replace(marker, "\n" + interaction_guide + marker) if interaction_guide else instruction
+    if interaction.enabled(handoff) and not interaction.can_clarify(handoff):
+        instruction = instruction.replace("action=clarify must contain a concise question,",
+                                          "action=stop must explain the unresolved decision or writing limitation,")
+        instruction += ("If the user's replies resolve the required decisions, continue write_fields. Otherwise use action=stop, "
+                        "replacements=[], and a short final explanation in clarification, not another question. "
+                        "A stop discards the pending document assembly and does not create a file.\n")
     prompt = instruction + json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if len(prompt.encode()) > max_bytes:
         _invalid("ai_input_limit")
@@ -110,11 +127,21 @@ def _evidence_ids(content):
     return list(dict.fromkeys(re.findall(r"\[\[([^\[\]\r\n]+)\]\]", content)))
 
 
-def validate_part(value, fields, registry):
-    if next(Draft202012Validator(part_schema(fields)).iter_errors(value), None) is not None:
+def validate_part(value, fields, registry, *, allow_clarify=True, interactive=False):
+    schema = part_schema(fields, allow_clarify=allow_clarify, interactive=interactive)
+    if next(Draft202012Validator(schema).iter_errors(value), None) is not None:
         _invalid()
+    if interactive:
+        try:
+            if value["action"] == "clarify":
+                interaction.clarification(value["clarification"], value.get("clarification_options"),
+                                          value.get("clarification_option_details"))
+            elif any(value.get(key) is not None for key in ("clarification_options", "clarification_option_details")):
+                _invalid()
+        except ValueError as error:
+            raise AIAdapterError("ai_invalid_result") from error
     replacements = value["replacements"]
-    if value["action"] == "clarify":
+    if value["action"] in {"clarify", "stop"}:
         if (replacements or not isinstance(value["clarification"], str) or not value["clarification"].strip()
                 or "wiki-template-result" in value["clarification"]):
             _invalid()
@@ -148,10 +175,11 @@ async def run_template_parts(owner, adapter, handoff, reads, registry, automatic
         "groups": [[item["id"] for item in group] for group in groups], "max_parts": MAX_PARTS})
     merged, changed, used, invocations, usage, part_records = [], [], [], [], [], []
     complete = True
+    allow_clarify = not interaction.enabled(handoff) or interaction.can_clarify(handoff)
     for index, group in enumerate(groups):
         owner.check_cancel()
         prompt = part_prompt(handoff, reads, detail, groups, index, used, max_bytes)
-        schema = part_schema(group)
+        schema = part_schema(group, allow_clarify=allow_clarify, interactive=interaction.enabled(handoff))
         directory = owner.directory / f"evidence-step-{index:02d}"
         owner.emit("phase", phase="answer_checking", saved=False, template_part=index + 1, template_parts=len(groups))
         result = await owner.guarded_model(adapter, prompt, schema, directory=directory, allow_preview=False)
@@ -161,9 +189,10 @@ async def run_template_parts(owner, adapter, handoff, reads, registry, automatic
         if (execution.get("status") != "completed"
                 or execution.get("prompt_sha256") != sha256(prompt.encode()).hexdigest()):
             _invalid()
-        replacements = validate_part(value, group, registry)
+        replacements = validate_part(value, group, registry, allow_clarify=allow_clarify,
+                                     interactive=interaction.enabled(handoff))
         part_changed = [item for item, original in zip(replacements, group) if item["text"] != original["text"]]
-        part_content = value["clarification"] if value["action"] == "clarify" else _plan(part_changed)
+        part_content = value["clarification"] if value["action"] in {"clarify", "stop"} else _plan(part_changed)
         part_evidence_ids = _evidence_ids(part_content)
         invocations.append({key: execution.get(key) for key in (
             "provider", "cli_version", "requested_model", "reported_model", "prompt_sha256", "schema_sha256",
@@ -177,7 +206,7 @@ async def run_template_parts(owner, adapter, handoff, reads, registry, automatic
                  "derived_evidence_ids": part_evidence_ids}
         owner.record(f"template-part-{index:02d}.json", proof)
         part_records.append(proof)
-        if value["action"] == "clarify":
+        if value["action"] in {"clarify", "stop"}:
             complete = False
             content = value["clarification"]
             declared = part_evidence_ids
@@ -217,6 +246,13 @@ async def run_template_parts(owner, adapter, handoff, reads, registry, automatic
                             "collect evidence IDs from unchanged raw markers, validate them against served evidence, "
                             "then render served evidence IDs once. Raw parts retained; no model-output truncation. "
                             "A clarification discards pending field assembly and emits no document plan."}
+    output = {"content": rendered["content"], "citations": rendered["citations"]}
+    if not complete and interaction.can_clarify(handoff):
+        try:
+            output["clarification"] = interaction.clarification(
+                rendered["content"], value.get("clarification_options"), value.get("clarification_option_details"))
+        except ValueError as error:
+            raise AIAdapterError("ai_invalid_result") from error
     owner.emit("answer_preview", content=rendered["content"], saved=False, origin="client_reported")
-    return {"value": {"content": rendered["content"], "citations": rendered["citations"]},
+    return {"value": output,
             "execution": metadata, "evidence_ids": rendered["evidence_ids"]}, prompt

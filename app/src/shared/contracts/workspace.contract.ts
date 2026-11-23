@@ -600,6 +600,7 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
         context_request: questionContextInput.nullable().optional(),
         reply_to: id.nullable().optional(),
         template_ref: z.strictObject({ id, revision }).nullable().optional(),
+        clarification_turn_id: id.optional(),
       })
       .refine(
         (value: {
@@ -607,17 +608,24 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
           context_request?: unknown;
           reply_to?: string | null;
           template_ref?: { id: string; revision: string } | null;
+          clarification_turn_id?: string;
           status?: 'complete' | 'failed';
           content: string;
         }): boolean =>
           value.role === 'user'
-            ? value.context_request != null &&
+            ? (value.clarification_turn_id !== undefined
+                ? value.context_request == null &&
+                  value.template_ref == null &&
+                  value.content.length <= 16000 &&
+                  !!value.content.trim()
+                : value.context_request != null) &&
               value.reply_to == null &&
               value.status !== 'failed' &&
               value.content.length > 0
             : value.reply_to != null &&
               value.context_request == null &&
               value.template_ref == null &&
+              value.clarification_turn_id === undefined &&
               (value.content.length > 0 || value.status === 'failed'),
         '질문은 명시 맥락, 답변은 저장된 질문 참조가 필요합니다.',
       ),

@@ -92,7 +92,7 @@ export function AiStatusCard({
         )}
       </>
     ),
-    login: '아직 실제로 AI를 호출해 보지 않았어요',
+    login: '현재 설정으로 저장된 호출 확인 기록이 없어요',
     required: `${providerName}에 로그인하면 질문과 문서 분석을 쓸 수 있어요`,
     waiting: '터미널이나 브라우저에서 로그인을 마쳐 주세요',
     checking: `${providerName} 연결 상태를 확인하고 있어요`,
@@ -170,6 +170,9 @@ export function AiStatusCard({
         action={action}
       >
         {description}
+        {level === 'verified' && code === 'ai_verification_not_saved' && (
+          <p role="status">{connection?.message}</p>
+        )}
         {level === 'error' && code && (
           <details>
             <summary>문제 상세</summary>

@@ -11,6 +11,7 @@ from core.common.json_codec import canonical_json_hash
 from core.common.evidence_transport import initial_citation_encoding
 from core.client.ai.contracts import MAX_PROMPT_BYTES
 from core.client.transport import AnalysisClientError
+from core.client import question_interaction as interaction
 
 
 def _citation(kind, fields):
@@ -42,8 +43,11 @@ ANSWER_SCHEMA = {"type": "object", "additionalProperties": False,
 
 def question_answer_schema(handoff):
     """v1~v3를 보존하고 웹을 명시한 v4만 외부 인용을 허용한다."""
+    interaction.validate_input(handoff)
     schema = deepcopy(ANSWER_SCHEMA)
     if handoff["contract_version"] in {"personal-question-v5", "personal-question-v6"}:
+        if interaction.can_clarify(handoff):
+            schema["properties"]["clarification"] = deepcopy(interaction.CLARIFICATION_SCHEMA)
         review = _citation("review", ("document", "state_revision", "event_id", "ledger"))
         review["properties"]["ledger"]["enum"] = ["review", "relation"]
         schema["properties"]["citations"]["items"]["anyOf"].append(review)
@@ -98,7 +102,7 @@ def assemble_question(handoff, record, *, resumed=False, seen_turns=None):
         if "conversation_context" in data:
             value["conversation_context"] = handoff["conversation_context"]
             expected["conversation_context"] = data["conversation_context"]
-        for key in ("template_ref", "source_prefetch"):
+        for key in ("template_ref", "source_prefetch", "interaction_contract", "continuation"):
             if key in data:
                 value[key] = handoff[key]
                 expected[key] = data[key]
@@ -155,6 +159,9 @@ def answer_payload(result, *, handoff, prompt):
         value, observed = result["value"], result["execution"]
         if next(Draft202012Validator(question_answer_schema(handoff)).iter_errors(value), None) is not None:
             raise ValueError()
+        if "clarification" in value:
+            interaction.clarification(value["content"], value["clarification"]["options"],
+                                      value["clarification"].get("option_details"))
         digest = sha256(prompt.encode("utf-8")).hexdigest()
         if observed.get("status") != "completed" or observed.get("prompt_sha256") != digest:
             raise ValueError()

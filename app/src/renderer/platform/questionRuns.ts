@@ -7,6 +7,7 @@ import type {
   QuestionStartRequest,
   QuestionCancelRequest,
   QuestionDetailResult,
+  QuestionLocalResult,
   QuestionPageResult,
   QuestionResumableRequest,
   QuestionResumableResult,
@@ -33,6 +34,9 @@ export const questionRunsGateway: QuestionRunsBridge = {
     getBridge().list(request),
   read: async (request: QuestionReadRequest): Promise<QuestionDetailResult> =>
     getBridge().read(request),
+  readLocal: async (
+    request: QuestionReadRequest,
+  ): Promise<QuestionLocalResult> => getBridge().readLocal(request),
   start: async (request: QuestionStartRequest): Promise<QuestionDetailResult> =>
     getBridge().start(request),
   cancel: async (

@@ -6,6 +6,7 @@ import {
   readFile,
   readdir,
   realpath,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,9 @@ import {
   withCurrentBundledRuntime,
 } from '@main/settings/RuntimeSettingsService';
 import type { BundledRuntimePaths } from '@main/settings/bundledRuntime';
+import type { RuntimeSettings } from '@contracts/runtime.contract';
+import { storedRuntimeSettingsSchema } from '@contracts/runtime.contract';
+import { z } from 'zod';
 
 /** 실행기 폴더 구조만 갖춘 가짜 번들입니다. python은 받은 셸 스크립트를 실행합니다. */
 async function fakeBundle(
@@ -50,6 +54,254 @@ async function fakeClaude(
   );
   await chmod(path, 0o755);
   return path;
+}
+
+/** 새 프로세스처럼 서비스를 다시 만들고 실제 호출 없이 확인 기록을 복원하는지 검사합니다. */
+async function verifyAiRestart(base: string): Promise<void> {
+  const directory = join(base, 'verification');
+  await mkdir(directory);
+  const cli = await fakeClaude(directory, 'claude', true);
+  const bundle = await fakeBundle(
+    join(directory, 'app'),
+    `#!/bin/sh
+printf 'call\\n' >> "$0.calls"
+if [ -e "$0.fail" ]; then
+  echo '{"ok":false,"error":{"code":"ai_test_failed"}}'
+else
+  echo '{"ok":true}'
+fi
+`,
+  );
+  const settings: RuntimeSettings = {
+    root: bundle.root,
+    python: bundle.python,
+    provider: 'claude',
+    codex: cli,
+    claude: cli,
+    tesseract: bundle.tesseract,
+    tessdata: bundle.tessdata,
+    models: { codex: 'default', claude: 'default' },
+  };
+  const settingsDirectory = join(directory, 'settings');
+  const settingsFile = join(settingsDirectory, 'runtime.json');
+  const verificationFile = join(settingsDirectory, 'ai-verification.json');
+  await mkdir(settingsDirectory);
+  await writeFile(settingsFile, JSON.stringify({ version: 2, settings }));
+  const restart = async (
+    chosenPath: string | null = null,
+  ): Promise<RuntimeSettingsService> => {
+    const service = new RuntimeSettingsService(
+      settingsDirectory,
+      '',
+      async (): Promise<string | null> => chosenPath,
+      null,
+      async (): Promise<string | null> => cli,
+    );
+    await service.initialize();
+    return service;
+  };
+  const calls = async (): Promise<number> =>
+    (await readFile(`${bundle.python}.calls`, 'utf8')).trim().split('\n')
+      .length;
+  const original = await restart();
+  const tested = await original.testAi();
+  const verifiedAt = tested.cliConnection?.verifiedAt;
+  assert.equal(tested.cliConnection?.status, 'connected');
+  assert.ok(verifiedAt);
+  assert.equal(await calls(), 1);
+
+  const restored = await restart();
+  // 저장된 성공만으로 연결됐다고 하지 않고 현재 로그인 결과를 받은 뒤 복원합니다.
+  assert.equal(restored.snapshot().cliConnection, undefined);
+  const resumed = await restored.refreshConnection();
+  assert.equal(resumed.cliConnection?.status, 'connected');
+  assert.equal(resumed.cliConnection?.verifiedAt, verifiedAt);
+  assert.equal(await calls(), 1);
+  const goodBytes = await readFile(settingsFile, 'utf8');
+  const persisted = z
+    .object({
+      version: z.literal(2),
+      settings: storedRuntimeSettingsSchema,
+    })
+    .strict()
+    .parse(JSON.parse(goodBytes));
+  const goodVerification = await readFile(verificationFile, 'utf8');
+  const verification = z
+    .object({
+      version: z.literal(1),
+      key: z.string().regex(/^[a-f0-9]{64}$/u),
+      verifiedAt: z.iso.datetime(),
+    })
+    .strict()
+    .parse(JSON.parse(goodVerification));
+  assert.equal(verification.verifiedAt, verifiedAt);
+  process.stdout.write(
+    'PASS AI verification survives restart without another model call\n',
+  );
+
+  // 경로·모델·제공자를 바꿔 놓은 설정에는 이전 AI의 성공 기록을 붙이지 않습니다.
+  const otherCli = await fakeClaude(directory, 'claude-other', true);
+  const changedSettings: RuntimeSettings[] = [
+    { ...settings, provider: 'codex' },
+    { ...settings, claude: otherCli },
+    { ...settings, python: `${bundle.python}-other` },
+    { ...settings, root: `${bundle.root}-other` },
+    { ...settings, models: { ...settings.models, claude: 'another-model' } },
+  ];
+  for (const changed of changedSettings) {
+    await writeFile(
+      settingsFile,
+      JSON.stringify({ ...persisted, settings: changed }),
+    );
+    await writeFile(verificationFile, goodVerification);
+    const service = await restart();
+    assert.equal(service.snapshot().issue, null);
+    const result = await service.refreshConnection();
+    assert.equal(result.cliConnection?.status, 'connected');
+    assert.equal(result.cliConnection?.verifiedAt ?? null, null);
+  }
+  assert.equal(await calls(), 1);
+  process.stdout.write(
+    'PASS changed AI or execution settings reject previous verification\n',
+  );
+
+  for (const status of ['logged_out', 'error'] as const) {
+    await writeFile(settingsFile, goodBytes);
+    await writeFile(verificationFile, goodVerification);
+    if (status === 'logged_out') await fakeClaude(directory, 'claude', false);
+    else await writeFile(cli, '#!/bin/sh\nexit 2\n');
+    const result = await (await restart()).refreshConnection();
+    assert.notEqual(result.cliConnection?.status, 'connected');
+    assert.equal(result.cliConnection?.verifiedAt ?? null, null);
+  }
+  await fakeClaude(directory, 'claude', true);
+  assert.equal(await calls(), 1);
+  process.stdout.write(
+    'PASS saved verification never bypasses current CLI login\n',
+  );
+
+  await writeFile(settingsFile, goodBytes);
+  await writeFile(verificationFile, goodVerification);
+  await writeFile(`${bundle.python}.fail`, '');
+  const failing = await restart();
+  assert.equal(
+    (await failing.refreshConnection()).cliConnection?.verifiedAt,
+    verifiedAt,
+  );
+  assert.equal((await failing.testAi()).cliConnection?.status, 'error');
+  const afterFailure = await (await restart()).refreshConnection();
+  assert.equal(afterFailure.cliConnection?.status, 'connected');
+  assert.equal(afterFailure.cliConnection?.verifiedAt ?? null, null);
+  await unlink(`${bundle.python}.fail`);
+  process.stdout.write(
+    'PASS failed model verification is not revived after restart\n',
+  );
+
+  // 같은 앱 실행에서도 설정을 바꾼 순간 이전 호출 성공 표시를 제거합니다.
+  for (const change of ['model', 'python', 'claude'] as const) {
+    await writeFile(settingsFile, goodBytes);
+    await writeFile(verificationFile, goodVerification);
+    const service = await restart(
+      change === 'claude' ? otherCli : `${bundle.python}-other`,
+    );
+    assert.ok((await service.testAi()).cliConnection?.verifiedAt);
+    const changed =
+      change === 'model'
+        ? await service.selectModel('claude', 'another-model')
+        : await service.choose(change);
+    assert.equal(changed.cliConnection?.verifiedAt ?? null, null);
+    assert.equal(service.snapshot().cliConnection?.verifiedAt ?? null, null);
+  }
+  process.stdout.write(
+    'PASS changing model or executable clears current verification display\n',
+  );
+
+  // 잠금 경합으로 무효화에 실패한 경우 알리고, 같은 인스턴스의 다음 실패 때 다시 정리합니다.
+  await writeFile(settingsFile, goodBytes);
+  await writeFile(verificationFile, goodVerification);
+  await writeFile(`${bundle.python}.fail`, '');
+  const locked = await restart();
+  await writeFile(join(settingsDirectory, 'runtime.lock'), 'test lock');
+  const uncleared = await locked.testAi();
+  assert.equal(uncleared.cliConnection?.status, 'error');
+  assert.match(uncleared.cliConnection?.message ?? '', /이전 성공 기록/u);
+  assert.equal(await readFile(verificationFile, 'utf8'), goodVerification);
+  await unlink(join(settingsDirectory, 'runtime.lock'));
+  const cleared = await locked.testAi();
+  assert.equal(cleared.cliConnection?.status, 'error');
+  assert.doesNotMatch(cleared.cliConnection?.message ?? '', /이전 성공 기록/u);
+  await assert.rejects(readFile(verificationFile), { code: 'ENOENT' });
+  assert.equal(await readFile(settingsFile, 'utf8'), goodBytes);
+  await unlink(`${bundle.python}.fail`);
+  process.stdout.write(
+    'PASS failed verification cleanup reports a lock and retries in the same service\n',
+  );
+
+  // 저장 전에 다른 앱이 바꾼 설정은 성공 이력을 쓰면서 덮어쓰지 않습니다.
+  await writeFile(settingsFile, goodBytes);
+  await writeFile(verificationFile, goodVerification);
+  const conflicted = await restart();
+  const concurrent = JSON.stringify({
+    ...persisted,
+    settings: {
+      ...settings,
+      models: { ...settings.models, claude: 'concurrent-model' },
+    },
+  });
+  await writeFile(settingsFile, concurrent);
+  assert.equal(
+    (await conflicted.testAi()).cliConnection?.code,
+    'ai_verification_not_saved',
+  );
+  assert.equal(await readFile(settingsFile, 'utf8'), concurrent);
+  assert.equal(await readFile(verificationFile, 'utf8'), goodVerification);
+  process.stdout.write(
+    'PASS verification persistence preserves concurrent settings\n',
+  );
+
+  // 설정이 같아도 다른 앱이 새로 쓴 확인 기록을 오래된 기준으로 덮어쓰지 않습니다.
+  await writeFile(settingsFile, goodBytes);
+  await writeFile(verificationFile, goodVerification);
+  const staleVerification = await restart();
+  const concurrentVerification = JSON.stringify({
+    ...verification,
+    verifiedAt: '2024-01-01T00:00:00.000Z',
+  });
+  await writeFile(verificationFile, concurrentVerification);
+  assert.equal(
+    (await staleVerification.testAi()).cliConnection?.code,
+    'ai_verification_not_saved',
+  );
+  assert.equal(await readFile(settingsFile, 'utf8'), goodBytes);
+  assert.equal(
+    await readFile(verificationFile, 'utf8'),
+    concurrentVerification,
+  );
+  process.stdout.write(
+    'PASS verification persistence preserves concurrent verification\n',
+  );
+
+  await writeFile(
+    settingsFile,
+    JSON.stringify({
+      version: 2,
+      settings: { ...settings, provider: 'codex' },
+    }),
+  );
+  const selected = await restart();
+  selected.selectProvider('claude');
+  const activated = await selected.testAi();
+  assert.equal(activated.activeProvider, 'claude');
+  assert.equal(activated.restartRequired, false);
+  const selectedAgain = await restart();
+  assert.equal(selectedAgain.snapshot().activeProvider, 'claude');
+  assert.equal(
+    (await selectedAgain.refreshConnection()).cliConnection?.verifiedAt,
+    activated.cliConnection?.verifiedAt,
+  );
+  process.stdout.write(
+    'PASS successful AI test activates and remembers selected provider\n',
+  );
 }
 
 /** 시작 때 이미 로그인된 CLI는 연결 버튼 없이 연결됨으로 확인하고 로그아웃은 연결 전으로 둡니다. */
@@ -295,6 +547,7 @@ exit 1
   assert.equal(failed?.status, 'failed');
   assert.equal(failed?.path, null);
   process.stdout.write('PASS claude diagnostic report is saved and opened\n');
+  await verifyAiRestart(base);
 }
 void main().catch((error: unknown): void => {
   process.stderr.write(`${error instanceof Error ? error.stack : error}\n`);

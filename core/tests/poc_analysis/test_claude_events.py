@@ -81,6 +81,89 @@ class ClaudeSystemEventTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(received))
 
 
+class ClaudePartialEventTests(unittest.TestCase):
+    def setUp(self):
+        self.events = _Events(stream_answer=True)
+        self.received = []
+
+    def partial(self, kind, **values):
+        self.events(json.dumps({"type": "stream_event", "session_id": SESSION,
+                                "event": {"type": kind, **values}}), self.received.append)
+
+    def start(self):
+        self.partial("message_start", message={"id": "message-1", "role": "assistant"})
+
+    def test_structured_json_deltas_are_snapshots_before_complete_result(self):
+        self.start()
+        self.partial("content_block_start", index=0,
+                     content_block={"type": "tool_use", "id": "output-1", "name": "StructuredOutput", "input": {}})
+        self.partial("content_block_delta", index=0,
+                     delta={"type": "input_json_delta", "partial_json": '{"action":"answer","content":"첫'})
+        self.partial("content_block_delta", index=0,
+                     delta={"type": "input_json_delta", "partial_json": ' 문장"}'})
+        self.assertEqual([item["text"] for item in self.received],
+                         ['{"action":"answer","content":"첫', '{"action":"answer","content":"첫 문장"}'])
+        self.assertTrue(all(item["kind"] == "structured_output" and item["event"] == "item.updated"
+                            and item["item_id"] == "output-1" for item in self.received))
+        self.assertIsNone(self.events.result)
+        self.partial("content_block_stop", index=0)
+        self.partial("message_delta", delta={"stop_reason": "tool_use"})
+        self.partial("message_stop")
+        self.events(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                "structured_output": {"action": "answer", "content": "첫 문장"}}), self.received.append)
+        self.assertEqual(self.events.result["content"], "첫 문장")
+
+    def test_public_text_is_separate_and_private_thinking_is_never_forwarded(self):
+        self.start()
+        self.partial("content_block_start", index=0, content_block={"type": "thinking", "thinking": "private"})
+        self.partial("content_block_delta", index=0, delta={"type": "thinking_delta", "thinking": "private"})
+        self.partial("content_block_delta", index=0, delta={"type": "signature_delta", "signature": "private"})
+        self.partial("content_block_stop", index=0)
+        self.partial("content_block_start", index=1, content_block={"type": "text", "text": ""})
+        self.partial("content_block_delta", index=1, delta={"type": "text_delta", "text": "공개"})
+        self.partial("content_block_delta", index=1, delta={"type": "text_delta", "text": " 설명"})
+        self.assertEqual([item["text"] for item in self.received], ["공개", "공개 설명"])
+        self.assertTrue(all(item["kind"] == "public_text" for item in self.received))
+        self.assertNotIn("private", json.dumps(self.received) + json.dumps(self.events.stream_blocks))
+
+    def test_non_output_tool_is_rejected_before_input_is_received(self):
+        self.start()
+        with self.assertRaises(AIAdapterError) as caught:
+            self.partial("content_block_start", index=0,
+                         content_block={"type": "tool_use", "id": "bad", "name": "Bash", "input": {}})
+        self.assertEqual(caught.exception.code, "ai_unexpected_tool_activity")
+        self.assertEqual(self.received, [])
+
+    def test_partial_events_require_explicit_opt_in(self):
+        with self.assertRaises(AIAdapterError) as caught:
+            _Events()(json.dumps({"type": "stream_event", "event": {"type": "message_start"}}), self.received.append)
+        self.assertEqual(caught.exception.code, "ai_cli_event_rejected")
+
+    def test_missing_or_wrong_block_types_fail_closed(self):
+        self.start()
+        with self.assertRaises(AIAdapterError):
+            self.partial("content_block_delta", index=0, delta={"type": "text_delta", "text": "orphan"})
+        self.partial("content_block_start", index=0, content_block={"type": "text", "text": ""})
+        with self.assertRaises(AIAdapterError):
+            self.partial("content_block_delta", index=0, delta={"type": "input_json_delta", "partial_json": "private"})
+        self.assertEqual(self.received, [])
+
+    def test_stream_output_limit_is_enforced_before_forwarding(self):
+        self.start()
+        self.partial("content_block_start", index=0, content_block={"type": "text", "text": ""})
+        with patch.object(claude, "MAX_RESULT_BYTES", 4), self.assertRaises(AIAdapterError) as caught:
+            self.partial("content_block_delta", index=0, delta={"type": "text_delta", "text": "한글"})
+        self.assertEqual(caught.exception.code, "ai_output_limit")
+        self.assertEqual(self.received, [])
+
+    def test_result_does_not_accept_an_unfinished_message(self):
+        self.start()
+        with self.assertRaises(AIAdapterError) as caught:
+            self.events(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                    "structured_output": {"content": "unfinished"}}), self.received.append)
+        self.assertEqual(caught.exception.code, "ai_incomplete_turn")
+
+
 class ClaudeEnvironmentTests(unittest.TestCase):
     def test_network_settings_are_forwarded_but_api_keys_are_not(self):
         values = {"HTTPS_PROXY": "http://proxy.example:8080", "no_proxy": "localhost",

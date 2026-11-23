@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { knowledgeValueSchema } from '@contracts/knowledge.contract';
-import { questionReceiptSchema } from '@contracts/questionRuns.contract';
+import {
+  questionClarificationSchema,
+  questionReceiptSchema,
+} from '@contracts/questionRuns.contract';
 import type {
   QuestionDetail,
   QuestionLocal,
@@ -105,6 +108,7 @@ const answerEventSchema = z.object({
   origin: z.literal('client_reported'),
   human_approval: z.literal(false),
   citations: z.array(knowledgeValueSchema),
+  clarification: questionClarificationSchema.optional(),
 });
 const conversationSchema = z.object({
   record: z.object({
@@ -232,6 +236,7 @@ export function projectQuestionAnswers(
       turnId: event.id,
       content: event.content,
       citations: event.citations,
+      ...(event.clarification ? { clarification: event.clarification } : {}),
     });
   }
   return answers;

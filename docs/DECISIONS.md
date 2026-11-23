@@ -152,3 +152,5 @@
 | D-142 | `knowledge` | [온톨로지가 없는 문서도 본문으로 질문 후보 순위에 넣기](domains/knowledge/DECISIONS.md#d-142--온톨로지가-없는-문서도-본문으로-질문-후보-순위에-넣기-2026-11-20) |
 | D-143 | `platform` | [Claude 상태 알림과 실행 환경 진단의 호환](domains/platform/DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22) |
 | D-144 | `platform` | [이전 앱 사본의 실행기 경로를 현재 앱 실행기로 바꾸기](domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22) |
+| D-145 | `ui` | [AI 채팅 답변 본문의 실시간 표시](domains/ui/DECISIONS.md#d-145--ai-채팅-답변-본문의-실시간-표시-2026-11-23) |
+| D-146 | `ui` | [AI 추가 질문의 사용자 답변 대기와 작업 이어가기](domains/ui/DECISIONS.md#d-146--ai-추가-질문의-사용자-답변-대기와-작업-이어가기-2026-11-23) |

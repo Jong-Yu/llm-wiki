@@ -28,6 +28,7 @@ import styles from './ChatComposer.module.scss';
 type AddResult = 'added' | 'truncated' | 'full';
 type ChatComposerProps = {
   draft: string;
+  answeringClarification?: boolean;
   onDraft: (value: string) => void;
   attachments: readonly ChatAttachment[];
   onAddAttachment: (text: string) => AddResult;
@@ -80,6 +81,7 @@ type ChatComposerProps = {
  */
 export function ChatComposer({
   draft,
+  answeringClarification = false,
   onDraft,
   attachments,
   onAddAttachment,
@@ -115,7 +117,8 @@ export function ChatComposer({
   const [notice, setNotice] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
   const readInFlight = useRef(false);
-  const optionsDisabled = disabled || running || locked || reading;
+  const optionsDisabled =
+    disabled || running || locked || reading || answeringClarification;
   const total = totalCharacters(attachments);
   const selectedTemplate =
     registeredTemplates.find(
@@ -177,6 +180,7 @@ export function ChatComposer({
   }
   /** 짧은 텍스트는 기본 붙여넣기를 사용해 커서 위치와 선택 범위를 보존합니다. */
   function paste(event: ClipboardEvent<HTMLTextAreaElement>): void {
+    if (answeringClarification) return;
     const text = event.clipboardData.getData('text');
     if (!shouldBecomeChip(text)) return;
     event.preventDefault();
@@ -215,6 +219,7 @@ export function ChatComposer({
                 <button
                   type="button"
                   aria-label="답변 양식 지우기"
+                  disabled={optionsDisabled}
                   onClick={(): void => onTemplate('')}
                 >
                   <Icon name="x" size={12} />
@@ -243,15 +248,17 @@ export function ChatComposer({
           placeholder={
             locked
               ? '질문을 입력하세요'
-              : running
-                ? '답변이 끝나면 이어서 질문할 수 있어요'
-                : afterError
-                  ? '질문을 수정해서 다시 보낼 수도 있어요'
-                  : attachments.length > 0
-                    ? '첨부한 자료에 대해 질문하세요'
-                    : inConversation
-                      ? '이어서 질문하세요'
-                      : '문서에 대해 질문하세요'
+              : answeringClarification
+                ? '답변을 입력하세요'
+                : running
+                  ? '답변이 끝나면 이어서 질문할 수 있어요'
+                  : afterError
+                    ? '질문을 수정해서 다시 보낼 수도 있어요'
+                    : attachments.length > 0
+                      ? '첨부한 자료에 대해 질문하세요'
+                      : inConversation
+                        ? '이어서 질문하세요'
+                        : '문서에 대해 질문하세요'
           }
           disabled={disabled || reading}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>): void =>
@@ -317,7 +324,9 @@ export function ChatComposer({
             <button
               type="submit"
               className={styles.send}
-              aria-label="질문 보내기"
+              aria-label={
+                answeringClarification ? '답변 보내기' : '질문 보내기'
+              }
               disabled={!canSend || reading}
             >
               <Icon name="arrow-up" size={16} />
@@ -326,16 +335,18 @@ export function ChatComposer({
         </div>
       </form>
       <p id="knowledge-chat-hint" className={styles.hint}>
-        {sessionHint ??
-          (running
-            ? '중단 버튼으로 멈출 수 있어요'
-            : locked
-              ? '연결하면 입력창이 열려요'
-              : attachments.length > 0
-                ? attachmentHint
-                : fileHint
-                  ? '파일이 필요하면 원하는 형식을 말해 주세요'
-                  : `Enter 전송 · Shift+Enter 줄바꿈 · ${providerName}${modelLabel}`)}
+        {answeringClarification
+          ? '답변을 보내면 이어서 진행해요. 자료·양식 변경은 새 대화에서 해 주세요.'
+          : (sessionHint ??
+            (running
+              ? '중단 버튼으로 멈출 수 있어요'
+              : locked
+                ? '연결하면 입력창이 열려요'
+                : attachments.length > 0
+                  ? attachmentHint
+                  : fileHint
+                    ? '파일이 필요하면 원하는 형식을 말해 주세요'
+                    : `Enter 전송 · Shift+Enter 줄바꿈 · ${providerName}${modelLabel}`))}
       </p>
     </div>
   );

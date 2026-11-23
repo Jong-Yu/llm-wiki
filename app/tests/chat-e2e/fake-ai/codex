@@ -9,7 +9,9 @@ stdin 프롬프트, --output-schema, --output-last-message, JSONL 이벤트(thre
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -58,6 +60,12 @@ def question_of(prompt):
     """검색어 확장 프롬프트와 답변 프롬프트에서 현재 질문만 꺼낸다. 이전 대화의 키워드는 무시한다."""
     if "QUESTION:\n" in prompt:
         return prompt.split("QUESTION:\n", 1)[1]
+    try:
+        data = json.loads(prompt.rsplit("\n", 1)[-1])
+        if isinstance(data, dict) and isinstance(data.get("question"), str):
+            return data["question"]
+    except ValueError:
+        pass
     match = re.search(r'"question"\s*:\s*("(?:[^"\\]|\\.)*")', prompt)
     if match:
         try:
@@ -116,7 +124,33 @@ def grounded_step(schema, prompt, answer, scenario):
     data = json.loads(prompt.rsplit("\n", 1)[-1])
     step = dict.fromkeys(schema["required"])
     step.update(action="answer", content=answer.get("content"), evidence_ids=[])
-    if scenario in {"근거", "정상"}:
+    if scenario == "추가질문":
+        exchanges = data.get("continuation", {}).get("exchanges", [])
+        if exchanges:
+            step["content"] = "## 요청하신 조건\n\n" + exchanges[-1]["answer"] + " 조건으로 정리했습니다. 원래 센서 경고 요청을 이어서 처리했습니다."
+            if "#설명추천" in data["question"]:
+                details = exchanges[-1].get("clarification", {}).get("option_details", [])
+                if details:
+                    step["content"] += "\n\n선택할 때 보신 설명도 이어받았습니다: " + details[0]["description"]
+        else:
+            step.update(action="clarify", content="상한 초과와 하한 미달 중 어떤 조건을 정리할까요?",
+                        clarification_options=["상한 초과", "하한 미달"])
+            if "#설명추천" in data["question"]:
+                step["content"] += "\n\n낮은 값에서 발생한 경고를 확인하려는 상황이라 하한 미달부터 살펴보는 것을 추천해요."
+                step["clarification_option_details"] = [
+                    {"option": "상한 초과", "description": "값이 설정 범위보다 높아지는 조건을 정리합니다.", "recommended": False},
+                    {"option": "하한 미달", "description": "말씀하신 낮은 값의 경고 상황에 맞춰 정리합니다.", "recommended": True}]
+    elif scenario == "템플릿질문":
+        exchanges = data.get("continuation", {}).get("exchanges", [])
+        if not exchanges:
+            step["action"] = "clarify"
+        else:
+            snapshot = json.loads(data["question"].split("\n\n[등록 템플릿 v1]\n", 1)[1].split("\n[템플릿 생성 계약]\n", 1)[0])
+            field = snapshot["generation"]["fields"][0]
+            identifier = "unknown-field" if "#템플릿오류" in exchanges[-1]["answer"] else field["id"]
+            plan = {"version": 1, "replacements": [{"id": identifier, "text": exchanges[-1]["answer"]}]}
+            step["content"] = "답변해 주신 조건을 원래 양식에 반영했습니다.\n\n```wiki-template-result\n" + json.dumps(plan, ensure_ascii=False) + "\n```"
+    elif scenario in {"근거", "정상"}:
         reads = data.get("evidence_reads", [])
         identifiers = list(dict.fromkeys(identifier for read in reads
             for identifier in read.get("result", {}).get("evidence_ids", [])))
@@ -145,8 +179,117 @@ ANSWERS = {
 }
 
 
+def app_server(arguments):
+    """실제 stdio 계약을 흉내 내며 기존 가짜 모델의 결과를 공개 delta로 보냅니다."""
+    effective = {}
+    for index, argument in enumerate(arguments):
+        if argument == "-c" and index + 1 < len(arguments):
+            key, value = arguments[index + 1].split("=", 1)
+            parsed = json.loads(value)
+            target = effective
+            segments = key.split(".")
+            for segment in segments[:-1]:
+                target = target.setdefault(segment, {})
+            target[segments[-1]] = parsed
+        elif argument in {"--disable", "--enable"} and index + 1 < len(arguments):
+            effective.setdefault("features", {})[arguments[index + 1]] = argument == "--enable"
+    thread_id, turn_id = str(uuid.uuid4()), str(uuid.uuid4())
+    for line in sys.stdin:
+        request = json.loads(line)
+        method, params = request.get("method"), request.get("params", {})
+        request_id = request.get("id")
+        if method == "initialize":
+            emit({"id": request_id, "result": {"userAgent": "fake-codex"}})
+        elif method == "initialized":
+            continue
+        elif method == "config/read":
+            emit({"id": request_id, "result": {"config": effective}})
+        elif method == "model/list":
+            emit({"id": request_id, "result": {"data": [
+                {"id": "fixture", "model": "fixture-model", "isDefault": True}], "nextCursor": None}})
+        elif method == "thread/start":
+            emit({"id": request_id, "result": {
+                "thread": {"id": thread_id, "ephemeral": True}, "model": "fake-codex",
+                "modelProvider": "openai", "instructionSources": [],
+                "cwd": params["cwd"], "approvalPolicy": "never",
+                "sandbox": {"type": "readOnly", "networkAccess": False},
+                "sandboxPolicy": {"type": "readOnly", "networkAccess": False}}})
+        elif method == "turn/start":
+            prompt = "\n".join(item["text"] for item in params["input"] if item["type"] == "text")
+            scenario = scenario_of(question_of(prompt))
+            if scenario == "로그인실패":
+                log({"scenario": scenario, "resumed": False, "searching": False,
+                     "arguments": arguments, "prompt_chars": len(prompt), "question": question_of(prompt)[:200]})
+                emit({"id": request_id, "error": {"code": 401, "message": "Not authenticated"}})
+                continue
+            emit({"id": request_id, "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
+            emit({"method": "turn/started", "params": {
+                "threadId": thread_id, "turn": {"id": turn_id, "status": "inProgress"}}})
+            complete = False
+            with tempfile.TemporaryDirectory(prefix="fake-codex-turn-") as work:
+                schema = os.path.join(work, "schema.json")
+                with open(schema, "w", encoding="utf-8") as stream:
+                    json.dump(params["outputSchema"], stream)
+                with subprocess.Popen([sys.executable, __file__, "exec", "--output-schema", schema],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as child:
+                    child.stdin.write(prompt)
+                    child.stdin.close()
+                    seen = set()
+                    for raw_line in child.stdout:
+                        event = json.loads(raw_line)
+                        if event["type"] == "item.completed":
+                            item = event["item"]
+                            if item["type"] == "agent_message":
+                                if item["id"] in seen:
+                                    continue
+                                seen.add(item["id"])
+                                text = item["text"]
+                                phase = "commentary" if text.startswith("[[wiki-work-update]]") else "final_answer"
+                                identity = {"threadId": thread_id, "turnId": turn_id}
+                                emit({"method": "item/started", "params": {**identity,
+                                      "item": {"id": item["id"], "type": "agentMessage", "text": "", "phase": phase}}})
+                                # 실시간 시나리오에서는 본문 여러 구간이 다른 시각에 도착하게 합니다.
+                                width = 35 if scenario in {"실시간", "스트림중단"} else 80
+                                for offset in range(0, len(text), width):
+                                    emit({"method": "item/agentMessage/delta", "params": {**identity,
+                                          "itemId": item["id"], "delta": text[offset:offset + width]}})
+                                    if scenario in {"실시간", "스트림중단"} and '"content"' in text[:offset + width]:
+                                        time.sleep(0.6)
+                                        if scenario == "스트림중단" and offset > len(text) // 2:
+                                            time.sleep(60)
+                                emit({"method": "item/completed", "params": {**identity,
+                                      "item": {"id": item["id"], "type": "agentMessage", "text": text, "phase": phase}}})
+                            elif item["type"] == "command_execution":
+                                emit({"method": "item/started", "params": {
+                                    "threadId": thread_id, "turnId": turn_id,
+                                    "item": {"id": item["id"], "type": "commandExecution", "command": "ls"}}})
+                        elif event["type"] == "turn.completed":
+                            complete = True
+                    code = child.wait()
+            if scenario == "비정상종료":
+                return 3
+            if complete and code == 0:
+                emit({"method": "turn/completed", "params": {
+                    "threadId": thread_id, "turn": {"id": turn_id, "status": "completed"}}})
+            elif code == 0:
+                return 0
+            else:
+                emit({"method": "turn/completed", "params": {
+                    "threadId": thread_id, "turn": {"id": turn_id, "status": "failed"}}})
+        else:
+            emit({"id": request_id, "error": {"code": -32601, "message": "unsupported fake method"}})
+
+
 def main():
     arguments = sys.argv[1:]
+    if "app-server" in arguments:
+        if "--help" in arguments:
+            print("Usage: codex app-server --listen stdio:// -c key=value --disable FEATURE")
+            return 0
+        return app_server(arguments)
+    if arguments == ["login", "status"]:
+        print("Logged in using ChatGPT")
+        return 0
     if arguments == ["--version"]:
         print("codex-cli 0.0.0-fake")
         return 0
@@ -186,7 +329,7 @@ def main():
     thread_id = arguments[arguments.index("resume") + 1] if resumed else str(uuid.uuid4())
     emit({"type": "thread.started", "thread_id": thread_id})
     emit({"type": "turn.started"})
-    if scenario in {"작업설명", "설명중단"} and not searching:
+    if scenario in {"작업설명", "설명중단", "실시간", "스트림중단"} and not searching:
         # 공개 설명 두 문장과 최종 JSON 사이를 벌려 실제 CLI→IPC→화면 전달을 확인한다.
         emit({"type": "item.completed", "item": {"id": "private", "type": "reasoning",
               "text": "내부 추론은 화면에 표시하지 않습니다."}})
@@ -225,6 +368,8 @@ def main():
     else:
         key = "후속" if resumed and scenario == "정상" else scenario
         text = ANSWERS.get(key, ANSWERS["정상"])
+        if scenario == "스트림중단":
+            text = "## 중단할 답변\n\n이 내용은 중단 전까지만 생성됩니다.\n\n" + text
         value = {"content": text, "citations": citations_for(schema, document_texts(prompt)) if scenario in {"근거", "정상"} else []}
     if "action" in schema.get("properties", {}) and "evidence_ids" in schema["properties"] and scenario != "스키마위반":
         value = grounded_step(schema, prompt, value, scenario)
