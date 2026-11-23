@@ -167,9 +167,9 @@ npm run package               # 현재 OS: macOS DMG/ZIP, Windows NSIS, Linux ta
 
 설치 프로그램 없이 ZIP 전체를 새 폴더에 풀어 실행할 수 있습니다. 기존 설치 파일·공개 업데이트 경로는 유지합니다.
 
-현재 Windows 정식 포터블은 [0.1.1 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1-portable-windows)입니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. 트레이와 Python/OCR·한영 언어 데이터를 포함하며, 이전 앱에 포함된 실행기 경로를 새 앱의 경로로 갱신합니다. Codex/Claude CLI 설치·로그인은 별도입니다. ZIP과 SHA-256을 제공하며 설치판 자동 업데이트 대상은 `app-0.1.1`을 유지합니다.
+현재 Windows 정식 포터블은 [0.1.2-portable](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.2-portable)입니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. AI 채팅 중간 설명·다운로드 조건 개선, 트레이와 Python/OCR·한영 언어 데이터를 포함하며, 이전 앱에 포함된 실행기 경로를 새 앱의 경로로 갱신합니다. Codex/Claude CLI 설치·로그인은 별도입니다. 앱 내부 버전은 0.1.2이며 ZIP과 SHA-256을 제공합니다. 설치판 자동 업데이트 대상은 `app-0.1.2`를 유지합니다.
 
-기존0.1.0 포터블은 [GitHub 포터블 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable)에서 ZIP·SHA256을 내려받습니다. 기존 설치판 Release는 게시 후 파일 추가가 잠겨 있어 별도 포터블 배포를 만들었으며, 현재 설치판의 최신 업데이트 대상은 [0.1.1](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.1)입니다. Mac 개인 실행기 ZIP은 기존0.1.0 공개 파일을 재사용하며 내부 파일 내용이 포터블 빌드와 같음을 확인했습니다. GitHub 게시는 OS의 실행 파일 서명·공증을 대신하지 않습니다.
+기존0.1.0 포터블은 [GitHub 포터블 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable)에서 ZIP·SHA256을 내려받습니다. 기존 설치판 Release는 게시 후 파일 추가가 잠겨 있어 별도 포터블 배포를 만들었으며, 현재 설치판의 최신 업데이트 대상은 [0.1.2](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.2)입니다. 해당 0.1.0 Mac 포터블의 개인 실행기 ZIP은 당시 공개 파일을 재사용하며 내부 파일 내용이 포터블 빌드와 같음을 확인했습니다. GitHub 게시는 OS의 실행 파일 서명·공증을 대신하지 않습니다.
 
 Windows 0.1.0 포터블의 공개 수정본은 [포터블 fix4](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable-windows-fix4)입니다. fix3에서 남은 Claude 첫 안내 메시지 거부를 고치고([D-143](../docs/domains/platform/DECISIONS.md#d-143--claude-상태-알림과-실행-환경-진단의-호환-2026-11-22)), 회사 프록시·인증서·Git Bash 설정을 Claude에 넘기며, 이전 포터블의 실행기 경로를 자동으로 바꿉니다([D-144](../docs/domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)). fix1~3과 달리 현재 작업 트리 전체로 다시 빌드한 사전 릴리스입니다. 실제 Windows 호출 성공 확인은 남아 있습니다. 이전 수정본의 원인은 [실행 기록](../docs/domains/platform/HISTORY.md#2026-11-19--windows-진단의-createjobobject-typeerror와-fix3-준비)을 따릅니다.
 

@@ -1,5 +1,13 @@
 # 실행 환경 작업 기록
 
+## 2026-11-23 — 0.1.2 Windows 포터블 공개와 검증
+
+- 사용자 요청에 따라 릴리스 이름을 `LLM Wiki 0.1.2-portable`, 태그를 `app-0.1.2-portable`로 정하고 Windows x64 무설치 ZIP을 별도 게시했다. 앱 내부 버전은 0.1.2다. 설치형과 같은 커밋 `7434b18`의 별도 worktree에서 `npm run package:win:portable`을 실행해 전체 타입·lint·format·194토큰 검사·제품 빌드·패키징이 exit 0으로 완료됐다. 동일 코드에서 직전 통과한 릴리스 70개 검사는 재사용했다.
+- ZIP은 253,430,188바이트, SHA-256 `79e541f69d05aff30000b1c7b74fc4bed511a57312f72fee2567f6193a1dae67`이다. 3,470항목(파일 3,035·폴더 435)의 CRC·경로와 압축 전 파일 전체 해시를 대조했다. asar의 버전·portable 표시·중간 설명 UI·빌드 out 10개 파일, 자동 업데이트 차단 코드와 설치용 업데이트 설정 부재를 확인했다. 런타임 2,962개 파일의 manifest와 소스 326개의 커밋 바이트가 일치하며 기존 설치형 0.1.2의 main/실행기와 같다. 사용자 자료·계정 설정·초기화 백업은 제외한다.
+- ZIP과 체크섬을 초안에 업로드하고 자산 크기·GitHub digest를 검사한 뒤 정식 공개했다(draft=false, prerelease=false). 초안의 태그 조회 API는 404를 반환해 목록과 release ID로 같은 초안·완료된 업로드를 확인했으며 재생성·재업로드는 하지 않았다. `make_latest=false`로 설치형 최신 `app-0.1.2`를 유지했다.
+- 두 공개 자산을 인증 없이 전체 다운로드해 크기·SHA-256·GitHub digest·로컬 파일과 대조했다. 이전 릴리스 11개의 ID·상태·전체 자산 ID/크기/digest와 설치형 최신 지정을 보존했다. 산출물은 `app/release/portable/0.1.2/windows-x64/`, 검증은 `.local/release-012-portable-local-verification.json`·`.local/release-012-portable-remote-verification.json`에 보존했다.
+- 이번 worktree·의존성 복사·압축 전 폴더·검증 임시 추출물을 정리하고 빌더 진단·로그만 `.local/release-012-portable-*`에 보존했다. 기존 배포 파일·별도 서버 수정·설치 앱·사용자 자료는 변경하지 않았다. 실제 Windows 실행은 미수행이다.
+
 ## 2026-11-23 — 0.1.2 정식 배포와 공개 다운로드 검증
 
 - 사용자 요청으로 앱/lock 버전을 0.1.2로 올리고 채팅 UI·공개 작업 설명·검증 기록을 `7434b184807ebc0ab121168c65a4bacb51ddeab6`에 커밋해 원격 main에 반영했다. 릴리스 70개 검사 통과 후 해당 커밋의 별도 worktree에서 실제 의존성 파일을 사용해 `npm run release -- --mac --win`을 실행했다. 모든 제품 검사·빌드·양 OS 패키징·게시가 exit 0으로 완료됐다.
