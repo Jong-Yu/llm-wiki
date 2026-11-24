@@ -1,5 +1,9 @@
 # 원본 저장 작업 기록
 
+## 2026-11-24 — 중간 결과 읽기 수정의 0.4.1 반영
+
+- 아래 errno-only EACCES 재시도와 실패 진단 보존을 소스 `4992886`/`v0.4.1` 및 [0.4.1 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.4.1-portable)에 반영했습니다. 원본·기존 보고·위키·히스토리를 변경하지 않았습니다. 포함 소스/런타임 무결성과 공개 검증은 [platform 기록](../platform/HISTORY.md#2026-11-24--windows-문자-변환-보완-041-포터블-공개), Windows 공유 잠금·동일 PDF 전체 재실행의 미확정 상태는 아래 기록을 따릅니다.
+
 ## 2026-11-24 — Windows checkpoint 읽기의 errno 재시도 누락 수정
 
 - 관측: 사용자가 두 번의 OCR 변환에서 `conversion_checkpoint_read_failed`와 부분 결과를 보고했다. Windows 파일 열기는 공유 충돌에도 `winerror` 없이 `errno=EACCES`를 반환할 수 있지만 기존 코드는 WinError 5/32/33만 재시도했다. 수정 전 동일한 예외를 한 번 주입해 최종 읽기가 즉시 실패하는 것을 재현했다. [CPython의 파일 열기 구현](https://github.com/python/cpython/blob/v3.12.8/Modules/_io/fileio.c#L361-L374)과 [Microsoft의 EACCES 설명](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/open-wopen?view=msvc-170#return-value)을 대조했으며, 사용자 로그에는 OS 숫자가 없어 해당 기기의 원인을 확정하지는 않았다.

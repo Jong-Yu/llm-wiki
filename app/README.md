@@ -177,7 +177,7 @@ npm run package               # 현재 OS: macOS DMG/ZIP, Windows NSIS, Linux ta
 
 0.3.0은 [0.1.3-rc.2](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.3-rc.2-portable)의 실시간 AI 답변·추가 질문 카드·상황별 설명/추천·AI 호출 확인 복원과 변환/분석 재시도 보완을 이어받았습니다. 이번 작업 화면은 기존 서버 API를 사용하므로 rc.2에서 새 서버 계약을 추가하지 않습니다. 구버전·다른 기기의 분석은 **AI 실행 기록**에서 찾습니다.
 
-현재 Windows 포터블은 [0.4.0 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.4.0-portable)입니다. PPTX/PPT 등록·변환, 전체30분/무진행120초 감독, 원본/Wiki 개별 휴지통·복원과 모든 미반영 화면·안내를 통합했습니다. 기존 문서 작업·실시간 답변·추가 질문·투명 테마 아이콘도 포함합니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. Python/OCR·한영 데이터가 포함되며 Codex/Claude CLI 설치·로그인 및 구형 PPT 변환용 LibreOffice는 별도입니다. 기존 설정·사용자 자료는 유지합니다. 서버도 통합 API로 갱신했고 최신 접속 주소는 기존 주소 메모에서 확인합니다. 전체 회귀·패키지·공개 다운로드 SHA256을 검증했으며 Windows 실기기·LibreOffice는 별도 확인이 필요합니다. 설치형 자동 업데이트 대상은 `app-0.1.2`를 유지합니다.
+현재 Windows 포터블은 [0.4.1 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.4.1-portable)입니다. 0.4.0의 PPTX/PPT·작업 복원·채팅·휴지통·아이콘을 유지하고, Windows 문자 변환의 중간 결과 읽기 재시도 누락과 실패 진단 보존을 보완했습니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. Python/OCR·한영 데이터가 포함되며 Codex/Claude CLI 설치·로그인 및 구형 PPT 변환용 LibreOffice는 별도입니다. 기존 설정·사용자 자료는 유지하며 서버 교체는 필요하지 않습니다. 관련 회귀·앱 빌드·ZIP/포함 소스 무결성을 검증했으며 Windows 실기기의 같은 PDF 전체 변환은 아직 확인하지 않았습니다. 설치형 자동 업데이트 대상은 `app-0.1.2`를 유지합니다.
 
 Windows 변환 중단 진단과 분석 재시도·진행 표시 보완은 [0.1.3-rc.1 포터블 사전 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.3-rc.1-portable)에서 확인할 수 있습니다. 기존 0.1.2에 이번 수정만 포함한 후보판이며, 실제 Windows의 동일 문서 전체 처리와 원인 확정은 아직 남아 있습니다. 전체 변환 120초 제한·부분 입력의 분석 차단은 유지하며, 정식 최신판과 자동 업데이트 대상은 바꾸지 않습니다. ZIP 전체를 새 폴더에 풀어 사용하고 기존 자료·설정을 삭제하지 않습니다.
 
