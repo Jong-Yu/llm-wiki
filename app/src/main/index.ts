@@ -2,12 +2,15 @@ import { app, BrowserWindow, dialog, session } from 'electron';
 import { installAppLifetime, showAppWindow } from './windows/appLifetime';
 import type { Event, WebContents } from 'electron';
 import appIcon from '../../design/brand/llm-wiki-icon.png?asset';
+import appDarkIcon from '../../design/brand/llm-wiki-icon-dark.png?asset';
 import windowsIcon from '../../design/brand/llm-wiki-icon.ico?asset';
+import windowsDarkIcon from '../../design/brand/llm-wiki-icon-dark.ico?asset';
 import { registerRuntimeHandlers } from './ipc/registerRuntimeHandlers';
 import { registerAppHandlers } from './ipc/registerAppHandlers';
 import { registerConnectionHandlers } from './ipc/registerConnectionHandlers';
 import { createAppWindow } from './windows/createAppWindow';
 import { createAppTray } from './windows/createAppTray';
+import { watchSystemIconTheme } from './windows/watchSystemIconTheme';
 import { getRendererLocation } from './windows/rendererLocation';
 import { createAppUpdater } from './updates/AppUpdater';
 import { registerUpdateHandlers } from './ipc/registerUpdateHandlers';
@@ -15,9 +18,12 @@ import { registerUpdateHandlers } from './ipc/registerUpdateHandlers';
 /** Electron 시작·종료와 창/IPC 조립의 진입점입니다. */
 async function startApp(): Promise<void> {
   await app.whenReady();
-  // 개발 실행의 Dock에도 로고를 표시하며 설치 앱은 번들의 ICNS를 사용합니다.
-  if (process.platform === 'darwin' && !app.isPackaged) {
-    app.dock?.setIcon(appIcon);
+  // 실행 중 Dock은 시스템 테마를 따르며 Finder의 정적 번들 아이콘은 별도입니다.
+  if (process.platform === 'darwin') {
+    const stopTheme = watchSystemIconTheme((dark: boolean): void => {
+      app.dock?.setIcon(dark ? appDarkIcon : appIcon);
+    });
+    app.once('will-quit', stopTheme);
   }
   // 명시한 외부 환경의 별칭을 맞춥니다. 설치 패키지의 기본 환경은 설정 초기화에서 선택합니다.
   const clientRoot =
@@ -107,7 +113,11 @@ async function startApp(): Promise<void> {
   };
   openWindow();
   if (process.platform === 'win32') {
-    createAppTray(app, { iconPath: windowsIcon, showWindow });
+    createAppTray(app, {
+      iconPath: windowsIcon,
+      darkIconPath: windowsDarkIcon,
+      showWindow,
+    });
   }
   updater.start();
   app.on('activate', showWindow);

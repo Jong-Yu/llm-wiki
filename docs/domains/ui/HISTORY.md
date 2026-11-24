@@ -1,5 +1,28 @@
 # UI 작업 기록
 
+## 2026-11-23 — 대표 로고의 투명 배경과 테마별 중립색
+
+- 사용자 후속 요청으로 원본의 크림 배경을 제거하고 주황 두 점은 고정했습니다. W 선·나머지 점·밑줄은 `currentColor`를 사용하며 한 원본의 먹색/밝은 회색에서 밝음·어두움 SVG·PNG·ICO를 생성합니다. favicon에는 OS 밝기 CSS를 넣고 기본 ICNS와 정적 설치 아이콘도 투명하게 갱신했습니다. `BrandMark`는 가장 가까운 앱 테마의 이미지를 상속하므로 다크 컨테이너 안의 밝은 로그인도 보존합니다.
+- `watchSystemIconTheme`로 Windows 트레이/창·작업 표시줄과 Mac 실행 중 Dock을 최초/시스템 테마 변경에 갱신하고, 창 닫힘·실제 앱 종료에 구독을 해제합니다. 앱/시스템 밝기를 구별하는 기준은 [Electron 공식 계약](https://www.electronjs.org/docs/latest/api/native-theme#nativethemeshouldusedarkcolorsforsystemintegratedui-macos-windows-readonly)을 따릅니다. 정적 EXE·설치 파일·Finder 아이콘의 자동 전환은 포함하지 않습니다.
+- 전체 타입·lint·포맷·194토큰 검사와 main/preload/renderer 빌드 통과. ICO9개 밝음/어두움 쌍의 알파 동일, 주황 픽셀 보존, 먹색→밝은 회색과50% 초과 투명 픽셀을 확인했습니다. favicon도 light/dark 중립색 변경·주황 보존·투명을 확인했고 빌드의4개 PNG/ICO가 생성 원본과 바이트 일치했습니다. [픽셀 검사](../../../app/test-results/brand-transparent-20261123/asset-verification.json)·[favicon 검사](../../../app/test-results/brand-transparent-20261123/favicon-verification.json)·[크기별 비교](../../../app/test-results/brand-transparent-20261123/comparison.png).
+- 격리 Electron 화면 검사1개 통과: 밝은 로그인 보존, 사이드바 light→cream→dark→light 복원, 투명 CSS 배경·AI호출0. 테마는 검증용 DOM 속성으로 전환했으며 설정 메뉴 자체의 회귀 검사는 아닙니다. [로그인](../../../app/test-results/brand-transparent-20261123/login.png)·[밝음](../../../app/test-results/brand-transparent-20261123/sidebar-light.png)·[어두움](../../../app/test-results/brand-transparent-20261123/sidebar-dark.png). 임시 검사 파일/중복 캡처는 정리했습니다.
+- `node tests/session-runtime/run.mjs --lifetime`은 실제 macOS Tray와 주입한 혼합 테마로 초기/변경 이미지, 중복 이벤트 억제, 종료 취소·정리 실패 시 구독 유지, 최종 해제를 통과했습니다. 초기2회는 빈 창의 최소화 이벤트 대기에서 시간 초과돼 격리 data 페이지 로드로 준비 상태를 보완한 뒤 통과했습니다. 독립 소스 검토에서 반례는 없었으나 리뷰어의 별도 Chrome 검증은 sandbox 시작 오류로 미실행입니다.
+- Windows 실기기 테마 변경·고정/핀 작업 표시줄의 실제 표시·설치 파일 재패키징·설치·공개 배포는 수행하지 않았습니다.
+
+## 2026-11-23 — 앱 대표 로고의 공통 원본 통일
+
+- 사용자 범위는 앱 로고·설치·작업 표시줄·트레이입니다. 화면의 단색 마스크, 앱 아이콘의 큰 여백, 트레이 전용 선 굵기/비율 차이를 확인했습니다. 기존 W/연결점·크림/먹색/주황 조합을 유지하고 `llm-wiki-mark.svg`를 유일한 원본으로 삼았습니다. `build-brand-icons.mjs`/`npm run icons:build`가 동일한 그림의 SVG·1024px PNG·9크기 ICO·ICNS를 생성합니다. 새 의존성은 추가하지 않았습니다.
+- `BrandMark`는 테마색 마스크 대신 컬러 원본을24×24로 표시하고 사이드바의28×24 덮어쓰기와 로그인의28×20 비율을 정리했습니다. 트레이와 Windows 창은 같은 ICO를 사용하며 favicon·설치·Dock의 기존 경로도 함께 갱신했습니다. 이 대화에서 만든 별도 트레이 SVG/ICO만 정리했습니다. 일반 메뉴/버튼 아이콘은 요청 범위 밖입니다.
+- `npm run build`의 타입·lint·포맷·194토큰 검사와 제품 빌드 통과. 생성 SVG는 원본과 바이트 일치하고 ICO9크기·PNG의10개 이미지는 원본 렌더와 픽셀 일치합니다. ICNS10표현은 알파·불투명 색이 같습니다. 초기 완전 픽셀 비교는 iconutil의16/32px 반투명 가장자리 RGB 변환 때문에 실패했으며, 차이를 분리 측정하고 원본 손상이 아님을 확인했습니다. [이미지 검증값](../../../app/test-results/brand-unification-20261123/asset-verification.json)·[전후 비교](../../../app/test-results/brand-unification-20261123/comparison.png).
+- 기존 chat-e2e의 임시 사용자 설정/격리 서버 fixture로 실제 로그인→워크스페이스 진입→사이드바를 확인한 일회 시각 검사1개를 통과했습니다. 두 위치의24×24·동일 배경 이미지·mask 없음과 cream/dark 스타일에서도 이미지 유지, AI호출0을 확인했습니다. 스타일 전환은 검증용 DOM 속성 적용이며 설정 화면 동작 검증은 아닙니다. [로그인](../../../app/test-results/brand-unification-20261123/login.png)·[사이드바](../../../app/test-results/brand-unification-20261123/sidebar-light.png)·[다크 사이드바](../../../app/test-results/brand-unification-20261123/sidebar-dark.png). 임시 검사 파일과 중복 캡처는 정리했습니다.
+- 독립 참조/생성기 검토에서 누락 경로나 차단 결함은 발견하지 못했습니다. 생성 파일 저장은 순차 쓰기이며 쓰기 자체 실패 시 재생성이 필요합니다. Windows 실기기·설치 파일 리소스 재패키징·설치·공개 배포는 수행하지 않았습니다.
+
+## 2026-11-23 — 트레이 아이콘의 여백과 작은 크기 보완
+
+- 일반 앱 아이콘 내부의 로고가 전체 폭의 약45%만 차지해 트레이에서 작아지는 원인을 확인했습니다. 기존 W/연결점 모양과 색을 유지한 `llm-wiki-tray.svg`를 만들고 바깥 여백을 줄여 약93%의 폭을 사용하도록 했습니다. 선과 밑줄도 작은 크기에 맞게 보강했습니다. 전용 ICO의16/20/24/32/40/48/64/256px 이미지를 `main/index.ts`와 Windows 수명 검사 경로에 연결했습니다.
+- 동일16/20/24/32px 공간의 밝음·어두움 배경 [전후 비교](../../../app/test-results/tray-icon-20261123/comparison.png)를 확인했습니다. main 타입·변경 진입점 lint·변경 TS2파일 포맷 검사, main/preload/renderer 빌드를 통과했습니다. ICO의8개 RGBA PNG 크기·헤더와 빌드에 포함된 ICO 바이트/참조 일치를 확인했습니다.
+- 첫 렌더는 현재 Playwright에 맞는 기본 브라우저 실행 파일이 없어 실패했고, 설치된 Chrome으로 SVG 렌더·ICO 변환·비교를 완료했습니다. 메뉴·종료 로직은 수정하지 않았으며 전체 회귀와 실제 Windows 트레이 표시, 패키징·설치·배포는 수행하지 않았습니다.
+
 ## 2026-11-23 — 독립 문서 작업 화면의 제품 연결
 
 - D-150의 작업 목록·상세와 등록 후 이동·문서/원본/상태바 진입·결과 복귀를 제품에 연결했습니다. 상태별 조회/재변환/기기 중단과 기존 분석 검사→실행을 구별하고, 최신 시도·부분 저장·미확인·기록 저장 경고를 표시합니다.

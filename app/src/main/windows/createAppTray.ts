@@ -1,8 +1,11 @@
-import { Menu, Tray } from 'electron';
+import { Menu, nativeTheme, Tray } from 'electron';
 import type { App } from 'electron';
+import { watchSystemIconTheme } from './watchSystemIconTheme';
+import type { SystemIconTheme } from './watchSystemIconTheme';
 
 type AppTrayOptions = {
   iconPath: string;
+  darkIconPath: string;
   showWindow: () => void;
 };
 
@@ -10,8 +13,16 @@ type AppTrayOptions = {
 export function createAppTray(
   application: Pick<App, 'once' | 'quit'>,
   options: AppTrayOptions,
+  theme: SystemIconTheme = nativeTheme,
 ): Tray {
-  const tray = new Tray(options.iconPath);
+  const tray = new Tray(
+    theme.shouldUseDarkColorsForSystemIntegratedUI
+      ? options.darkIconPath
+      : options.iconPath,
+  );
+  const stopTheme = watchSystemIconTheme((dark: boolean): void => {
+    tray.setImage(dark ? options.darkIconPath : options.iconPath);
+  }, theme);
   tray.setToolTip('LLM Wiki');
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -23,6 +34,9 @@ export function createAppTray(
   tray.on('click', options.showWindow);
   tray.on('double-click', options.showWindow);
   // 종료 취소·정리 실패 때는 유지하며, 이 참조로 실행 중 GC도 막습니다.
-  application.once('will-quit', (): void => tray.destroy());
+  application.once('will-quit', (): void => {
+    stopTheme();
+    tray.destroy();
+  });
   return tray;
 }

@@ -1,9 +1,21 @@
+// 가까운 테마 컨테이너가 색을 결정하므로 다크 앱 안의 밝은 로그인도 보존합니다.
+:global([data-wiki-theme='light']),
+:global([data-wiki-theme='cream']) {
+  --wiki-brand-image: url('../../../../design/brand/llm-wiki-mark.svg');
+}
+
+:global([data-wiki-theme='dark']) {
+  --wiki-brand-image: url('../../../../design/brand/llm-wiki-icon-dark.svg');
+}
+
 .mark {
   display: inline-block;
-  width: 32px;
+  width: 24px;
   height: 24px;
   flex-shrink: 0;
-  background: var(--wiki-color-action-primary);
-  mask: url('../../../../design/brand/llm-wiki-mark.svg') center / contain
-    no-repeat;
+  background: var(
+      --wiki-brand-image,
+      url('../../../../design/brand/llm-wiki-mark.svg')
+    )
+    center / contain no-repeat;
 }

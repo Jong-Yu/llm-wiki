@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, shell } from 'electron';
+import { BrowserWindow, nativeTheme, screen, shell } from 'electron';
 import type {
   Event,
   WebContentsWillFrameNavigateEventParams,
@@ -9,6 +9,8 @@ import type {
 import { fileURLToPath } from 'node:url';
 import appIcon from '../../../design/brand/llm-wiki-icon.png?asset';
 import windowsIcon from '../../../design/brand/llm-wiki-icon.ico?asset';
+import windowsDarkIcon from '../../../design/brand/llm-wiki-icon-dark.ico?asset';
+import { watchSystemIconTheme } from './watchSystemIconTheme';
 import { isRendererLocation, isWindowFrameLocation } from './rendererLocation';
 import { isPublicWebUrl } from '@contracts/webEvidence.contract';
 
@@ -20,6 +22,9 @@ export function createAppWindow(rendererLocation: string): BrowserWindow {
   ).workArea;
   const width = Math.min(1920, workArea.width);
   const height = Math.min(1080, workArea.height);
+  const systemWindowsIcon = nativeTheme.shouldUseDarkColorsForSystemIntegratedUI
+    ? windowsDarkIcon
+    : windowsIcon;
   const window = new BrowserWindow({
     width,
     height,
@@ -28,7 +33,7 @@ export function createAppWindow(rendererLocation: string): BrowserWindow {
     minWidth: Math.min(960, workArea.width),
     minHeight: Math.min(640, workArea.height),
     title: 'LLM Wiki',
-    icon: process.platform === 'win32' ? windowsIcon : appIcon,
+    icon: process.platform === 'win32' ? systemWindowsIcon : appIcon,
     show: false,
     webPreferences: {
       preload: fileURLToPath(new URL('../preload/index.cjs', import.meta.url)),
@@ -38,6 +43,12 @@ export function createAppWindow(rendererLocation: string): BrowserWindow {
       webviewTag: false,
     },
   });
+  if (process.platform === 'win32') {
+    const stopTheme = watchSystemIconTheme((dark: boolean): void => {
+      window.setIcon(dark ? windowsDarkIcon : windowsIcon);
+    });
+    window.once('closed', stopTheme);
+  }
 
   window.webContents.setWindowOpenHandler(
     (details: HandlerDetails): WindowOpenHandlerResponse => {

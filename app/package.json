@@ -1,6 +1,6 @@
 {
   "name": "llm-wiki-app",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "LLM Wiki desktop application",
   "type": "module",
@@ -18,6 +18,7 @@
     "format": "oxfmt --config config/oxfmt.json --write src config package.json tsconfig.json README.md \"!src/renderer/shared/theme/tokens.*\"",
     "format:check": "oxfmt --config config/oxfmt.json --check src config package.json tsconfig.json README.md \"!src/renderer/shared/theme/tokens.*\"",
     "tokens:check": "node scripts/build-design-tokens.mjs --check",
+    "icons:build": "node scripts/build-brand-icons.mjs",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run tokens:check",
     "package:dir": "npm run build && node scripts/package-desktop.mjs --dir",
     "package": "npm run build && node scripts/package-desktop.mjs",
