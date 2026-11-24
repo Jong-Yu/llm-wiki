@@ -1,3 +1,10 @@
+import { createNativeNotificationDelivery } from '@main/windows/notificationDelivery';
+import { NotificationService } from '@main/backend/NotificationService';
+import { loadNotificationDevice } from '@main/backend/notificationDevice';
+import { registerNotificationHandlers } from './registerNotificationHandlers';
+import type { AnalysisContext } from '@main/backend/ConnectionService';
+import type { DocumentTask } from '@contracts/documentTasks.contract';
+import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
 import { KnowledgeComparisonService } from '@main/backend/KnowledgeComparisonService';
 import { MarkdownExportService } from '@main/backend/MarkdownExportService';
 import { registerFileExportHandlers } from './registerFileExportHandlers';
@@ -47,7 +54,10 @@ import { DocumentTaskService } from '@main/backend/DocumentTaskService';
 import { SourceConversionService } from '@main/backend/SourceConversionService';
 import { registerDocumentTaskHandlers } from './registerDocumentTaskHandlers';
 import type { SourceConversionReadRequest } from '@contracts/sourceConversion.contract';
-import type { AnalysisReadRequest } from '@contracts/analysis.contract';
+import type {
+  AnalysisReadRequest,
+  AnalysisJob,
+} from '@contracts/analysis.contract';
 import { ArtifactService } from '@main/backend/ArtifactService';
 import { TemplateService } from '@main/backend/TemplateService';
 import { registerTemplateHandlers } from './registerTemplateHandlers';
@@ -195,6 +205,38 @@ export async function registerConnectionHandlers(
     undefined,
     documentTasks,
   );
+  const notifications = new NotificationService(
+    service,
+    analysis,
+    await loadNotificationDevice(
+      join(app.getPath('userData'), 'notification-device.json'),
+    ),
+    recovery,
+  );
+  analysis.connectExecutionGuard(
+    (
+      context: AnalysisContext,
+      job: AnalysisJob,
+      claimId: string | undefined,
+    ): ReturnType<NotificationService['validateExecution']> =>
+      notifications.validateExecution(context, job, claimId),
+  );
+  documentTasks.connectNotifications(
+    (
+      context: AnalysisContext,
+      task: DocumentTask,
+      run: SourceConversionRun,
+    ): Promise<void> => notifications.observeConversion(context, task, run),
+  );
+  registerNotificationHandlers(getWindow, rendererLocation, notifications);
+  const notificationDelivery = createNativeNotificationDelivery(
+    service,
+    notifications,
+    recovery,
+    getWindow,
+    rendererLocation,
+  );
+  notificationDelivery.start();
   const conversion = new SourceConversionService(
     service,
     { workRoot: join(app.getPath('userData'), 'source-conversions') },
@@ -489,6 +531,7 @@ export async function registerConnectionHandlers(
   );
   return Object.assign(
     async (): Promise<void> => {
+      notificationDelivery.dispose();
       service.disconnect();
       await Promise.all([
         analysis.stop(),

@@ -94,6 +94,13 @@ export class DocumentTaskService {
   #readers: Readers | null = null;
   #writes: Promise<void> = Promise.resolve();
   #activeConversions = new Set<string>();
+  #conversionObserver:
+    | ((
+        context: AnalysisContext,
+        task: DocumentTask,
+        run: SourceConversionRun,
+      ) => Promise<void>)
+    | null = null;
 
   constructor(connection: Connection, recovery: ProcessRecovery) {
     this.#connection = connection;
@@ -108,6 +115,17 @@ export class DocumentTaskService {
   /** 같은 수명의 변환·분석 서비스만 연결하며 복원 시 프로세스를 시작하지 않습니다. */
   connect(readers: Readers): void {
     this.#readers = readers;
+  }
+
+  /** 변환 보고의 서버 알림 연결은 기존 로컬 기록을 저장한 뒤 관측합니다. */
+  connectNotifications(
+    observer: (
+      context: AnalysisContext,
+      task: DocumentTask,
+      run: SourceConversionRun,
+    ) => Promise<void>,
+  ): void {
+    this.#conversionObserver = observer;
   }
 
   /** 같은 파일의 관측 갱신은 순서대로 CAS 저장하며 실패를 다음 쓰기로 숨기지 않습니다. */
@@ -404,6 +422,10 @@ export class DocumentTaskService {
       value.updatedAt = next.updatedAt;
       await this.#save(context, value, entry);
     });
+    if (this.#conversionObserver) {
+      const { value } = await this.#find(context, taskId);
+      await this.#conversionObserver(context, value, snapshot);
+    }
   }
 
   /** 복원에는 해당 작업의 최신 변환만 쓰고 다른 작업의 최근 원본 변환을 채택하지 않습니다. */
@@ -550,7 +572,7 @@ export class DocumentTaskService {
         );
   }
 
-  /** 상세 열기·새로고침은 원본·변환·분석 영수증 조회만 수행합니다. */
+  /** 상세 복원은 기존 영수증과 알림만 연결하며 변환·분석 프로세스를 시작하지 않습니다. */
   async read(
     request: DocumentTaskReadRequest,
   ): Promise<DocumentTaskDetailResult> {
@@ -591,6 +613,18 @@ export class DocumentTaskService {
         });
         if (converted.ok) {
           conversion = converted.data;
+          if (conversion && this.#conversionObserver) {
+            try {
+              await this.#conversionObserver(context, task, conversion);
+            } catch {
+              errors.push({
+                stage: 'conversion',
+                code: 'notification_sync_failed',
+                message:
+                  '변환 보고는 보존되어 있지만 서버 알림 연결을 확인하지 못했습니다. 연결 상태를 확인하고 새로고침해 주세요.',
+              });
+            }
+          }
           if (conversion?.historyWarning)
             errors.push({
               stage: 'conversion',

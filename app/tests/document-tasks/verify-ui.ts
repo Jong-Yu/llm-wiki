@@ -371,6 +371,243 @@ async function verify(): Promise<void> {
       'PASS unconfirmed registration offers result lookup only and creates no new conversion, registration, or AI run',
     );
 
+    assert.equal(
+      await js(
+        "window.__documentTaskChecks.conversionViewScenarios().staleFailed.every(view=>view.state==='failed' && view.primaryAction?.id==='retry-conversion' && view.textReviewScopes.length===0 && view.textReviewUnits.length===0 && !JSON.stringify(view.explanation).includes('이전 요청'))",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "(() => { const views=window.__documentTaskChecks.conversionViewScenarios(); return views.current.state==='review' && views.current.textReviewUnits.length===30 && views.first.state==='running' && views.first.primaryAction?.id==='stop-conversion'; })()",
+      ),
+      true,
+    );
+    console.log(
+      'PASS latest failed request excludes stale review conversion and session phases while current and first live requests remain visible',
+    );
+    assert.equal(
+      await js(
+        "window.__documentTaskChecks.conversionViewScenarios().staleUnconfirmed.every(view=>view.state==='unconfirmed' && view.primaryAction?.id==='refresh' && view.textReviewScopes.length===0 && view.textReviewUnits.length===0 && !JSON.stringify(view.explanation).includes('이전 요청'))",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "(() => { const view=window.__documentTaskChecks.conversionViewScenarios().scopeInvalid; return view.state==='unconfirmed' && view.primaryAction===null; })()",
+      ),
+      true,
+    );
+    console.log(
+      'PASS latest unconfirmed request retains result lookup without stale OCR text or replay actions and preserves scope invalidation',
+    );
+
+    await js("window.__documentTaskChecks.scenario('text-review')");
+    await open('/tasks?taskId=000000000000000000000000000000c9');
+    await until(
+      "document.querySelector('[data-active=true] [data-task-detail] [role=status]')?.textContent==='문자 확인 필요'",
+    );
+    const reviewEffects = await effects();
+    await until(
+      "[...document.querySelectorAll('a')].some(a=>a.textContent.trim()==='문자 검토와 승인' && a.getAttribute('href').includes('workflowId=') && a.getBoundingClientRect().width>0)",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('button')].some(b=>['다시 변환','본문 준비 시작'].includes(b.textContent.trim()) && b.getBoundingClientRect().width>0)",
+      ),
+      false,
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-active=true] [aria-label=\"문서 처리 단계\"] li[data-state=review]')?.textContent.includes('변환 문자 보관 · 원본 대조 필요')",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('[data-active=true] summary')].filter(s=>s.textContent.endsWith('변환 문자 보기')).length",
+      ),
+      30,
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-active=true] [data-task-detail]').innerText.includes('변환 결과 보관 중')",
+      ),
+      false,
+    );
+    await click('1쪽 변환 문자 보기', 'summary');
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('[data-active=true] details[open] pre')].some(p=>p.textContent==='검증용 1쪽 변환 문자입니다.\\n사용자 원문을 포함하지 않는 합성 자료입니다.')",
+      ),
+      true,
+    );
+    await layout('ocr-text-review');
+    await auditAccessibility(window, 'document-task-text-review', {
+      textSpacing: true,
+    });
+    await click('처리 기록 보기', 'summary');
+    assert.equal(
+      await js(
+        "document.querySelector('[data-active=true] [data-task-detail]').innerText.includes('일부 구간만 변환했습니다')",
+      ),
+      false,
+    );
+    await click('새로고침');
+    await until(
+      "!document.querySelector('[data-active=true] [data-task-detail][aria-busy=true]')",
+    );
+    await open('/tasks?taskId=000000000000000000000000000000c9');
+    await until(
+      "document.querySelector('[data-active=true] [data-task-detail] [role=status]')?.textContent==='문자 확인 필요'",
+    );
+    assert.deepEqual(await effects(), reviewEffects);
+    assert.deepEqual(
+      await js(
+        '(() => { const attempt=window.__documentTaskChecks.snapshot().tasks[0].conversions.at(-1); return {state:attempt.state,complete:attempt.reportSummary.complete,unread:attempt.reportSummary.unreadRanges.length}; })()',
+      ),
+      { state: 'partial', complete: false, unread: 30 },
+    );
+    await click('작업 목록', 'a');
+    await until(
+      "document.querySelectorAll('[data-active=true] [data-task-id]').length===1",
+    );
+    await js(
+      "[...document.querySelectorAll('[data-active=true] [aria-label=\"작업 상태\"] button')].find(b=>b.textContent.trim().startsWith('조치 필요')).click()",
+    );
+    assert.equal(
+      await js(
+        "document.querySelector('[data-active=true] [data-task-id]')?.textContent.includes('문자 확인 필요')",
+      ),
+      true,
+    );
+    assert.deepEqual(await effects(), reviewEffects);
+    console.log(
+      'PASS retained OCR confidence warnings display 30 readable scopes and exact stored text; refresh, restart and attention filtering preserve partial without reconversion or analysis',
+    );
+
+    await js(
+      "document.querySelector('[data-active=true] [data-task-id] a').click()",
+    );
+    await until(
+      "[...document.querySelectorAll('a')].some(a=>a.textContent.trim()==='문자 검토와 승인' && a.getAttribute('href').includes('workflowId=') && a.getBoundingClientRect().width>0)",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('[data-active=true] button')].some(b=>['보관한 문자로 계속','다시 변환'].includes(b.textContent.trim()))",
+      ),
+      false,
+    );
+    assert.deepEqual(await effects(), reviewEffects);
+    console.log(
+      'PASS existing local OCR task links its fixed server workflow and cannot continue before per-page review and approval; full shared workflow is covered by tests/notifications',
+    );
+
+    await js("window.__documentTaskChecks.scenario('text-review-frame')");
+    await open('/tasks?taskId=000000000000000000000000000000c9');
+    await until(
+      "[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='다시 변환' && b.getBoundingClientRect().width>0)",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('a')].some(a=>a.getAttribute('href')?.includes('workflowId=') && a.getBoundingClientRect().width>0)",
+      ),
+      false,
+    );
+    assert.deepEqual(await effects(), reviewEffects);
+    console.log(
+      'PASS image frame warnings stay in generic recovery and never link to a PDF-only approval workflow',
+    );
+
+    await js("window.__documentTaskChecks.scenario('text-review-read-only')");
+    await open('/tasks?taskId=000000000000000000000000000000c9');
+    await until(
+      "document.querySelector('[data-active=true] [data-task-detail] [role=status]')?.textContent==='문자 확인 필요'",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('button')].some(b=>['보관한 문자로 계속','다시 변환','본문 준비 시작'].includes(b.textContent.trim()) && b.getBoundingClientRect().width>0)",
+      ),
+      false,
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('[data-active=true] summary')].filter(s=>s.textContent.endsWith('변환 문자 보기')).length",
+      ),
+      30,
+    );
+    assert.deepEqual(await effects(), {
+      registrations: 0,
+      creates: 0,
+      conversions: 0,
+      analysisStarts: 0,
+      analysisExecutes: 0,
+    });
+    console.log(
+      'PASS read-only access preserves OCR review text and exposes no continuation or conversion action',
+    );
+
+    await js(
+      "window.__documentTaskChecks.scenario('text-review-missing-text')",
+    );
+    await open('/tasks?taskId=000000000000000000000000000000c9');
+    await until(
+      "document.querySelector('[data-active=true] [data-task-detail]')?.textContent?.includes('확인 대상 위치의 보관 문자를 찾지 못해 계속할 수 없습니다')",
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='보관한 문자로 계속' && b.getBoundingClientRect().width>0)",
+      ),
+      false,
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='다시 변환' && b.getBoundingClientRect().width>0)",
+      ),
+      true,
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('[data-active=true] summary')].some(s=>s.textContent.endsWith('변환 문자 보기'))",
+      ),
+      false,
+    );
+    assert.deepEqual(await effects(), {
+      registrations: 0,
+      creates: 0,
+      conversions: 0,
+      analysisStarts: 0,
+      analysisExecutes: 0,
+    });
+    console.log(
+      'PASS missing preserved OCR text remains a failed conversion with retry and never exposes continuation',
+    );
+
+    await js("window.__documentTaskChecks.scenario('review-then-failed')");
+    await open('/tasks?taskId=000000000000000000000000000000c9');
+    await until("document.body.innerText.includes('변환 프로그램이 중단')");
+    assert.equal(
+      await js(
+        "document.querySelector('[data-active=true] [data-task-detail] [role=status]')?.textContent",
+      ),
+      '일부 완료 · 조치 필요',
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('[data-active=true] summary')].some(s=>s.textContent.endsWith('변환 문자 보기'))",
+      ),
+      false,
+    );
+    assert.equal(
+      await js(
+        "[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='다시 변환' && b.getBoundingClientRect().width>0)",
+      ),
+      true,
+    );
+    console.log(
+      'PASS a newer interrupted conversion stays actionable and does not display an older confidence-review body',
+    );
+
     await js("window.__documentTaskChecks.scenario('running')");
     await open('/tasks?taskId=000000000000000000000000000000c9');
     await until(
@@ -497,7 +734,7 @@ async function verify(): Promise<void> {
     );
     assert.deepEqual(rendererErrors, [], 'Renderer errors');
     console.log(
-      'Document workflow UI: 10 scenarios passed; fixture bridge, no real AI or user storage',
+      'Document workflow UI: 18 scenarios passed; fixture bridge, no real AI or user storage',
     );
   } finally {
     window.destroy();

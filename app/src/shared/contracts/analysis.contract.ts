@@ -62,6 +62,7 @@ export const analysisCancelRequestSchema = analysisReadRequestSchema.extend({
 export const analysisExecuteRequestSchema = analysisReadRequestSchema.extend({
   expectedJobRevision: revision,
   mode: z.enum(['start', 'resume']),
+  executionClaimId: id.optional(),
 });
 export const analysisStartRequestSchema = z.strictObject({
   connectionId: text,

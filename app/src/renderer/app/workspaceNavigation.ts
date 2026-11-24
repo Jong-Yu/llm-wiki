@@ -20,7 +20,10 @@ export function workspacePageKey(pathname: string, search: string): string {
     case '/jobs':
       return `job:${query.get('jobId') ?? ''}`;
     case '/tasks':
+      if (query.has('workflowId'))
+        return `workflow:${query.get('workflowId') ?? ''}`;
       return `task:${query.get('taskId') ?? 'list'}`;
+    case '/notifications':
     case '/documents':
     case '/register':
     case '/ontology':
@@ -62,7 +65,9 @@ export function workspaceParentLocation(
     return `/document?path=${encodeURIComponent(document)}`;
   if (pathname === '/jobs' || pathname === '/sessions/history')
     return '/sessions';
-  if (pathname === '/tasks') return '/tasks';
+  if (pathname === '/tasks')
+    return query.has('workflowId') ? '/notifications' : '/tasks';
+  if (pathname === '/notifications') return '/notifications';
   if (pathname === '/artifact' || pathname === '/chat') return '/chat';
   return '/documents';
 }
@@ -137,6 +142,15 @@ export function workspaceBreadcrumb(
     case '/jobs':
       return [{ label: 'AI 세션', to: '/sessions' }, { label: '분석 작업' }];
     case '/tasks':
+      if (query.has('workflowId'))
+        return [
+          { label: '알림', to: '/notifications' },
+          {
+            label:
+              titleOf(`workflow:${query.get('workflowId') ?? ''}`) ??
+              '문자 검토와 처리',
+          },
+        ];
       return query.get('taskId')
         ? [
             { label: '작업', to: '/tasks' },
@@ -158,6 +172,8 @@ export function workspaceBreadcrumb(
       ];
     case '/documents':
       return [{ label: '문서' }];
+    case '/notifications':
+      return [{ label: '알림' }];
     case '/ontology':
       return [{ label: '온톨로지' }];
     case '/review':

@@ -1,0 +1,302 @@
+import { z } from 'zod';
+import { isDocumentPath } from './documents.contract';
+import { sourceExpectedScopeSchema } from './sources.contract';
+import { conversionReportSchema } from './sourceConversion.contract';
+
+const id = z.string().regex(/^[a-f0-9]{32}$/);
+const revision = z.string().regex(/^[a-f0-9]{64}$/);
+const text = z.string().min(1).max(4096);
+const timestamp = z.string().min(1).max(100);
+export const NOTIFICATION_CHANNELS = {
+  list: 'notifications:list',
+  read: 'notifications:read',
+  markRead: 'notifications:mark-read',
+  decide: 'notifications:decide',
+  approve: 'notifications:approve',
+  inspect: 'notifications:inspect',
+  continue: 'notifications:continue',
+  page: 'notifications:page',
+};
+export const notificationSessionSchema = z.strictObject({
+  connectionId: text,
+  expectedScope: sourceExpectedScopeSchema,
+});
+export const notificationListSchema = notificationSessionSchema.extend({
+  filter: z.enum(['all', 'unread', 'approval']).optional(),
+  cursor: z.string().min(1).max(16384).nullable().optional(),
+  afterSequence: z.number().int().nonnegative().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+export const notificationReadSchema = notificationSessionSchema.extend({
+  workflowId: id,
+});
+export const notificationMarkReadSchema = notificationSessionSchema.extend({
+  notificationIds: z.array(id).min(1).max(100),
+  read: z.boolean(),
+});
+const mutation = notificationReadSchema.extend({
+  requestId: id,
+  expectedRevision: revision,
+});
+export const notificationDecideSchema = mutation.extend({
+  decisions: z
+    .array(
+      z.strictObject({
+        page: z.number().int().min(1),
+        state: z.enum(['pending', 'usable', 'held']),
+      }),
+    )
+    .min(1)
+    .max(1000),
+});
+export const notificationApproveSchema = mutation.extend({
+  targetDocument: text.refine(isDocumentPath).optional(),
+});
+export const notificationContinueSchema = mutation;
+export const notificationPageSchema = notificationReadSchema.extend({
+  page: z.number().int().min(1).max(100000),
+});
+export const notificationSourceSchema = z.object({
+  source_id: id,
+  source_version: id,
+  source_sha256: revision,
+  registration_revision: revision,
+});
+export const notificationConversionRefSchema = z.object({
+  conversion_id: id,
+  conversion_revision: revision,
+});
+export const notificationAccessSchema = z.object({
+  user_id: text,
+  tenant: text,
+  profile_id: text,
+  policy_revision: revision,
+  access_revision: z.string().min(1).nullish(),
+});
+export const notificationWorkflowSchema = z.object({
+  workflow_id: id,
+  revision,
+  source_ref: notificationSourceSchema,
+  conversion_ref: notificationConversionRefSchema.nullable(),
+  title: text,
+  target_document: text.refine(isDocumentPath).nullable(),
+  blocked_reason: z.enum(['source_changed', 'report_changed']).optional(),
+  state: z.enum([
+    'review',
+    'approved',
+    'claimed',
+    'running',
+    'complete',
+    'failed',
+    'stopped',
+  ]),
+  pages: z
+    .array(
+      z.object({
+        page: z.number().int().min(1),
+        state: z.enum(['pending', 'usable', 'held']),
+      }),
+    )
+    .max(1000),
+  approval: z
+    .object({
+      request_id: id,
+      approved_at: timestamp,
+      actor: z.object({ user_id: text, tenant: text, profile_id: text }),
+      device_id: id,
+      device_name: z.string().max(80),
+    })
+    .nullable(),
+  execution: z
+    .object({
+      claim_id: id.nullable(),
+      device_id: id.nullable(),
+      device_name: z.string().max(80).nullable(),
+      claimed_at: timestamp.nullable(),
+      job_id: id.nullable(),
+    })
+    .nullable(),
+  resume_request_id: id,
+  created_at: timestamp,
+  updated_at: timestamp,
+});
+export const notificationItemSchema = z.object({
+  notification_id: id,
+  workflow_id: id,
+  sequence: z.number().int().nonnegative(),
+  kind: z.enum(['approval_required', 'completed', 'failed', 'stopped']),
+  origin: z.enum(['server', 'client_reported']).optional(),
+  created_at: timestamp,
+  read_at: timestamp.nullable(),
+  title: text,
+  state: z.string().min(1).max(100),
+  blocked_reason: z.enum(['source_changed', 'report_changed']).optional(),
+  warning_count: z.number().int().nonnegative(),
+  source_ref: notificationSourceSchema,
+  conversion_ref: notificationConversionRefSchema.nullable(),
+});
+export const notificationListDataSchema = z.object({
+  items: z.array(notificationItemSchema).max(100),
+  next_cursor: z.string().nullable(),
+  unread_count: z.number().int().nonnegative(),
+  approval_count: z.number().int().nonnegative(),
+  latest_sequence: z.number().int().nonnegative(),
+  access: notificationAccessSchema,
+});
+export const notificationDetailDataSchema = z.object({
+  workflow: notificationWorkflowSchema,
+  events: z
+    .array(
+      z.object({
+        event_id: id,
+        kind: z.string(),
+        created_at: timestamp,
+        actor: z.object({ user_id: text, tenant: text, profile_id: text }),
+      }),
+    )
+    .max(10000),
+  conversion: z
+    .object({
+      manifest: z.object({
+        id,
+        source_ref: notificationSourceSchema,
+        method: conversionReportSchema.shape.method,
+        complete: z.boolean(),
+        unread_ranges: conversionReportSchema.shape.unread_ranges,
+        warnings: conversionReportSchema.shape.warnings,
+        units: z
+          .array(
+            conversionReportSchema.shape.units.element.omit({ content: true }),
+          )
+          .max(1000),
+      }),
+      revision,
+      components: z.record(z.string(), z.string().max(4 * 1024 * 1024)),
+    })
+    .nullable(),
+  access: notificationAccessSchema,
+});
+export const notificationMutationDataSchema = z.object({
+  workflow: notificationWorkflowSchema,
+  replayed: z.boolean(),
+  access: notificationAccessSchema,
+});
+export const notificationReadStateDataSchema = z.object({
+  updated: z.number().int().nonnegative(),
+  access: notificationAccessSchema,
+});
+export const notificationInspectionDataSchema = z.object({
+  ready: z.boolean(),
+  blockers: z.array(z.string()),
+  deviceId: id,
+  deviceName: z.string().max(80),
+  checkedAt: timestamp,
+});
+export const notificationContinueDataSchema = z.object({
+  workflow: notificationWorkflowSchema,
+  jobId: id,
+  started: z.boolean(),
+});
+export const notificationPageDataSchema = z.object({
+  page: z.number().int().min(1),
+  dataUrl: z
+    .string()
+    .startsWith('data:image/png;base64,')
+    .max(12 * 1024 * 1024),
+});
+const failure = z.object({
+  ok: z.literal(false),
+  error: z.object({
+    code: text,
+    message: z.string().max(4096),
+    status: z.number().optional(),
+    traceId: z.string().optional(),
+  }),
+});
+export const notificationListResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: notificationListDataSchema }),
+  failure,
+]);
+export const notificationDetailResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: notificationDetailDataSchema }),
+  failure,
+]);
+export const notificationMutationResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: notificationMutationDataSchema }),
+  failure,
+]);
+export const notificationReadStateResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: notificationReadStateDataSchema }),
+  failure,
+]);
+export const notificationInspectionResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: notificationInspectionDataSchema }),
+  failure,
+]);
+export const notificationContinueResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: notificationContinueDataSchema }),
+  failure,
+]);
+export const notificationPageResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: notificationPageDataSchema }),
+  failure,
+]);
+export type NotificationSession = z.infer<typeof notificationSessionSchema>;
+export type NotificationListRequest = z.infer<typeof notificationListSchema>;
+export type NotificationReadRequest = z.infer<typeof notificationReadSchema>;
+export type NotificationMarkReadRequest = z.infer<
+  typeof notificationMarkReadSchema
+>;
+export type NotificationDecideRequest = z.infer<
+  typeof notificationDecideSchema
+>;
+export type NotificationApproveRequest = z.infer<
+  typeof notificationApproveSchema
+>;
+export type NotificationContinueRequest = z.infer<
+  typeof notificationContinueSchema
+>;
+export type NotificationPageRequest = z.infer<typeof notificationPageSchema>;
+export type NotificationItem = z.infer<typeof notificationItemSchema>;
+export type NotificationWorkflow = z.infer<typeof notificationWorkflowSchema>;
+export type NotificationListResult = z.infer<
+  typeof notificationListResultSchema
+>;
+export type NotificationDetailResult = z.infer<
+  typeof notificationDetailResultSchema
+>;
+export type NotificationMutationResult = z.infer<
+  typeof notificationMutationResultSchema
+>;
+export type NotificationReadStateResult = z.infer<
+  typeof notificationReadStateResultSchema
+>;
+export type NotificationInspectionResult = z.infer<
+  typeof notificationInspectionResultSchema
+>;
+export type NotificationContinueResult = z.infer<
+  typeof notificationContinueResultSchema
+>;
+export type NotificationPageResult = z.infer<
+  typeof notificationPageResultSchema
+>;
+export type NotificationsBridge = {
+  list: (request: NotificationListRequest) => Promise<NotificationListResult>;
+  read: (request: NotificationReadRequest) => Promise<NotificationDetailResult>;
+  markRead: (
+    request: NotificationMarkReadRequest,
+  ) => Promise<NotificationReadStateResult>;
+  decide: (
+    request: NotificationDecideRequest,
+  ) => Promise<NotificationMutationResult>;
+  approve: (
+    request: NotificationApproveRequest,
+  ) => Promise<NotificationMutationResult>;
+  inspect: (
+    request: NotificationReadRequest,
+  ) => Promise<NotificationInspectionResult>;
+  continue: (
+    request: NotificationContinueRequest,
+  ) => Promise<NotificationContinueResult>;
+  page: (request: NotificationPageRequest) => Promise<NotificationPageResult>;
+};

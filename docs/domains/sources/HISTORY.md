@@ -1,5 +1,17 @@
 # 원본 저장 작업 기록
 
+## 2026-11-24 — 고정 원본의 PDF 페이지 미리보기
+
+- `GET /sources/{id}/versions/{version}/pages/{page}`에 현재 권한과 원본 hash·등록 revision 검사를 적용했다. 검증된 열린 원본 descriptor만 별도 PDFium 프로세스에 전달하고 결과를 반환하기 전 권한·판본을 다시 확인한다. 페이지 이미지는 저장하지 않는다.
+- `core.tests.poc_analysis.test_source_preview`4검사 통과. 합성 PDF2쪽의 실제 PNG/회전 metadata/긴 변1600px, 원본 바이트 보존, 잘못된 hash/revision·없는 쪽·렌더 전후 권한 거부·동시 처리 중·시간 초과와 사용권 해제를 확인했다. OCR은 호출하지 않았다.
+- 첫 승인 범위는 PDF의 `page` 저신뢰 경고다. 이미지의 `frame` 경고를 PDF 승인 대기로 잘못 묶어 없는 화면에서 멈추지 않도록 앱 판별을 분리했다. 실제 사용자 PDF 전체 페이지 품질·운영 Linux 자원 제한·Windows 실기기 미리보기는 미검증이다.
+
+## 2026-11-24 — 사용자 계정의 170쪽 변환 보고 확인
+
+- 기존 Codex 자격증명은 401로 거부되어 다른 계정이나 자료 루트로 우회하지 않았다. 사용자가 알려 준 계정 이름으로 정상 인증한 뒤 허용 tenant/profile과 사용자 범위를 확인하고 해당 원본·판본·변환 보고를 읽었다.
+- 원본 PDF의 SHA256과 보고의 원본 참조가 일치하며, PDF 170쪽에 대응해 1~170쪽이 중복·빈 본문 없이 보관되어 있었다. `complete=false`의 남은 30개 구간은 모두 `ocr_low_or_missing_confidence_text_retained_manual_review_required`였으며 checkpoint/worker 중단은 없었다. 같은 날 이전 두 보고에는 checkpoint 읽기 실패와 각각 123쪽/2쪽의 부분 결과가 있었다. 실행 회차는 서버 보고 필드에 없어 저장 시각을 기기 실행 회차의 확정 근거로 사용하지 않았다.
+- 이번 조회는 보관 결과 관측이며 OCR 재실행이나 Windows 파일 잠금 재현이 아니다. 30쪽의 문자 정확도를 승인하지 않았고 원본·보고·위키·히스토리를 변경하지 않았다. 표시 보완과 검증은 [UI 기록](../ui/HISTORY.md#2026-11-24--ocr-문자-확인-필요와-변환-중단의-표시-구분)을 따른다. 원문과 토큰 없이 식별자·해시·개수만 `.local/diagnostics/2026-11-24-architecture-conversion/observations.json`에 보관했다.
+
 ## 2026-11-24 — 중간 결과 읽기 수정의 0.4.1 반영
 
 - 아래 errno-only EACCES 재시도와 실패 진단 보존을 소스 `4992886`/`v0.4.1` 및 [0.4.1 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.4.1-portable)에 반영했습니다. 원본·기존 보고·위키·히스토리를 변경하지 않았습니다. 포함 소스/런타임 무결성과 공개 검증은 [platform 기록](../platform/HISTORY.md#2026-11-24--windows-문자-변환-보완-041-포터블-공개), Windows 공유 잠금·동일 PDF 전체 재실행의 미확정 상태는 아래 기록을 따릅니다.

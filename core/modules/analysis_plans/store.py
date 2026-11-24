@@ -75,7 +75,18 @@ class PlanStore:
             "tenant": self.actor["tenant"], "user_id": self.actor["user_id"], "actor": self.actor,
             "request_id": request_id, "payload_hash": digest, "components": inputs_files.descriptors(components)}
         authorize()
+        notification = pending = None
+        if kind == "conversions":
+            from core.modules.notifications.store import NotificationStore, review_pages
+            notification = NotificationStore(self.store, self.actor, rulesets=self.rulesets)
+            value_manifest["created_at"] = notification.now()
+            if review_pages(value_manifest, components):
+                value_manifest["approval_workflow_id"] = value
+            pending = notification.stage_locked("conversion", value)
+            notification.stage_conversion_head_locked(value_manifest["source_ref"], value)
         revision = inputs_files.publish(self.store, path, value_manifest, components, maximum=8 * 1024 * 1024)
+        if pending is not None:
+            notification.deliver_locked(pending)
         return {"manifest": value_manifest, "revision": revision, "components": components, "replayed": False}
 
     def _original_locked(self, reference):

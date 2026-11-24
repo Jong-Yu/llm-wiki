@@ -1,4 +1,37 @@
 import {
+  NOTIFICATION_CHANNELS,
+  notificationApproveSchema,
+  notificationContinueResultSchema,
+  notificationContinueSchema,
+  notificationDecideSchema,
+  notificationDetailResultSchema,
+  notificationInspectionResultSchema,
+  notificationListResultSchema,
+  notificationListSchema,
+  notificationMarkReadSchema,
+  notificationMutationResultSchema,
+  notificationPageResultSchema,
+  notificationPageSchema,
+  notificationReadSchema,
+  notificationReadStateResultSchema,
+} from '@contracts/notifications.contract';
+import type {
+  NotificationApproveRequest,
+  NotificationContinueRequest,
+  NotificationContinueResult,
+  NotificationDecideRequest,
+  NotificationDetailResult,
+  NotificationInspectionResult,
+  NotificationListRequest,
+  NotificationListResult,
+  NotificationMarkReadRequest,
+  NotificationMutationResult,
+  NotificationPageRequest,
+  NotificationPageResult,
+  NotificationReadRequest,
+  NotificationReadStateResult,
+} from '@contracts/notifications.contract';
+import {
   DOCUMENT_TASK_CHANNELS,
   documentTaskCreateSchema,
   documentTaskSessionSchema,
@@ -517,6 +550,80 @@ export function createWikiBridge(
       ): Promise<QuestionWebSearchResult> =>
         parseQuestionWebSearchResult(
           await invoke(QUESTION_RUN_CHANNELS.webSearch, request),
+        ),
+    },
+    notifications: {
+      list: async (
+        request: NotificationListRequest,
+      ): Promise<NotificationListResult> =>
+        notificationListResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.list,
+            notificationListSchema.parse(request),
+          ),
+        ),
+      read: async (
+        request: NotificationReadRequest,
+      ): Promise<NotificationDetailResult> =>
+        notificationDetailResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.read,
+            notificationReadSchema.parse(request),
+          ),
+        ),
+      markRead: async (
+        request: NotificationMarkReadRequest,
+      ): Promise<NotificationReadStateResult> =>
+        notificationReadStateResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.markRead,
+            notificationMarkReadSchema.parse(request),
+          ),
+        ),
+      decide: async (
+        request: NotificationDecideRequest,
+      ): Promise<NotificationMutationResult> =>
+        notificationMutationResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.decide,
+            notificationDecideSchema.parse(request),
+          ),
+        ),
+      approve: async (
+        request: NotificationApproveRequest,
+      ): Promise<NotificationMutationResult> =>
+        notificationMutationResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.approve,
+            notificationApproveSchema.parse(request),
+          ),
+        ),
+      inspect: async (
+        request: NotificationReadRequest,
+      ): Promise<NotificationInspectionResult> =>
+        notificationInspectionResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.inspect,
+            notificationReadSchema.parse(request),
+          ),
+        ),
+      continue: async (
+        request: NotificationContinueRequest,
+      ): Promise<NotificationContinueResult> =>
+        notificationContinueResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.continue,
+            notificationContinueSchema.parse(request),
+          ),
+        ),
+      page: async (
+        request: NotificationPageRequest,
+      ): Promise<NotificationPageResult> =>
+        notificationPageResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.page,
+            notificationPageSchema.parse(request),
+          ),
         ),
     },
     documentTasks: {

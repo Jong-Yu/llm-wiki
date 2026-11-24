@@ -17,6 +17,9 @@ import { registerUpdateHandlers } from './ipc/registerUpdateHandlers';
 
 /** Electron 시작·종료와 창/IPC 조립의 진입점입니다. */
 async function startApp(): Promise<void> {
+  // Windows 알림의 앱 식별자를 설치 패키지 appId와 맞춥니다.
+  if (process.platform === 'win32')
+    app.setAppUserModelId('local.llm-wiki.desktop');
   await app.whenReady();
   // 실행 중 Dock은 시스템 테마를 따르며 Finder의 정적 번들 아이콘은 별도입니다.
   if (process.platform === 'darwin') {

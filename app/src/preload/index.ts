@@ -66,3 +66,12 @@ const wiki = createWikiBridge(
 );
 
 contextBridge.exposeInMainWorld('wiki', wiki);
+
+// OS 알림은 고정된 업무 ID의 화면만 열며 승인이나 실행을 호출하지 않습니다.
+ipcRenderer.on(
+  'notifications:open-workflow',
+  (_event: Electron.IpcRendererEvent, value: unknown): void => {
+    if (typeof value === 'string' && /^[a-f0-9]{32}$/.test(value))
+      window.location.hash = `/tasks?workflowId=${value}`;
+  },
+);

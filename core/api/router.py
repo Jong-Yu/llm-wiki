@@ -19,6 +19,8 @@ from core.api.v1.personal.router import router as personal
 from core.api.v1.personal.workflows_router import router as personal_workflows
 from core.api.v1.analysis_plans.router import router as analysis_plans
 from core.api.v1.analysis_proposals.router import router as analysis_proposals
+from core.api.v1.notifications.router import router as notifications
+from core.api.v1.source_previews.router import router as source_previews
 from core.api.schemas import ErrorEnvelope
 
 router = APIRouter(prefix="/api/v1", responses={
@@ -41,3 +43,6 @@ router.include_router(analysis_proposals, prefix="/tenants/{tenant}")
 router.include_router(cleanup, prefix="/tenants/{tenant}")
 
 router.include_router(relations, prefix="/tenants/{tenant}")
+
+router.include_router(notifications, prefix="/tenants/{tenant}")
+router.include_router(source_previews, prefix="/tenants/{tenant}")

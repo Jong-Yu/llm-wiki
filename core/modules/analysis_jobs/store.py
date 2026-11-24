@@ -28,7 +28,19 @@ class JobStore:
         return value.astimezone(timezone.utc)
 
     def _write(self, path, value):
-        return records.write(self, path, value)
+        # Durable notification intent precedes canonical state. Delivery failure after
+        # saving never changes the successful job outcome or asks for a write replay.
+        pending = notifications = None
+        if path.name in {"job.json", "state.json"} and isinstance(value, dict) and value.get("events"):
+            from .registration import registration
+            if registration(value) is not None and value["events"][-1]["kind"] in {"created", "claimed", "reported", "cancelled"}:
+                from core.modules.notifications.store import NotificationStore
+                notifications = NotificationStore(self.store, value["actor"], rulesets=self.rulesets, clock=self.clock)
+                pending = notifications.stage_locked("job", value["job_id"], event_id=value["events"][-1]["event_id"])
+        result = records.write(self, path, value)
+        if pending is not None:
+            notifications.deliver_locked(pending)
+        return result
 
     def _write_request(self, path, value):
         return self._write(path, value)

@@ -125,7 +125,7 @@ async def _download(http, endpoint, directory, source):
 async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
                   prepare_input=False, context_documents=None, adapter=None, profile=None,
                   expected_job_revision=None, semantic_check=False, input_view="full", rules_view="full",
-                  session_registry=None):
+                  session_registry=None, execution_claim_id=None):
     """작업을 확인해 인계하고, 어댑터를 명시한 경우에만 실제 AI 단계를 실행한다."""
     from .ai.timings import StageTimings, outcome
     timings, local = StageTimings(), {}
@@ -135,7 +135,7 @@ async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
             context_documents=context_documents, adapter=adapter, profile=profile,
             expected_job_revision=expected_job_revision, semantic_check=semantic_check,
             input_view=input_view, rules_view=rules_view, session_registry=session_registry,
-            timings=timings, local=local)
+            timings=timings, local=local, execution_claim_id=execution_claim_id)
     except BaseException as error:
         # workflow 진입 뒤에는 기존 ai-failure가 기록한다. 준비 실패 관측은
         # 원래 예외를 가리지 않고, 이미 생성한 이번 실행 디렉터리에만 보존한다.
@@ -158,7 +158,8 @@ async def prepare(*, base_url, tenant, job_id, token, work_dir, reclaim=False,
 
 async def _prepare(*, base_url, tenant, job_id, token, work_dir, reclaim,
                    prepare_input, context_documents, adapter, profile, expected_job_revision,
-                   semantic_check, input_view, rules_view, session_registry, timings, local):
+                   semantic_check, input_view, rules_view, session_registry, timings, local,
+                   execution_claim_id=None):
     base = server_url(base_url)
     from .ai.input_view import INPUT_VIEWS
     if input_view not in INPUT_VIEWS:
@@ -166,6 +167,8 @@ async def _prepare(*, base_url, tenant, job_id, token, work_dir, reclaim,
     from .ai.rule_selection import rules_view_configuration
     rules_view_configuration(rules_view)
     _identifier(job_id)
+    if execution_claim_id is not None:
+        _identifier(execution_claim_id)
     if expected_job_revision is not None and _HASH.fullmatch(expected_job_revision) is None:
         raise AnalysisClientError("invalid_job_revision")
     if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", tenant) is None:
@@ -221,8 +224,12 @@ async def _prepare(*, base_url, tenant, job_id, token, work_dir, reclaim,
                         "execution_configuration": execution_config,
                         "usage_observations": {"adapter_call_count": 0, "calls": [], "reused_result": True,
                                                "timings": timings.summary()}}}
-            claimed = await timings.wait("preparation", tool_call(mcp, "analysis_job_claim", {"tenant": tenant, "job_id": job_id,
-                "expected_job_revision": job["job_revision"], "reclaim": reclaim}), operation="claim")
+            # 승인 workflow의 PC 실행 사용권을 같은 claim에 전달한다. 일반 작업의 기존 요청은 유지한다.
+            claim_arguments = {"tenant": tenant, "job_id": job_id,
+                "expected_job_revision": job["job_revision"], "reclaim": reclaim}
+            if execution_claim_id is not None:
+                claim_arguments["execution_claim_id"] = execution_claim_id
+            claimed = await timings.wait("preparation", tool_call(mcp, "analysis_job_claim", claim_arguments), operation="claim")
             run = _identifier(claimed["run_id"])
             source_input = await timings.wait("preparation", tool_call(mcp, "source_read", {"tenant": tenant, "job_id": job_id, "run_id": run}),
                                              operation="source_reference")

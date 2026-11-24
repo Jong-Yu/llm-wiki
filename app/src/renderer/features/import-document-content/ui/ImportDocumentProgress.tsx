@@ -7,6 +7,11 @@ import { useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import { Link } from 'react-router';
 import { WorkspaceSection } from '@renderer/shared/ui/WorkspaceSection';
+import {
+  conversionNeedsTextReview,
+  conversionNeedsPageApproval,
+} from '@contracts/sourceConversion.contract';
+import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
 import type { ImportScope } from '../api/importRegistration.api';
 import type { ImportRegisteredSource } from '../model/importProcessing.types';
 import type { ImportProcessingSession } from '../model/ImportProcessingSession';
@@ -96,9 +101,17 @@ function ConversionWarnings({ report }: ConversionWarningsProps): JSX.Element {
       const code = /^(?:remaining|whole) source: ([a-zA-Z0-9_.-]+)$/.exec(
         range,
       )?.[1];
+      const review =
+        /^(page|frame) ([1-9][0-9]*): ocr_low_or_missing_confidence_text_retained_manual_review_required$/.exec(
+          range,
+        );
       return {
         range,
-        message: code ? (conversionFailures[code] ?? null) : null,
+        message: review
+          ? `${review[2]}${review[1] === 'page' ? '쪽' : '번째 프레임'}: 변환 문자를 보관했지만 인식 신뢰도가 낮아 원본 대조가 필요합니다.`
+          : code
+            ? (conversionFailures[code] ?? null)
+            : null,
       };
     },
   );
@@ -109,7 +122,16 @@ function ConversionWarnings({ report }: ConversionWarningsProps): JSX.Element {
           { range, message }: { range: string; message: string | null },
           index: number,
         ): JSX.Element => (
-          <p key={`${index}:${range}`} className={styles.error}>
+          <p
+            key={`${index}:${range}`}
+            className={
+              range.endsWith(
+                'ocr_low_or_missing_confidence_text_retained_manual_review_required',
+              )
+                ? undefined
+                : styles.error
+            }
+          >
             {message ?? `미독: ${range}`}
           </p>
         ),
@@ -118,7 +140,7 @@ function ConversionWarnings({ report }: ConversionWarningsProps): JSX.Element {
         (item: { message: string | null }): boolean => item.message !== null,
       ) && (
         <details>
-          <summary>변환 오류 기록</summary>
+          <summary>변환 진단 기록</summary>
           {explained
             .filter(
               (item: { message: string | null }): boolean =>
@@ -129,10 +151,76 @@ function ConversionWarnings({ report }: ConversionWarningsProps): JSX.Element {
             ))}
         </details>
       )}
-      {report.warnings.map((warning: string, index: number): JSX.Element => (
-        <p key={`${index}:${warning}`}>{warning}</p>
-      ))}
+      {report.warnings.length > 0 && (
+        <details>
+          <summary>변환 도구 기록</summary>
+          {report.warnings.map(
+            (warning: string, index: number): JSX.Element => (
+              <p key={`${index}:${warning}`}>{warning}</p>
+            ),
+          )}
+        </details>
+      )}
     </>
+  );
+}
+
+type ConversionTextReviewProps = {
+  report: NonNullable<SourceConversionRun['report']>;
+};
+type TextReviewUnit = { id: string; label: string; content: string };
+
+/** 저신뢰 구간의 저장된 문자만 원본 대조용으로 보여 주며 확인 완료로 바꾸지 않습니다. */
+function ConversionTextReview({
+  report,
+}: ConversionTextReviewProps): JSX.Element {
+  const scopes = new Set(
+    report.unread_ranges.map(
+      (range: string): string => range.split(':')[0] ?? '',
+    ),
+  );
+  const units = report.units.flatMap(
+    (unit: (typeof report.units)[number]): TextReviewUnit[] => {
+      if (
+        unit.location.kind !== 'pages' ||
+        !unit.location.start ||
+        unit.location.start !== unit.location.end
+      )
+        return [];
+      const label = scopes.has(`page ${unit.location.start}`)
+        ? `${unit.location.start}쪽`
+        : scopes.has(`frame ${unit.location.start}`)
+          ? `${unit.location.start}번째 프레임`
+          : null;
+      return label ? [{ id: unit.unit_id, label, content: unit.content }] : [];
+    },
+  );
+  const pageUnits =
+    [...scopes].every((scope: string): boolean => scope.startsWith('page ')) &&
+    report.units.every(
+      (unit: (typeof report.units)[number]): boolean =>
+        unit.location.kind === 'pages' &&
+        unit.location.start === unit.location.end,
+    );
+  return (
+    <div className={styles.report}>
+      <p>
+        보관된 변환 문자 {report.units.length}
+        {pageUnits ? '쪽' : '개 구간'} · 문자 확인 필요{' '}
+        {report.unread_ranges.length}
+        {pageUnits ? '쪽' : '개 구간'}
+      </p>
+      <p>
+        아래 문자를 등록 원본과 대조해 주세요. 인식 신뢰도는 문자 정확도에 대한
+        검증 결과가 아닙니다.
+      </p>
+      {units.map((unit: TextReviewUnit): JSX.Element => (
+        <details key={unit.id}>
+          <summary>{unit.label} 변환 문자</summary>
+          <pre>{unit.content}</pre>
+        </details>
+      ))}
+    </div>
   );
 }
 
@@ -196,6 +284,13 @@ export function ImportDocumentProgress({
   const uncertain =
     state.phase === 'conversion_unconfirmed' ||
     state.phase === 'planning_unconfirmed';
+  const needsTextReview = state.phase === 'conversion_review';
+  const needsPageApproval =
+    needsTextReview && conversionNeedsPageApproval(conversion?.report);
+  const hasTextReview =
+    state.phase !== 'conversion_failed' &&
+    conversion?.receiptState === 'saved' &&
+    conversionNeedsTextReview(conversion.report);
   const progressMessage = (state.error ?? state.message).replaceAll(
     '서버 준비 조건: common_ruleset_required',
     '공통 분석 규약이 설정되지 않았습니다. 서버의 분석 설정을 확인해 주세요.',
@@ -205,6 +300,7 @@ export function ImportDocumentProgress({
   const plainText = ['md', 'txt'].includes(registered.item.format);
   const converted =
     plainText ||
+    (!!state.detail && hasTextReview) ||
     (conversion?.state === 'complete' && conversion.receiptState === 'saved');
   const failedStage =
     state.error !== null ||
@@ -214,8 +310,18 @@ export function ImportDocumentProgress({
     { label: '원본 보관', state: 'done' },
     {
       label: '문자 변환',
-      state: stepState(converted, false, state.phase === 'conversion_failed'),
-      note: plainText ? '원문 그대로 사용' : undefined,
+      state: stepState(
+        converted,
+        needsTextReview,
+        state.phase === 'conversion_failed',
+      ),
+      note: hasTextReview
+        ? converted
+          ? '보관 문자 사용 · 원본 대조 필요'
+          : '문자 확인 필요'
+        : plainText
+          ? '원문 그대로 사용'
+          : undefined,
     },
     {
       label: '문서 저장',
@@ -232,6 +338,7 @@ export function ImportDocumentProgress({
     },
   ];
   const phaseTitles: Partial<Record<typeof state.phase, string>> = {
+    conversion_review: '변환 문자를 확인해 주세요',
     conversion_failed: '본문을 변환하지 못했습니다',
     stopped: savedWiki
       ? '문서는 저장됐지만 관계 추출이 중단됐습니다'
@@ -250,7 +357,7 @@ export function ImportDocumentProgress({
   const actions: ProgressAction[] = [
     {
       id: 'prepare',
-      available: scope.canPrepare && state.canPrepare,
+      available: scope.canPrepare && state.canPrepare && !needsTextReview,
       label: conversion ? '본문 준비 이어가기' : 'Markdown 준비 시작',
       variant: 'primary',
       run: (): Promise<void> => session.begin(),
@@ -259,7 +366,7 @@ export function ImportDocumentProgress({
       id: 'retry-conversion',
       available: state.canRetryConversion,
       label: '본문 변환 다시 시도',
-      variant: 'primary',
+      variant: needsTextReview ? 'surface' : 'primary',
       run: (): Promise<void> => session.retryConversion(),
     },
     {
@@ -330,8 +437,15 @@ export function ImportDocumentProgress({
             {uncertain && (
               <p>새 요청을 만들지 않고 원래 요청의 저장 결과부터 확인합니다.</p>
             )}
-            {conversion?.state === 'partial' && (
+            {conversion?.state === 'partial' && !hasTextReview && (
               <p>읽지 못한 부분을 확인하고 변환을 다시 시도해 주세요.</p>
+            )}
+            {needsPageApproval && (
+              <p>
+                경고 쪽을 원본과 대조하고 문자 사용을 승인해 주세요. 모든 쪽
+                확인과 최종 승인이 서버에 저장된 뒤 문서 저장과 관계 추출을
+                이어갑니다. 원래 경고는 처리 결과에도 남습니다.
+              </p>
             )}
           </div>
         )}
@@ -351,6 +465,18 @@ export function ImportDocumentProgress({
           </p>
         )}
         <div className={styles.actions}>
+          {needsPageApproval && (
+            <Link
+              className={`${styles.button} ${styles.primary}`}
+              to={
+                conversion?.reference
+                  ? `/tasks?${new URLSearchParams({ workflowId: conversion.reference.conversionId })}`
+                  : '/notifications'
+              }
+            >
+              문자 검토와 승인
+            </Link>
+          )}
           {actions
             .filter((action: ProgressAction): boolean => action.available)
             .map((action: ProgressAction): JSX.Element => (
@@ -380,6 +506,9 @@ export function ImportDocumentProgress({
             </Link>
           )}
         </div>
+        {hasTextReview && conversion?.report && (
+          <ConversionTextReview report={conversion.report} />
+        )}
         <div className={styles.resultLinks}>
           {savedOntology && (
             <Link

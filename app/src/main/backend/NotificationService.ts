@@ -1,0 +1,828 @@
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import {
+  notificationDetailDataSchema,
+  notificationListDataSchema,
+  notificationMutationDataSchema,
+  notificationReadStateDataSchema,
+  notificationAccessSchema,
+} from '@contracts/notifications.contract';
+import type {
+  NotificationSession,
+  NotificationListRequest,
+  NotificationReadRequest,
+  NotificationMarkReadRequest,
+  NotificationDecideRequest,
+  NotificationApproveRequest,
+  NotificationContinueRequest,
+  NotificationPageRequest,
+  NotificationListResult,
+  NotificationDetailResult,
+  NotificationReadStateResult,
+  NotificationMutationResult,
+  NotificationInspectionResult,
+  NotificationContinueResult,
+  NotificationPageResult,
+  NotificationWorkflow,
+} from '@contracts/notifications.contract';
+import { conversionNeedsPageApproval } from '@contracts/sourceConversion.contract';
+import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
+import type { DocumentTask } from '@contracts/documentTasks.contract';
+import type { AnalysisContext, ConnectionService } from './ConnectionService';
+import type { AnalysisService } from './AnalysisService';
+import type { AnalysisJob } from '@contracts/analysis.contract';
+import type { NotificationDevice } from './notificationDevice';
+import {
+  apiFailure,
+  matchesExpectedScope,
+  readScopedApiJson,
+  readApiPageBytes,
+} from './readApi';
+import type { ApiFailure } from './readApi';
+import type { ProcessRecovery } from './processRecovery';
+import {
+  readProcessJournal,
+  writeProcessJournal,
+  removeProcessJournal,
+} from './processRecovery';
+import type { RecoveryEntry } from '@contracts/recovery.contract';
+import { ExecutionStarts } from './ExecutionStarts';
+
+type Connection = Pick<
+  ConnectionService,
+  | 'analysisContext'
+  | 'isAnalysisCurrent'
+  | 'analysisAccessFailure'
+  | 'onScopeChanged'
+>;
+type Analysis = Pick<
+  AnalysisService,
+  'inspectRuntime' | 'start' | 'inspectExecution' | 'execute'
+>;
+const envelope = z.object({
+  data: z.looseObject({ access: notificationAccessSchema }),
+});
+const pendingApproval = z.object({
+  workflowId: z.string(),
+  requestId: z.string(),
+  expectedRevision: z.string(),
+  targetDocument: z.string().optional(),
+});
+const executionEntry = z.object({
+  workflowId: z.string(),
+  stage: z.enum(['claim', 'registration', 'started']),
+  requestId: z.string(),
+  expectedRevision: z.string(),
+  reclaim: z.boolean().default(false),
+  priorClaimId: z.string().nullable().default(null),
+});
+const outboxEntry = z.object({
+  path: z.enum(['notification-workflows', 'notification-events']),
+  body: z.record(z.string(), z.unknown()),
+});
+
+/** 사용자 요청마다 새 ID를 만들지 않고 해당 단계의 안정된 멱등 키를 계산합니다. */
+function stepId(value: string, step: string): string {
+  return createHash('sha256')
+    .update(`${value}:${step}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+/** 늦은 응답과 다른 계정의 승인을 현재 화면에 적용하지 않습니다. */
+function changed(): ApiFailure {
+  return apiFailure(
+    'scope_changed',
+    '작업 공간 또는 조회 설정이 변경되었습니다. 현재 범위에서 다시 확인해 주세요.',
+  );
+}
+
+/** 서버의 알림·페이지 확인·승인 영수증을 소유하고 실행은 기존 개인 실행기에 연결합니다. */
+export class NotificationService {
+  readonly #connection: Connection;
+  readonly #analysis: Analysis;
+  readonly #device: NotificationDevice;
+  readonly #recovery: ProcessRecovery;
+  readonly #requests = new Set<AbortController>();
+  readonly #starts = new ExecutionStarts();
+  readonly #flushes = new ExecutionStarts();
+
+  constructor(
+    connection: Connection,
+    analysis: Analysis,
+    device: NotificationDevice,
+    recovery: ProcessRecovery,
+  ) {
+    this.#connection = connection;
+    this.#analysis = analysis;
+    this.#device = device;
+    this.#recovery = recovery;
+    connection.onScopeChanged((): void => {
+      for (const controller of this.#requests) controller.abort();
+    });
+  }
+
+  /** 다른 PC의 claim을 화면에서 복사해도 이 PC의 직접 분석 실행으로 우회할 수 없습니다. */
+  async validateExecution(
+    context: AnalysisContext,
+    job: AnalysisJob,
+    claimId: string | undefined,
+  ): Promise<ApiFailure | null> {
+    const reference = job.registration?.conversion_ref;
+    if (!reference)
+      return claimId
+        ? apiFailure(
+            'execution_claim_invalid',
+            '이 작업의 실행 승인 식별자가 아닙니다.',
+          )
+        : null;
+    const result = await this.#api(
+      context,
+      `notification-workflows/${reference.conversion_id}`,
+    );
+    if (!result.ok)
+      return result.error.code === 'not_found' && !claimId ? null : result;
+    const detail = notificationDetailDataSchema.parse(result.value);
+    const workflow = detail.workflow;
+    if (workflow.blocked_reason)
+      return apiFailure(
+        workflow.blocked_reason,
+        '원본 또는 변환 보고가 바뀌었습니다. 최신 보고에서 다시 확인해 주세요.',
+      );
+    if (!workflow.pages.length && !claimId) return null;
+    if (
+      !workflow.approval ||
+      workflow.execution?.claim_id !== claimId ||
+      workflow.execution?.device_id !== this.#device.deviceId ||
+      workflow.execution?.job_id !== job.job_id ||
+      workflow.conversion_ref?.conversion_revision !==
+        reference.conversion_revision
+    )
+      return apiFailure(
+        'execution_claim_invalid',
+        '승인한 작업과 현재 PC의 실행 소유권을 다시 확인해 주세요.',
+      );
+    return null;
+  }
+
+  /** 화면에 고정된 주체·작업 공간을 쓰기 직전에도 검증합니다. */
+  async #context(
+    request: NotificationSession,
+    write: boolean = false,
+  ): Promise<AnalysisContext | ApiFailure> {
+    const context = await this.#connection.analysisContext(
+      request.connectionId,
+      write,
+    );
+    if ('ok' in context) return context;
+    return matchesExpectedScope(request.expectedScope, context)
+      ? context
+      : changed();
+  }
+
+  /** 응답 전체는 업무 스키마에서 다시 검사하고 원격 오류 원문을 반사하지 않습니다. */
+  async #api(
+    context: AnalysisContext,
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<{ ok: true; value: unknown } | ApiFailure> {
+    return readScopedApiJson(this.#connection, this.#requests, context, path, {
+      schema: envelope,
+      changed,
+      invalidMessage: '알림 응답을 확인할 수 없습니다.',
+      profile: 'get-query',
+      body,
+      maxResponseBytes: 8 * 1024 * 1024,
+    });
+  }
+
+  /** 재연결은 저장된 로컬 보고를 같은 멱등 키로 전송하며 실행·승인은 재시도하지 않습니다. */
+  async flush(context: AnalysisContext): Promise<void> {
+    const finish = this.#flushes.begin(context.active.connectionId);
+    if (!finish) return;
+    try {
+      for (const entry of await readProcessJournal(
+        this.#recovery,
+        context,
+        'notification-outbox',
+      )) {
+        if (!this.#connection.isAnalysisCurrent(context)) return;
+        const pending = outboxEntry.safeParse(JSON.parse(entry.payload));
+        if (!pending.success) continue;
+        const result = await this.#api(
+          context,
+          pending.data.path,
+          pending.data.body,
+        );
+        if (result.ok)
+          await removeProcessJournal(this.#recovery, context, entry);
+        else if (
+          !result.error.status ||
+          result.error.status >= 500 ||
+          [401, 403].includes(result.error.status)
+        )
+          return;
+        // 한 사건의 판본/입력 거부는 보존하되 뒤에 쌓인 다른 사건의 전달을 막지 않는다.
+      }
+    } finally {
+      finish();
+    }
+  }
+
+  /** 원본 보고와 로컬 시도를 보존한 뒤 서버 알림 연결을 별도 outbox에 보관합니다. */
+  async observeConversion(
+    context: AnalysisContext,
+    task: DocumentTask,
+    run: SourceConversionRun,
+  ): Promise<void> {
+    const review =
+      run.receiptState === 'saved' &&
+      run.reference &&
+      conversionNeedsPageApproval(run.report);
+    const failure = ['failed', 'cancelled', 'report_unconfirmed'].includes(
+      run.state,
+    );
+    if (!review && !failure) return;
+    const source = {
+      source_id: task.source.sourceId,
+      source_version: task.source.sourceVersion,
+      source_sha256: task.source.sourceSha256,
+      registration_revision: task.source.registrationRevision,
+    };
+    const reference = run.reference
+      ? {
+          conversion_id: run.reference.conversionId,
+          conversion_revision: run.reference.conversionRevision,
+        }
+      : null;
+    const requestId = stepId(run.requestId, review ? 'review' : run.state);
+    const body = review
+      ? {
+          request_id: requestId,
+          source_ref: source,
+          conversion_ref: reference,
+          title: task.item.title,
+          target_document: task.targetDocument,
+        }
+      : {
+          request_id: requestId,
+          source_ref: source,
+          conversion_ref: reference,
+          job_id: null,
+          kind: run.state === 'cancelled' ? 'stopped' : 'failed',
+          title: task.item.title,
+          device_id: this.#device.deviceId,
+          device_name: this.#device.deviceName,
+        };
+    const existing = (
+      await readProcessJournal(this.#recovery, context, 'notification-outbox')
+    ).find((entry: RecoveryEntry): boolean => entry.key === requestId);
+    if (!existing)
+      await writeProcessJournal(
+        this.#recovery,
+        context,
+        'notification-outbox',
+        requestId,
+        {
+          path: review ? 'notification-workflows' : 'notification-events',
+          body,
+        },
+      );
+    await this.flush(context);
+  }
+
+  /** 서버가 보존한 전체 기록을 페이지 단위로 읽습니다. */
+  async list(
+    request: NotificationListRequest,
+  ): Promise<NotificationListResult> {
+    const context = await this.#context(request);
+    if ('ok' in context) return context;
+    await this.flush(context);
+    const query = new URLSearchParams({
+      filter: request.filter ?? 'all',
+      limit: String(request.limit ?? 50),
+    });
+    if (request.cursor) query.set('cursor', request.cursor);
+    if (request.afterSequence !== undefined)
+      query.set('after_seq', String(request.afterSequence));
+    const result = await this.#api(
+      context,
+      `notifications?${query.toString()}`,
+    );
+    return result.ok
+      ? { ok: true, data: notificationListDataSchema.parse(result.value) }
+      : result;
+  }
+
+  /** 보고의 불변 참조를 대조하고 승인 접수 미확인은 같은 영수증 조회로만 해소합니다. */
+  async read(
+    request: NotificationReadRequest,
+  ): Promise<NotificationDetailResult> {
+    const context = await this.#context(request);
+    if ('ok' in context) return context;
+    await this.flush(context);
+    const result = await this.#api(
+      context,
+      `notification-workflows/${request.workflowId}`,
+    );
+    if (!result.ok) return result;
+    const data = notificationDetailDataSchema.parse(result.value);
+    const { workflow, conversion } = data;
+    if (
+      workflow.workflow_id !== request.workflowId ||
+      !!workflow.conversion_ref !== !!conversion ||
+      (conversion &&
+        workflow.conversion_ref &&
+        (conversion.manifest.id !== workflow.conversion_ref.conversion_id ||
+          conversion.revision !== workflow.conversion_ref.conversion_revision ||
+          JSON.stringify(conversion.manifest.source_ref) !==
+            JSON.stringify(workflow.source_ref)))
+    )
+      return apiFailure(
+        'source_mismatch',
+        '고정 원본과 변환 보고의 연결을 확인할 수 없습니다.',
+      );
+    if (workflow.approval) {
+      const pending = (
+        await readProcessJournal(
+          this.#recovery,
+          context,
+          'notification-approvals',
+        )
+      ).find(
+        (entry: RecoveryEntry): boolean => entry.key === workflow.workflow_id,
+      );
+      if (pending) {
+        const approval = pendingApproval.parse(JSON.parse(pending.payload));
+        if (approval.requestId === workflow.approval.request_id)
+          await removeProcessJournal(this.#recovery, context, pending);
+      }
+    }
+    return { ok: true, data };
+  }
+
+  /** 읽음은 페이지 확인이나 실행 승인과 분리해 저장합니다. */
+  async markRead(
+    request: NotificationMarkReadRequest,
+  ): Promise<NotificationReadStateResult> {
+    const context = await this.#context(request);
+    if ('ok' in context) return context;
+    const result = await this.#api(context, 'notifications/read', {
+      notification_ids: request.notificationIds,
+      read: request.read,
+    });
+    return result.ok
+      ? { ok: true, data: notificationReadStateDataSchema.parse(result.value) }
+      : result;
+  }
+
+  /** 페이지 확인은 사용자가 관측한 workflow 판본으로 CAS 저장합니다. */
+  async decide(
+    request: NotificationDecideRequest,
+  ): Promise<NotificationMutationResult> {
+    const context = await this.#context(request, true);
+    if ('ok' in context) return context;
+    const result = await this.#api(
+      context,
+      `notification-workflows/${request.workflowId}/pages`,
+      {
+        request_id: request.requestId,
+        expected_revision: request.expectedRevision,
+        decisions: request.decisions,
+      },
+    );
+    return result.ok
+      ? { ok: true, data: notificationMutationDataSchema.parse(result.value) }
+      : result;
+  }
+
+  /** 승인 전 요청을 보호 저장하고 명시 재시도도 같은 요청만 사용합니다. */
+  async approve(
+    request: NotificationApproveRequest,
+  ): Promise<NotificationMutationResult> {
+    const finish = this.#starts.begin(
+      `approve:${request.connectionId}:${request.workflowId}`,
+    );
+    if (!finish)
+      return apiFailure(
+        'approval_busy',
+        '같은 승인의 저장 결과를 확인하고 있습니다.',
+      );
+    try {
+      const context = await this.#context(request, true);
+      if ('ok' in context) return context;
+      let entry =
+        (
+          await readProcessJournal(
+            this.#recovery,
+            context,
+            'notification-approvals',
+          )
+        ).find(
+          (item: RecoveryEntry): boolean => item.key === request.workflowId,
+        ) ?? null;
+      let intent = {
+        workflowId: request.workflowId,
+        requestId: request.requestId,
+        expectedRevision: request.expectedRevision,
+        ...(request.targetDocument
+          ? { targetDocument: request.targetDocument }
+          : {}),
+      };
+      if (entry) {
+        intent = pendingApproval.parse(JSON.parse(entry.payload));
+        const observed = await this.read(request);
+        if (!observed.ok) return observed;
+        if (observed.data.workflow.approval)
+          return {
+            ok: true,
+            data: {
+              workflow: observed.data.workflow,
+              replayed: true,
+              access: observed.data.access,
+            },
+          };
+        // 재조회에서 영수증이 아직 없을 때의 명시 재시도만 최초 요청을 그대로 재사용합니다.
+      } else {
+        entry = await writeProcessJournal(
+          this.#recovery,
+          context,
+          'notification-approvals',
+          request.workflowId,
+          intent,
+        );
+      }
+      const result = await this.#api(
+        context,
+        `notification-workflows/${request.workflowId}/approve`,
+        {
+          request_id: intent.requestId,
+          expected_revision: intent.expectedRevision,
+          device_id: this.#device.deviceId,
+          device_name: this.#device.deviceName,
+          ...(intent.targetDocument
+            ? { target_document: intent.targetDocument }
+            : {}),
+        },
+      );
+      if (!result.ok) {
+        if (
+          result.error.status &&
+          result.error.status >= 400 &&
+          result.error.status < 500
+        )
+          await removeProcessJournal(this.#recovery, context, entry);
+        return result;
+      }
+      const data = notificationMutationDataSchema.parse(result.value);
+      if (
+        data.workflow.workflow_id !== request.workflowId ||
+        data.workflow.approval?.request_id !== intent.requestId
+      )
+        return apiFailure(
+          'approval_unconfirmed',
+          '승인 영수증이 요청과 일치하는지 다시 조회해 주세요.',
+        );
+      await removeProcessJournal(this.#recovery, context, entry);
+      return { ok: true, data };
+    } finally {
+      finish();
+    }
+  }
+
+  /** 이 PC의 준비 상태와 다른 기기의 실행 소유권을 함께 안내합니다. */
+  async inspect(
+    request: NotificationReadRequest,
+  ): Promise<NotificationInspectionResult> {
+    const detail = await this.read(request);
+    if (!detail.ok) return detail;
+    const blockers = await this.#analysis.inspectRuntime();
+    const workflow = detail.data.workflow;
+    if (workflow.blocked_reason)
+      blockers.push(
+        '원본 또는 변환 보고가 바뀌었습니다. 최신 보고에서 다시 확인해 주세요.',
+      );
+    if (
+      !['failed', 'stopped'].includes(workflow.state) &&
+      workflow.execution?.device_id &&
+      workflow.execution.device_id !== this.#device.deviceId
+    )
+      blockers.push(
+        `${workflow.execution.device_name}에서 이어서 처리 중입니다.`,
+      );
+    if (['running', 'complete'].includes(workflow.state))
+      blockers.push(
+        workflow.state === 'complete'
+          ? '이미 결과가 저장되었습니다.'
+          : '기존 실행의 결과를 확인해 주세요.',
+      );
+    const current = await this.#context(request);
+    if ('ok' in current) return current;
+    return {
+      ok: true,
+      data: {
+        ready: blockers.length === 0,
+        blockers,
+        ...this.#device,
+        checkedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  /** 전역 claim → 안정된 분석 접수 → 서버 연결 후에만 한 번 로컬 프로세스를 시작합니다. */
+  async continue(
+    request: NotificationContinueRequest,
+  ): Promise<NotificationContinueResult> {
+    const finish = this.#starts.begin(
+      `continue:${request.connectionId}:${request.workflowId}`,
+    );
+    if (!finish)
+      return apiFailure(
+        'execution_busy',
+        '같은 작업의 이어서 처리를 확인하고 있습니다.',
+      );
+    try {
+      const context = await this.#context(request, true);
+      if ('ok' in context) return context;
+      const detail = await this.read(request);
+      if (!detail.ok) return detail;
+      let workflow = detail.data.workflow;
+      if (workflow.blocked_reason)
+        return apiFailure(
+          workflow.blocked_reason,
+          '원본 또는 변환 보고가 바뀌었습니다. 최신 보고에서 다시 확인해 주세요.',
+        );
+      if (
+        !workflow.approval ||
+        !workflow.target_document ||
+        !workflow.conversion_ref
+      )
+        return apiFailure(
+          'approval_required',
+          '확인할 쪽과 저장할 문서를 승인한 뒤 이어서 처리해 주세요.',
+        );
+      if (
+        !['failed', 'stopped'].includes(workflow.state) &&
+        workflow.execution?.device_id &&
+        workflow.execution.device_id !== this.#device.deviceId
+      )
+        return apiFailure(
+          'execution_owned',
+          '다른 PC가 이 작업을 이어서 처리하고 있습니다.',
+        );
+      const blockers = await this.#analysis.inspectRuntime();
+      if (blockers.length)
+        return apiFailure('runtime_unavailable', blockers.join(' '));
+      let entry =
+        (
+          await readProcessJournal(
+            this.#recovery,
+            context,
+            'notification-executions',
+          )
+        ).find(
+          (item: RecoveryEntry): boolean => item.key === request.workflowId,
+        ) ?? null;
+      const previous = entry
+        ? executionEntry.parse(JSON.parse(entry.payload))
+        : null;
+      if (workflow.state === 'complete' && workflow.execution?.job_id)
+        return {
+          ok: true,
+          data: { workflow, jobId: workflow.execution.job_id, started: false },
+        };
+      let intent = previous ?? {
+        workflowId: workflow.workflow_id,
+        requestId: request.requestId,
+        expectedRevision: request.expectedRevision,
+        stage: 'claim',
+        reclaim: false,
+        priorClaimId: null,
+      };
+      if (
+        workflow.execution &&
+        (previous?.stage === 'started' ||
+          (!previous && ['failed', 'stopped'].includes(workflow.state)))
+      ) {
+        if (workflow.execution.job_id) {
+          const observed = await this.#analysis.inspectExecution({
+            connectionId: request.connectionId,
+            jobId: workflow.execution.job_id,
+          });
+          if (!observed.ok) return observed;
+          if (!observed.data.mode)
+            return apiFailure(
+              'analysis_execution_blocked',
+              observed.data.blockers.join(' '),
+            );
+        }
+        if (workflow.revision !== request.expectedRevision)
+          return apiFailure(
+            'conflict',
+            '현재 실행 상태를 다시 확인한 뒤 이어서 처리해 주세요.',
+          );
+        intent = {
+          workflowId: workflow.workflow_id,
+          requestId: stepId(
+            request.requestId,
+            `reclaim:${workflow.execution.claim_id}`,
+          ),
+          expectedRevision: request.expectedRevision,
+          stage: 'claim',
+          reclaim: true,
+          priorClaimId: workflow.execution.claim_id,
+        };
+        entry = await writeProcessJournal(
+          this.#recovery,
+          context,
+          'notification-executions',
+          workflow.workflow_id,
+          intent,
+          entry?.revision ?? null,
+        );
+      }
+      if (
+        !workflow.execution ||
+        (intent.reclaim &&
+          intent.stage === 'claim' &&
+          workflow.execution.claim_id === intent.priorClaimId)
+      ) {
+        if (!previous && workflow.revision !== request.expectedRevision)
+          return apiFailure(
+            'conflict',
+            '승인 상태가 변경되었습니다. 다시 확인해 주세요.',
+          );
+        if (!entry)
+          entry = await writeProcessJournal(
+            this.#recovery,
+            context,
+            'notification-executions',
+            workflow.workflow_id,
+            intent,
+          );
+        const claimed = await this.#api(
+          context,
+          `notification-workflows/${workflow.workflow_id}/claim`,
+          {
+            request_id: intent.requestId,
+            expected_revision: intent.expectedRevision,
+            device_id: this.#device.deviceId,
+            device_name: this.#device.deviceName,
+            reclaim: intent.reclaim,
+          },
+        );
+        if (!claimed.ok) {
+          if (
+            claimed.error.status &&
+            claimed.error.status >= 400 &&
+            claimed.error.status < 500
+          )
+            await removeProcessJournal(this.#recovery, context, entry);
+          return claimed;
+        }
+        workflow = notificationMutationDataSchema.parse(claimed.value).workflow;
+      }
+      const execution = workflow.execution;
+      if (!execution?.claim_id || execution.device_id !== this.#device.deviceId)
+        return apiFailure(
+          'execution_owned',
+          '실행 기기를 확인하지 못했습니다.',
+        );
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      let jobId = execution.job_id;
+      if (!jobId) {
+        if (!workflow.target_document || !workflow.conversion_ref)
+          return apiFailure(
+            'approval_required',
+            '승인한 원본과 저장 문서를 확인해 주세요.',
+          );
+        entry = await writeProcessJournal(
+          this.#recovery,
+          context,
+          'notification-executions',
+          workflow.workflow_id,
+          { ...intent, stage: 'registration' },
+          entry?.revision ?? null,
+        );
+        const source = workflow.source_ref;
+        const registered = await this.#analysis.start(
+          {
+            connectionId: request.connectionId,
+            sourceId: source.source_id,
+            sourceVersion: source.source_version,
+            sourceSha256: source.source_sha256,
+            registrationRevision: source.registration_revision,
+            targetDocument: workflow.target_document,
+            registration: {
+              requestId: workflow.resume_request_id,
+              title: workflow.title.slice(0, 200),
+              conversionRef: {
+                conversionId: workflow.conversion_ref.conversion_id,
+                conversionRevision: workflow.conversion_ref.conversion_revision,
+              },
+            },
+            outputs: ['wiki', 'ontology'],
+          },
+          true,
+          context,
+        );
+        if (!registered.ok) return registered;
+        jobId = registered.data.job.job_id;
+        const linked = await this.#api(
+          context,
+          `notification-workflows/${workflow.workflow_id}/execution`,
+          {
+            request_id: stepId(execution.claim_id, 'link'),
+            expected_revision: workflow.revision,
+            claim_id: execution.claim_id,
+            job_id: jobId,
+          },
+        );
+        if (!linked.ok) return linked;
+        workflow = notificationMutationDataSchema.parse(linked.value).workflow;
+      }
+      const inspected = await this.#analysis.inspectExecution({
+        connectionId: request.connectionId,
+        jobId,
+      });
+      if (!inspected.ok) return inspected;
+      if (!inspected.data.mode)
+        return apiFailure(
+          'analysis_execution_blocked',
+          inspected.data.blockers.join(' '),
+        );
+      await writeProcessJournal(
+        this.#recovery,
+        context,
+        'notification-executions',
+        workflow.workflow_id,
+        { ...intent, stage: 'started' },
+        entry?.revision ?? null,
+      );
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      const started = await this.#analysis.execute(
+        {
+          connectionId: request.connectionId,
+          jobId,
+          expectedJobRevision: inspected.data.detail.job.job_revision,
+          mode: inspected.data.mode,
+          executionClaimId: execution.claim_id,
+        },
+        context,
+      );
+      if (!started.ok) return started;
+      return { ok: true, data: { workflow, jobId, started: true } };
+    } finally {
+      finish();
+    }
+  }
+
+  /** 보고에 고정된 원본에서 요청한 한 쪽만 제한 PNG로 반환합니다. */
+  async page(
+    request: NotificationPageRequest,
+  ): Promise<NotificationPageResult> {
+    const context = await this.#context(request);
+    if ('ok' in context) return context;
+    const detail = await this.read(request);
+    if (!detail.ok) return detail;
+    if (
+      !detail.data.workflow.pages.some(
+        (page: NotificationWorkflow['pages'][number]): boolean =>
+          page.page === request.page,
+      )
+    )
+      return apiFailure('invalid_page', '검토 대상 쪽을 선택해 주세요.');
+    const source = detail.data.workflow.source_ref;
+    const query = new URLSearchParams({
+      source_sha256: source.source_sha256,
+      registration_revision: source.registration_revision,
+      profile: context.selection.profile,
+    });
+    const url = `${context.active.serverUrl}tenants/${encodeURIComponent(context.selection.tenant)}/sources/${source.source_id}/versions/${source.source_version}/pages/${request.page}?${query.toString()}`;
+    const controller = new AbortController();
+    this.#requests.add(controller);
+    try {
+      const result = await readApiPageBytes(url, context.token, controller, {
+        sourceSha256: source.source_sha256,
+        sourceVersion: source.source_version,
+        registrationRevision: source.registration_revision,
+        page: request.page,
+      });
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      if (!result.ok) {
+        this.#connection.analysisAccessFailure(result);
+        return result;
+      }
+      if (!(result.value instanceof Uint8Array))
+        return apiFailure('invalid_response', '원본 쪽을 표시할 수 없습니다.');
+      return {
+        ok: true,
+        data: {
+          page: request.page,
+          dataUrl: `data:image/png;base64,${Buffer.from(result.value).toString('base64')}`,
+        },
+      };
+    } finally {
+      this.#requests.delete(controller);
+    }
+  }
+}

@@ -47,7 +47,17 @@ class ResultStore:
 
     def _write_receipt(self, path, value):
         """처리 기록을 파일로 남긴다. 위키 본문을 쓰는 함수와는 별도다."""
+        # The delivery pointer is durable before the actual Wiki/graph save. A
+        # later notification failure must not affect the canonical saved receipt.
+        from core.modules.notifications.store import NotificationStore
+        job = records.owned_state(self.jobs, value["job_id"], value["tenant"], value["user_id"])
+        notifications = NotificationStore(self.store, job["actor"], rulesets=self.rulesets, clock=self.jobs.clock)
+        pending = notifications.pending_path("job", value["job_id"], value["request_id"])
+        if value.get("state") == "pending_reconcile" and value.get("saved") is None:
+            notifications.stage_locked("job", value["job_id"], event_id=value["request_id"])
         records.write(self.jobs, path, value)
+        if value.get("state") != "pending_reconcile":
+            notifications.deliver_locked(pending)
 
     def write_wiki(self, job_id, *, tenant, user_id, run_id, expected_job_revision,
                    bundle_id, bundle_revision, request_id, document, content, expected_revision, authorize,

@@ -26,6 +26,7 @@ type DocumentTaskDetailProps = {
   error?: string | null;
   onAction: (action: DocumentTaskAction) => void;
   executionContent?: ReactNode;
+  textReviewPath?: string;
 };
 const stepLabels: Record<DocumentTaskStepState, string> = {
   complete: '완료',
@@ -34,6 +35,7 @@ const stepLabels: Record<DocumentTaskStepState, string> = {
   waiting: '진행 전',
   ready: '실행 전',
   unconfirmed: '확인 필요',
+  review: '문자 확인 필요',
   stopped: '실행 중단',
 };
 const stepIcons: Record<DocumentTaskStepState, IconName> = {
@@ -43,6 +45,7 @@ const stepIcons: Record<DocumentTaskStepState, IconName> = {
   waiting: 'clock',
   ready: 'clock',
   unconfirmed: 'triangle-alert',
+  review: 'triangle-alert',
   stopped: 'pause',
 };
 
@@ -58,6 +61,7 @@ export function DocumentTaskDetail({
   error = null,
   onAction,
   executionContent,
+  textReviewPath,
 }: DocumentTaskDetailProps): JSX.Element {
   const resultReturnState = { workflowReturnTo: documentTaskPath(task.id) };
   const sourcePath = `/source?${new URLSearchParams({ sourceId: task.sourceId, version: task.sourceVersion })}`;
@@ -78,6 +82,15 @@ export function DocumentTaskDetail({
           >
             {action.label}
           </Button>
+        )}
+        {task.textReviewScopes.length > 0 && (
+          <Link
+            className={`${buttonStyles.button} ${buttonStyles.surface}`}
+            to={textReviewPath ?? sourcePath}
+            state={resultReturnState}
+          >
+            {textReviewPath ? '문자 검토와 승인' : '원본과 문자 대조'}
+          </Link>
         )}
         {!action && task.state === 'complete' && firstResult && (
           <Link
@@ -218,7 +231,41 @@ export function DocumentTaskDetail({
           </p>
         )}
       </WorkspaceSection>
-      {task.warnings.length > 0 && (
+      {task.textReviewScopes.length > 0 && (
+        <WorkspaceSection title="문자 확인이 필요한 위치">
+          <p className={styles.reviewScopes}>
+            {task.textReviewScopes.join(' · ')}
+          </p>
+          <p className={styles.secondary}>
+            이 위치의 변환 문자는 보존되어 있습니다. 문자 인식의 신뢰도가 낮다는
+            안내이며, 원본과 대조해 정확도를 확인해야 합니다.
+          </p>
+          {task.textReviewUnits.length > 0 ? (
+            <div className={styles.reviewUnits}>
+              {task.textReviewUnits.map(
+                (
+                  unit: DocumentTaskView['textReviewUnits'][number],
+                  index: number,
+                ): JSX.Element => (
+                  <details
+                    className={styles.record}
+                    key={`${unit.label}:${index}`}
+                  >
+                    <summary>{unit.label} 변환 문자 보기</summary>
+                    <pre>{unit.content}</pre>
+                  </details>
+                ),
+              )}
+            </div>
+          ) : (
+            <p className={styles.secondary}>
+              이 화면에는 변환 문자가 아직 표시되지 않습니다. 새로고침해 보고를
+              다시 확인해 주세요.
+            </p>
+          )}
+        </WorkspaceSection>
+      )}
+      {task.warnings.length > 0 && task.textReviewScopes.length === 0 && (
         <WorkspaceSection title="변환 시 확인할 내용">
           <ul className={styles.warningList}>
             {task.warnings.map(
@@ -231,6 +278,18 @@ export function DocumentTaskDetail({
       )}
       <details className={styles.record}>
         <summary>처리 기록 보기</summary>
+        {task.textReviewScopes.length > 0 && task.warnings.length > 0 && (
+          <details>
+            <summary>문자 인식 처리 기록</summary>
+            <ul className={styles.warningList}>
+              {task.warnings.map(
+                (warning: string, index: number): JSX.Element => (
+                  <li key={`${index}:${warning}`}>{warning}</li>
+                ),
+              )}
+            </ul>
+          </details>
+        )}
         <dl className={styles.results}>
           <div>
             <dt>최근 변경</dt>

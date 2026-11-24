@@ -12,7 +12,15 @@ import { SourceConversionService } from '@main/backend/SourceConversionService';
 import { AnalysisService } from '@main/backend/AnalysisService';
 import { writeProcessJournal } from '@main/backend/processRecovery';
 import { verifyImportProcessing } from './import-processing';
-import { conversionId } from '@main/backend/sourceConversionProtocol';
+import { verifyNotificationDelivery } from './notification-delivery';
+import {
+  verifyNotifications,
+  verifyMissingRegistration,
+} from './notifications';
+import {
+  conversionId,
+  conversionMessage,
+} from '@main/backend/sourceConversionProtocol';
 import type { RecoveryResult } from '@contracts/recovery.contract';
 import type {
   DocumentTask,
@@ -24,6 +32,7 @@ import type {
   AnalysisStartRequest,
 } from '@contracts/analysis.contract';
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
+import { conversionNeedsTextReview } from '@contracts/sourceConversion.contract';
 
 const root = process.env.WIKI_TASK_TEST_ROOT!;
 const python = process.env.WIKI_TASK_TEST_PYTHON!;
@@ -120,6 +129,34 @@ let legacyReportVisible = false;
 let remoteRequest: string | null = null;
 let remoteDocument = 'saved.md';
 let receiptVisible = true;
+const reviewRequestId = 'c'.repeat(32);
+const reviewReport: NonNullable<SourceConversionRun['report']> = {
+  method: 'pdf_text',
+  complete: false,
+  units: Array.from({ length: 170 }, (_, index: number) => ({
+    unit_id: `page${index + 1}`,
+    location: { kind: 'pages' as const, start: index + 1, end: index + 1 },
+    content: `preserved OCR text ${index + 1}`,
+  })),
+  unread_ranges: Array.from(
+    { length: 30 },
+    (_, index: number): string =>
+      `page ${index + 1}: ocr_low_or_missing_confidence_text_retained_manual_review_required`,
+  ),
+  warnings: [
+    ...Array.from(
+      { length: 99 },
+      (_, index: number): string => `warning ${index}`,
+    ),
+    'remaining scopes: additional diagnostics exceed the report limit',
+  ],
+  origin: 'client_reported',
+  coverage: 'reported_units_only',
+  original_coverage: 'not_verified',
+  semantic_validation: 'not_run',
+  diagnostics: [],
+  unit_methods: {},
+};
 const fetchOriginal = globalThis.fetch;
 /** 서버 쓰기 유실은 의도적으로 발생시키고 이후 GET만 같은 작업을 반환합니다. */
 globalThis.fetch = async (
@@ -162,6 +199,32 @@ globalThis.fetch = async (
     });
   if (url.includes('/analysis-conversions/')) {
     conversionGets += 1;
+    const reviewId = conversionId('fixture', 'tester', reviewRequestId);
+    if (url.includes(`/analysis-conversions/${reviewId}`))
+      return envelope({
+        manifest: {
+          ...reviewReport,
+          id: reviewId,
+          kind: 'conversions',
+          user_id: 'tester',
+          tenant: 'fixture',
+          request_id: reviewRequestId,
+          source_ref: {
+            source_id: one,
+            source_version: two,
+            source_sha256: revision,
+            registration_revision: revision,
+          },
+          units: reviewReport.units.map(
+            ({ content: _content, ...unit }) => unit,
+          ),
+        },
+        revision,
+        components: Object.fromEntries(
+          reviewReport.units.map((unit) => [unit.unit_id, unit.content]),
+        ),
+        access: actor,
+      });
     if (legacyReportVisible) {
       const requestId = 'e'.repeat(32);
       const id = conversionId('fixture', 'tester', requestId);
@@ -365,6 +428,58 @@ async function finished(
 }
 
 try {
+  const unchangedReview = JSON.stringify(reviewReport);
+  assert.equal(conversionNeedsTextReview(reviewReport), true);
+  assert.equal(
+    conversionNeedsTextReview({
+      ...reviewReport,
+      unread_ranges: [
+        'frame 1: ocr_low_or_missing_confidence_text_retained_manual_review_required',
+      ],
+    }),
+    true,
+  );
+  for (const unread of [
+    [],
+    ['remaining source: conversion_checkpoint_read_failed'],
+    [...reviewReport.unread_ranges, 'page 171: pdf_page_failed'],
+    [
+      'page 0: ocr_low_or_missing_confidence_text_retained_manual_review_required',
+    ],
+    [
+      'page 1: ocr_low_or_missing_confidence_text_retained_manual_review_required_extra',
+    ],
+  ])
+    assert.equal(
+      conversionNeedsTextReview({ ...reviewReport, unread_ranges: unread }),
+      false,
+    );
+  assert.equal(conversionNeedsTextReview(null), false);
+  assert.equal(conversionNeedsTextReview(undefined), false);
+  assert.equal(
+    conversionNeedsTextReview({ ...reviewReport, complete: true }),
+    false,
+  );
+  assert.equal(
+    conversionNeedsTextReview({
+      ...reviewReport,
+      warnings: [
+        'remaining scopes: additional diagnostics exceed the report limit | worker: code=conversion_timeout;exit_code=0',
+      ],
+    }),
+    false,
+  );
+  assert.match(conversionMessage('partial', reviewReport), /OCR 문자 확인/);
+  assert.match(conversionMessage('partial'), /일부 구간만 변환/);
+  assert.match(
+    conversionMessage('failed', reviewReport),
+    /완료하지 못했습니다/,
+  );
+  assert.equal(JSON.stringify(reviewReport), unchangedReview);
+  console.log(
+    'PASS confidence-only reports need text review while interruption, unknown unread and completion remain distinct',
+  );
+
   let runtime = services();
   const requests = await Promise.all([
     runtime.tasks.create({ ...session(), item, targetDocument: 'first.md' }),
@@ -679,6 +794,53 @@ try {
     'PASS task read adopts only the exact legacy request and resolves its report by GET without modifying the old guard or executing',
   );
 
+  const reviewTask = await runtime.tasks.create({
+    ...session(),
+    item,
+    targetDocument: 'ocr-review.md',
+  });
+  assert.ok(reviewTask.ok);
+  await runtime.tasks.observeConversion(context, reviewTask.data.taskId, {
+    ...failure,
+    requestId: reviewRequestId,
+    state: 'partial',
+    report: reviewReport,
+    receiptState: 'saved',
+    reference: {
+      ...first.source,
+      conversionId: conversionId('fixture', 'tester', reviewRequestId),
+      conversionRevision: revision,
+      requestId: reviewRequestId,
+    },
+    message: '일부 구간만 변환했습니다.',
+    diagnosticCodes: [],
+  });
+  const reviewRuntime = services();
+  const reviewRestored = await reviewRuntime.tasks.read({
+    ...session(),
+    taskId: reviewTask.data.taskId,
+  });
+  assert.ok(reviewRestored.ok && reviewRestored.data.conversion?.report);
+  const reviewed = reviewRestored.data.conversion;
+  assert.ok(reviewed.report);
+  assert.equal(reviewed.state, 'partial');
+  assert.equal(reviewed.receiptState, 'saved');
+  assert.equal(reviewed.report.complete, false);
+  assert.deepEqual(reviewed.report.units, reviewReport.units);
+  assert.deepEqual(reviewed.report.unread_ranges, reviewReport.unread_ranges);
+  assert.deepEqual(reviewed.report.warnings, reviewReport.warnings);
+  assert.equal(reviewed.reference?.requestId, reviewRequestId);
+  assert.match(reviewed.message, /OCR 문자 확인/);
+  assert.equal(postCount, postsBeforeRead);
+  assert.equal(
+    (await readFile(join(project, 'executions.txt'), 'utf8')).trim().split('\n')
+      .length,
+    2,
+  );
+  console.log(
+    'PASS restart restores confidence-only OCR guidance without conversion, writes or completeness promotion',
+  );
+
   // 구 guard는 격리 검사에서만 성공한 정리로 제거하고 진행 저장 실패를 주입합니다.
   const legacyEntries = await legacy.readContext(
     context,
@@ -752,7 +914,24 @@ try {
     connectionId: context.active.connectionId,
     ...session().expectedScope,
   });
-  console.log('12 backend and processing workflow checks passed');
+  await verifyNotificationDelivery();
+  await verifyNotifications(
+    context,
+    connection,
+    services('notification-tests').recovery,
+    reconciled.data.analysis,
+    first,
+    failure,
+    root,
+  );
+  await verifyMissingRegistration(
+    context,
+    connection,
+    services('missing-notification-registration').recovery,
+    reconciled.data.analysis,
+    first,
+  );
+  console.log('15 backend and processing workflow checks passed');
 } finally {
   globalThis.fetch = fetchOriginal;
 }

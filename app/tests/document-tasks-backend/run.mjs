@@ -22,6 +22,7 @@ try {
     },
     ssr: { noExternal: true, external: ['electron'] },
     build: {
+      sourcemap: 'inline',
       ssr: join(appRoot, 'tests/document-tasks-backend/verify.ts'),
       outDir: temporary,
       emptyOutDir: false,
@@ -31,15 +32,19 @@ try {
       },
     },
   });
-  const child = spawn(process.execPath, [join(temporary, 'verify.mjs')], {
-    cwd: appRoot,
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      WIKI_TASK_TEST_ROOT: temporary,
-      WIKI_TASK_TEST_PYTHON: join(appRoot, '../.venv/bin/python'),
+  const child = spawn(
+    process.execPath,
+    ['--enable-source-maps', join(temporary, 'verify.mjs')],
+    {
+      cwd: appRoot,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        WIKI_TASK_TEST_ROOT: temporary,
+        WIKI_TASK_TEST_PYTHON: join(appRoot, '../.venv/bin/python'),
+      },
     },
-  });
+  );
   const code = await new Promise((accept, reject) => {
     child.once('error', reject);
     child.once('exit', accept);

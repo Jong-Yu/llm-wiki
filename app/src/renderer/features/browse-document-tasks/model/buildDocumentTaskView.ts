@@ -4,6 +4,7 @@ import type {
   DocumentTask,
 } from '@contracts/documentTasks.contract';
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
+import { conversionNeedsTextReview } from '@contracts/sourceConversion.contract';
 import type {
   DocumentTaskResult,
   DocumentTaskState,
@@ -37,17 +38,81 @@ type DocumentTaskViewOptions = {
 };
 type ConversionView = SourceConversionRun | DocumentConversionAttempt;
 
-/** 다른 원본 판본의 변환 진행을 현재 작업의 결과로 표시하지 않습니다. */
+/** 기존 기기 요약과 서버 보고의 문자 확인 경고를 같은 표시 기준으로 읽습니다. */
+function textReviewScopes(conversion: ConversionView | null): string[] {
+  if (conversion?.state !== 'partial' || conversion.receiptState !== 'saved')
+    return [];
+  const report =
+    'reportSummary' in conversion
+      ? conversion.reportSummary && {
+          complete: conversion.reportSummary.complete,
+          unread_ranges: conversion.reportSummary.unreadRanges,
+          warnings: conversion.reportSummary.warnings,
+        }
+      : conversion.report;
+  if (!report || !conversionNeedsTextReview(report)) return [];
+  return [
+    ...new Set(
+      report.unread_ranges.map((range: string): string => {
+        const scope = range.slice(0, range.indexOf(':'));
+        return scope
+          .replace(/^page (\d+)$/, '$1쪽')
+          .replace(/^frame (\d+)$/, '$1번째 프레임');
+      }),
+    ),
+  ];
+}
+
+/** 현재 보고에 실제 포함된 문자만 경고 위치와 연결하며 누락 본문을 만들지 않습니다. */
+function textReviewUnits(
+  conversion: ConversionView | null,
+  scopes: readonly string[],
+): DocumentTaskView['textReviewUnits'] {
+  if (!conversion || !('report' in conversion) || !conversion.report) return [];
+  return conversion.report.units.flatMap(
+    (
+      unit: NonNullable<SourceConversionRun['report']>['units'][number],
+    ): DocumentTaskView['textReviewUnits'] => {
+      const location = unit.location;
+      if (location.kind !== 'pages' || location.start !== location.end)
+        return [];
+      const label = scopes.find(
+        (scope: string): boolean =>
+          scope === `${location.start}쪽` ||
+          scope === `${location.start}번째 프레임`,
+      );
+      return label && unit.content ? [{ label, content: unit.content }] : [];
+    },
+  );
+}
+
+/** 저장된 시도 순서의 마지막 요청만 채택하고 다른 원본·이전 요청을 배제합니다. */
 function matchingConversion(
   task: DocumentTask,
   conversion: ConversionView | null,
 ): ConversionView | null {
   if (!conversion) return null;
+  const latest = task.conversions.at(-1);
+  if (latest && latest.requestId !== conversion.requestId) return null;
   return conversion.source.sourceId === task.source.sourceId &&
     conversion.source.sourceVersion === task.source.sourceVersion &&
     conversion.source.sourceSha256 === task.source.sourceSha256 &&
     conversion.source.registrationRevision === task.source.registrationRevision
     ? conversion
+    : null;
+}
+
+/** 이전 변환 세션의 단계·메시지·행동이 최신 저장 시도를 덮지 않게 합니다. */
+function matchingProcessing(
+  task: DocumentTask,
+  processing: DocumentTaskProcessingView | null,
+): DocumentTaskProcessingView | null {
+  if (!processing) return null;
+  if (processing.conversion)
+    return matchingConversion(task, processing.conversion) ? processing : null;
+  return task.conversions.length === 0 ||
+    matchingAnalysis(task, processing.detail)
+    ? processing
     : null;
 }
 
@@ -117,6 +182,12 @@ function conversionProgress(
 ): string | null {
   const progress = conversion?.progress;
   if (!progress) return null;
+  if (
+    progress.stage === 'submit' &&
+    conversion.state !== 'running' &&
+    conversion.state !== 'cancelling'
+  )
+    return null;
   if (progress.stage === 'download') return '원본을 읽고 있습니다';
   if (progress.stage === 'submit') return '변환 결과 보관 중';
   const unit =
@@ -203,7 +274,11 @@ function taskState(
     ['converting', 'planning', 'running'].includes(processing?.phase ?? '')
   )
     return 'running';
-  if (conversion?.state === 'partial') return 'partial';
+  if (conversion?.state === 'partial')
+    return processing?.phase !== 'conversion_failed' &&
+      textReviewScopes(conversion).length > 0
+      ? 'review'
+      : 'partial';
   if (
     conversion?.state === 'failed' ||
     task.registration.state === 'rejected' ||
@@ -253,6 +328,12 @@ function explanation(
       body: '추출한 관계는 검토 전 상태입니다. 저장 완료가 내용의 정확성이나 전문가 승인을 뜻하지 않습니다.',
       next: '보존된 문서와 관계를 열어 확인할 수 있습니다.',
     };
+  if (state === 'review')
+    return {
+      title: '변환된 문자를 확인해 주세요',
+      body: '변환 문자는 보관됐습니다. 문자 인식의 신뢰도가 낮은 구간이 있어 원본과 대조해야 합니다.',
+      next: '문자 검토와 승인에서 경고 쪽을 대조하고 사용 여부를 확인해 주세요. 모든 쪽 확인과 최종 승인이 서버에 저장된 뒤 이어갈 수 있습니다.',
+    };
   if (state === 'stopped')
     return {
       title:
@@ -274,8 +355,11 @@ function explanation(
           ? '읽지 못한 원본이 남아 있습니다'
           : '문자 변환이 중단됐습니다',
       body:
-        failureMessage(conversion) ??
-        '본문을 완전히 읽지 못했습니다. 등록한 원본은 보관되어 있습니다.',
+        processing?.phase === 'conversion_failed' &&
+        textReviewScopes(conversion).length > 0
+          ? processing.message
+          : (failureMessage(conversion) ??
+            '본문을 완전히 읽지 못했습니다. 등록한 원본은 보관되어 있습니다.'),
       next: '다시 변환은 원본의 처음부터 시작합니다. 읽지 못한 부분이 남아 있으면 관계 추출을 진행하지 않습니다.',
     };
   if (state === 'partial' || state === 'failed')
@@ -320,26 +404,24 @@ export function buildDocumentTaskView(
   task: DocumentTask,
   options: DocumentTaskViewOptions = {},
 ): DocumentTaskView {
-  const processing = options.processing ?? null;
+  const processing = matchingProcessing(task, options.processing ?? null);
+  const scopeInvalid = options.processing?.scopeInvalid === true;
   const detail = matchingAnalysis(
     task,
     options.analysis ?? processing?.detail ?? null,
   );
   const job = detail?.job ?? matchingJob(task, options.job ?? null);
-  const conversion = matchingConversion(
-    task,
-    options.conversion ??
-      processing?.conversion ??
-      task.conversions.at(-1) ??
-      null,
-  );
+  const conversion =
+    matchingConversion(task, options.conversion ?? null) ??
+    matchingConversion(task, processing?.conversion ?? null) ??
+    matchingConversion(task, task.conversions.at(-1) ?? null);
   const state = taskState(
     task,
     detail,
     job,
     conversion,
     processing,
-    options.readFailed === true,
+    options.readFailed === true || scopeInvalid,
   );
   const results = savedResults(task, detail);
   const plainText = task.item.format === 'md' || task.item.format === 'txt';
@@ -348,6 +430,10 @@ export function buildDocumentTaskView(
     !!job ||
     (conversion?.state === 'complete' && conversion.receiptState === 'saved');
   const progress = conversionProgress(conversion, task.item.format);
+  const reviewScopes =
+    scopeInvalid || processing?.phase === 'conversion_failed'
+      ? []
+      : textReviewScopes(conversion);
   const current: DocumentTaskStepState =
     state === 'complete'
       ? 'complete'
@@ -372,9 +458,13 @@ export function buildDocumentTaskView(
       state: converted ? 'complete' : current,
       note: plainText
         ? '원문 문자 그대로 사용'
-        : converted
-          ? '본문 읽기 완료'
-          : (progress ?? '처리량 기록 없음'),
+        : reviewScopes.length > 0
+          ? converted
+            ? '변환 문자 사용 · 원본 대조 필요'
+            : '변환 문자 보관 · 원본 대조 필요'
+          : converted
+            ? '본문 읽기 완료'
+            : (progress ?? '처리량 기록 없음'),
     },
     {
       title: 'Wiki 저장',
@@ -414,12 +504,14 @@ export function buildDocumentTaskView(
     running: `${phase} 중`,
     failed: `${phase} 실패`,
     partial: '일부 완료 · 조치 필요',
+    review: '문자 확인 필요',
     unconfirmed: '결과 확인 필요',
-    complete: '처리 완료',
+    complete:
+      reviewScopes.length > 0 ? '처리 완료 · 문자 확인 필요' : '처리 완료',
     stopped: '실행 중단',
   };
   let primaryAction: DocumentTaskView['primaryAction'] = null;
-  if (!processing?.scopeInvalid) {
+  if (!scopeInvalid) {
     if (state === 'unconfirmed')
       primaryAction = { id: 'refresh', label: '결과 확인' };
     else if (
@@ -430,10 +522,11 @@ export function buildDocumentTaskView(
       if (state === 'running' && conversion?.state === 'running')
         primaryAction = { id: 'stop-conversion', label: '이 기기 변환 중단' };
       else if (
-        processing?.canRetryConversion ||
-        (!processing &&
-          !converted &&
-          ['failed', 'partial', 'stopped'].includes(state))
+        state !== 'review' &&
+        (processing?.canRetryConversion ||
+          (!processing &&
+            !converted &&
+            ['failed', 'partial', 'stopped'].includes(state)))
       )
         primaryAction = { id: 'retry-conversion', label: '다시 변환' };
       else if (['ready', 'failed'].includes(state) && processing?.canPrepare)
@@ -488,6 +581,8 @@ export function buildDocumentTaskView(
     warnings: conversion?.historyWarning
       ? [...warnings, conversion.historyWarning]
       : warnings,
+    textReviewScopes: reviewScopes,
+    textReviewUnits: textReviewUnits(conversion, reviewScopes),
     primaryAction,
     attempts: task.conversions.map(
       (
@@ -496,9 +591,15 @@ export function buildDocumentTaskView(
       ): DocumentTaskView['attempts'][number] => ({
         id: attempt.requestId,
         title: `문자 변환 ${index + 1}회`,
-        state: attempt.state,
+        state:
+          textReviewScopes(attempt).length > 0
+            ? '문자 확인 필요'
+            : attempt.state,
         startedAt: attempt.startedAt,
-        message: attempt.message,
+        message:
+          textReviewScopes(attempt).length > 0
+            ? '변환 문자는 보관됐습니다. 문자 인식의 신뢰도가 낮은 구간을 원본과 대조해 주세요.'
+            : attempt.message,
         codes: [
           ...attempt.diagnosticCodes,
           ...(attempt.reportSummary?.unreadRanges ?? []),

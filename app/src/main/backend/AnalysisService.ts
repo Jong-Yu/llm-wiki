@@ -3,11 +3,15 @@ import type { DocumentTaskService } from './DocumentTaskService';
 import type { AiActivity } from '@contracts/aiSessions.contract';
 import { sameAccessRevision } from '@contracts/connection.contract';
 import type { WorkspaceMembership } from '@contracts/connection.contract';
-import { aiModelArguments, personalAi } from './personalAi';
+import {
+  aiModelArguments,
+  personalAi,
+  discoverAiExecutable,
+} from './personalAi';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
-import { resolve, join, dirname } from 'node:path';
+import { resolve, join, dirname, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import {
   analysisJobSchema,
@@ -116,6 +120,33 @@ function runKey(context: AnalysisContext, jobId: string): string {
 function serverBase(context: AnalysisContext): string {
   return context.active.serverUrl.replace(/\/api\/v1\/$/, '');
 }
+
+/** 명시 재시도에서도 최초 승인 접수의 전체 요청을 정확히 대조합니다. */
+function registrationPayload(
+  request: AnalysisStartRequest,
+): Record<string, unknown> | null {
+  const registration = request.registration;
+  if (!registration) return null;
+  return {
+    request_id: registration.requestId,
+    source_ref: {
+      source_id: request.sourceId,
+      source_version: request.sourceVersion,
+      source_sha256: request.sourceSha256,
+      registration_revision: request.registrationRevision,
+    },
+    document: request.targetDocument,
+    title: registration.title,
+    ...(registration.conversionRef
+      ? {
+          conversion_ref: {
+            conversion_id: registration.conversionRef.conversionId,
+            conversion_revision: registration.conversionRef.conversionRevision,
+          },
+        }
+      : {}),
+  };
+}
 /** Electron은 기존 분석 CLI를 시작하고, 저장 사실은 서버에서 따로 읽습니다. */
 export class AnalysisService {
   #connection: ConnectionService;
@@ -128,6 +159,13 @@ export class AnalysisService {
   #requests = new Set<AbortController>();
   readonly #privateRoot: string | undefined;
   readonly #tasks: DocumentTaskService | undefined;
+  #executionGuard:
+    | ((
+        context: AnalysisContext,
+        job: AnalysisJob,
+        claimId: string | undefined,
+      ) => Promise<ApiFailure | null>)
+    | null = null;
 
   /** 창·연결 수명과 프로세스 수명을 묶되 화면을 닫는 것만으로 새 실행을 만들지 않습니다. */
   constructor(
@@ -144,6 +182,17 @@ export class AnalysisService {
       for (const controller of this.#requests) controller.abort();
       void this.stop();
     });
+  }
+
+  /** 공개 IPC에서 전달된 claim도 이 PC의 서버 소유권을 검증한 뒤에만 실행합니다. */
+  connectExecutionGuard(
+    guard: (
+      context: AnalysisContext,
+      job: AnalysisJob,
+      claimId: string | undefined,
+    ) => Promise<ApiFailure | null>,
+  ): void {
+    this.#executionGuard = guard;
   }
 
   /** 모든 시작과 실행이 임시 인증 파일을 정리한 뒤 종료합니다. */
@@ -388,6 +437,23 @@ export class AnalysisService {
     }
   }
 
+  /** 승인 전에 이 PC의 개인 실행 환경만 검사하며 작업이나 프로세스를 만들지 않습니다. */
+  async inspectRuntime(): Promise<string[]> {
+    const runtime = await this.#runtime();
+    if ('ok' in runtime) return [runtime.error.message];
+    try {
+      const ai = await personalAi('analysis');
+      if (isAbsolute(ai.cli)) await access(ai.cli);
+      else if (!(await discoverAiExecutable(ai.provider)))
+        return [
+          '이 PC에서 개인 AI 실행기를 찾을 수 없습니다. 설정에서 설치 경로를 확인해 주세요.',
+        ];
+      return [];
+    } catch {
+      return ['이 PC의 개인 AI 실행 설정을 먼저 완료해 주세요.'];
+    }
+  }
+
   /** 현재 영수증·사용권으로만 실행 가능 여부를 안내하고 서버의 최종 검증을 대신하지 않습니다. */
   #executionBlockers(
     detail: AnalysisDetail,
@@ -447,6 +513,7 @@ export class AnalysisService {
       blockers.push('현재 개인 실행기는 문서별 단일 대상 작업을 지원합니다.');
     if (
       job.outputs.includes('wiki') &&
+      job.registration?.mode !== 'preserve' &&
       job.source_ref.size_bytes > 4 * 1024 * 1024
     )
       blockers.push('현재 개인 실행기는 UTF-8 원본 4 MiB까지 지원합니다.');
@@ -498,6 +565,7 @@ export class AnalysisService {
   /** 사용자가 확인한 작업 판본을 그대로 CLI claim까지 전달하며 중복 job을 만들지 않습니다. */
   async execute(
     request: AnalysisExecuteRequest,
+    expectedContext?: AnalysisContext,
   ): Promise<AnalysisDetailResult> {
     const finish = this.#starts.begin(
       JSON.stringify([request.connectionId, request.jobId]),
@@ -514,6 +582,11 @@ export class AnalysisService {
         true,
       );
       if ('ok' in context) return context;
+      if (
+        expectedContext &&
+        !this.#connection.isAnalysisCurrent(expectedContext)
+      )
+        return changed();
       const detail = await this.#detail(context, request.jobId);
       if (!detail.ok) return detail;
       if (detail.data.job.job_revision !== request.expectedJobRevision)
@@ -533,6 +606,12 @@ export class AnalysisService {
         return apiFailure('analysis_execution_blocked', blockers.join(' '));
       const runtime = await this.#runtime();
       if ('ok' in runtime) return runtime;
+      const denied = await this.#executionGuard?.(
+        context,
+        detail.data.job,
+        request.executionClaimId,
+      );
+      if (denied) return denied;
       await this.#spawn(
         context,
         detail.data.job,
@@ -540,6 +619,7 @@ export class AnalysisService {
         runtime.root,
         mode === 'resume',
         epoch,
+        request.executionClaimId,
       );
       return this.#detail(context, request.jobId);
     } catch {
@@ -586,7 +666,11 @@ export class AnalysisService {
   }
 
   /** 명시된 원본·단일 문서로 한 번 접수한 뒤 기존 개인 AI 어댑터를 실행합니다. */
-  async start(request: AnalysisStartRequest): Promise<AnalysisDetailResult> {
+  async start(
+    request: AnalysisStartRequest,
+    retryConfirmedMissingRegistration: boolean = false,
+    expectedContext?: AnalysisContext,
+  ): Promise<AnalysisDetailResult> {
     const finish = this.#starts.begin('registration');
     if (!finish)
       return apiFailure(
@@ -600,6 +684,11 @@ export class AnalysisService {
         true,
       );
       if ('ok' in context) return context;
+      if (
+        expectedContext &&
+        !this.#connection.isAnalysisCurrent(expectedContext)
+      )
+        return changed();
       if (
         request.registration &&
         context.active.workspaces.find(
@@ -630,33 +719,59 @@ export class AnalysisService {
           context,
           `requests/${previous.requestId}`,
         );
-        if (!recovered.ok)
-          return apiFailure(
-            'creation_unconfirmed',
-            '분석 접수 결과를 확인하지 못했습니다. 같은 요청을 다시 만들지 말고 작업 목록을 확인해 주세요.',
-          );
-        created = createdSchema.parse(recovered.value);
-        // 이전 클릭의 접수 확인은 조회에서 끝냅니다. 새로운 분석이나 자동 재실행을 만들지 않습니다.
-        if (
-          created.request_id !== previous.requestId ||
-          created.state !== 'complete'
-        )
-          return apiFailure(
-            'creation_unconfirmed',
-            '같은 분석 접수의 영수증을 아직 확인하지 못했습니다.',
-          );
-        const detail = await this.#detail(context, created.job_id);
-        if (detail.ok) {
+        if (!recovered.ok) {
+          const saved = previous.journal
+            ? z
+                .object({
+                  registrationPayload: z
+                    .record(z.string(), z.unknown())
+                    .optional(),
+                })
+                .parse(JSON.parse(previous.journal.payload))
+            : null;
+          if (
+            !retryConfirmedMissingRegistration ||
+            recovered.error.status !== 404 ||
+            previous.requestId !== request.registration?.requestId ||
+            !saved?.registrationPayload ||
+            JSON.stringify(saved.registrationPayload) !==
+              JSON.stringify(registrationPayload(request))
+          )
+            return apiFailure(
+              'creation_unconfirmed',
+              '분석 접수 결과를 확인하지 못했습니다. 기존 요청의 저장 여부를 다시 확인해 주세요.',
+            );
+          // 새 작업을 만들지 않고 승인 흐름의 명시 계속에서만 최초 본문·ID로 재전송한다.
           await removeProcessJournal(this.#recovery, context, previous.journal);
           this.#creation = null;
+        } else {
+          created = createdSchema.parse(recovered.value);
+          // 이전 클릭의 접수 확인은 조회에서 끝냅니다. 새로운 분석이나 자동 재실행을 만들지 않습니다.
+          if (
+            created.request_id !== previous.requestId ||
+            created.state !== 'complete'
+          )
+            return apiFailure(
+              'creation_unconfirmed',
+              '같은 분석 접수의 영수증을 아직 확인하지 못했습니다.',
+            );
+          const detail = await this.#detail(context, created.job_id);
+          if (detail.ok) {
+            await removeProcessJournal(
+              this.#recovery,
+              context,
+              previous.journal,
+            );
+            this.#creation = null;
+          }
+          // 다른 문서의 명시 접수에 이전 작업을 응답하지 않습니다.
+          if (
+            !detail.ok ||
+            !request.taskId ||
+            previous.requestId === request.registration?.requestId
+          )
+            return detail;
         }
-        // 다른 문서의 명시 접수에 이전 작업을 응답하지 않습니다.
-        if (
-          !detail.ok ||
-          !request.taskId ||
-          previous.requestId === request.registration?.requestId
-        )
-          return detail;
       }
       const runtime = request.registration ? null : await this.#runtime();
       if (runtime && 'ok' in runtime) return runtime;
@@ -676,6 +791,9 @@ export class AnalysisService {
             sourceVersion: request.sourceVersion,
             sourceSha256: request.sourceSha256,
             registrationRevision: request.registrationRevision,
+            ...(request.registration
+              ? { registrationPayload: registrationPayload(request) }
+              : {}),
           },
         );
       } catch (error: unknown) {
@@ -691,37 +809,15 @@ export class AnalysisService {
       const response = await this.#api(
         context,
         request.registration ? 'analysis-jobs/registrations' : 'analysis-jobs',
-        request.registration
-          ? {
-              request_id: requestId,
-              source_ref: {
-                source_id: request.sourceId,
-                source_version: request.sourceVersion,
-                source_sha256: request.sourceSha256,
-                registration_revision: request.registrationRevision,
-              },
-              document: request.targetDocument,
-              title: request.registration.title,
-              ...(request.registration.conversionRef
-                ? {
-                    conversion_ref: {
-                      conversion_id:
-                        request.registration.conversionRef.conversionId,
-                      conversion_revision:
-                        request.registration.conversionRef.conversionRevision,
-                    },
-                  }
-                : {}),
-            }
-          : {
-              request_id: requestId,
-              source_id: request.sourceId,
-              source_version: request.sourceVersion,
-              source_sha256: request.sourceSha256,
-              expected_registration_revision: request.registrationRevision,
-              targets: [request.targetDocument],
-              outputs: request.outputs,
-            },
+        registrationPayload(request) ?? {
+          request_id: requestId,
+          source_id: request.sourceId,
+          source_version: request.sourceVersion,
+          source_sha256: request.sourceSha256,
+          expected_registration_revision: request.registrationRevision,
+          targets: [request.targetDocument],
+          outputs: request.outputs,
+        },
       );
       if (!response.ok) {
         // 명확한 거부만 새 접수를 허용합니다. 전송 오류/5xx는 같은 request_id를 보존합니다.
@@ -781,6 +877,7 @@ export class AnalysisService {
     projectRoot: string,
     reclaim: boolean = false,
     epoch: number = this.#epoch,
+    executionClaimId?: string,
   ): Promise<void> {
     const stateKey = runKey(context, job.job_id);
     // 웹 시험은 별도 임시 경로를 주입하고 데스크톱 기본 경로는 그대로 사용합니다.
@@ -810,6 +907,7 @@ export class AnalysisService {
         job.job_id,
         '--expected-job-revision',
         job.job_revision,
+        ...(executionClaimId ? ['--execution-claim-id', executionClaimId] : []),
         ...(reclaim ? ['--reclaim'] : []),
         '--token-file',
         execution.tokenFile,

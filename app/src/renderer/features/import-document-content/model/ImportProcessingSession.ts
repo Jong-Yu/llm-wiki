@@ -8,6 +8,7 @@ import type {
   SourceConversionScope,
   SourceConversionRun,
 } from '@contracts/sourceConversion.contract';
+import { conversionNeedsPageApproval } from '@contracts/sourceConversion.contract';
 import { importProcessingApi } from '../api/importProcessing.api';
 import type {
   ImportRegisteredSource,
@@ -91,6 +92,7 @@ export class ImportProcessingSession {
       this.#conversionRequested = true;
       this.#applyConversion(data.conversion);
     }
+    if (this.#snapshot.scopeInvalid) return;
     if (data.analysis) this.#applyDetail(data.analysis);
     else if (this.#registrationUnconfirmed) {
       this.#update({
@@ -183,6 +185,12 @@ export class ImportProcessingSession {
     this.#snapshot = { ...this.#snapshot, ...patch };
     this.#listeners.forEach((listener: () => void): void => listener());
   }
+  /** 중단·미확인 이후의 조회가 이전 등록 의도를 자동 재개하지 않게 합니다. */
+  #stopAutomaticPreparation(): void {
+    this.#preparationRequested = false;
+    this.#restored = true;
+    this.#autoExecuted = true;
+  }
   /** 권한 오류 이후에는 이전 범위의 실행·조회 버튼을 잠급니다. */
   #fail(
     error: ImportProcessingError,
@@ -198,6 +206,7 @@ export class ImportProcessingSession {
         'subject_changed',
         'selection_required',
       ].includes(error.code);
+    if (invalid) this.#stopAutomaticPreparation();
     this.#update({
       error: error.message,
       phase,
@@ -217,6 +226,7 @@ export class ImportProcessingSession {
     try {
       await operation();
     } catch {
+      this.#stopAutomaticPreparation();
       this.#fail({
         code: 'outcome_unknown',
         message:
@@ -248,9 +258,53 @@ export class ImportProcessingSession {
       run.source.registrationRevision === this.#source.registrationRevision
     );
   }
+  /** 보관 영수증의 원본·요청·불변 보고 식별자가 현재 변환과 일치해야 사용합니다. */
+  #sameConversionReference(run: SourceConversionRun): boolean {
+    const reference = run.reference;
+    return (
+      reference !== null &&
+      reference.sourceId === this.#source.sourceId &&
+      reference.sourceVersion === this.#source.sourceVersion &&
+      reference.sourceSha256 === this.#source.sourceSha256 &&
+      reference.registrationRevision === this.#source.registrationRevision &&
+      reference.requestId === run.requestId &&
+      /^[a-f0-9]{32}$/.test(reference.conversionId) &&
+      /^[a-f0-9]{64}$/.test(reference.conversionRevision)
+    );
+  }
+  /** 저신뢰 경고만 남아도 보관 본문과 경고 위치의 문자가 실제 있어야 이어갑니다. */
+  #hasReviewText(run: SourceConversionRun): boolean {
+    const report = run.report;
+    if (
+      !report ||
+      !conversionNeedsPageApproval(report) ||
+      !report.units.some(
+        (
+          unit: NonNullable<SourceConversionRun['report']>['units'][number],
+        ): boolean => unit.content.trim().length > 0,
+      )
+    )
+      return false;
+    return report.unread_ranges.every((range: string): boolean => {
+      const page = Number(range.split(':', 1)[0]?.split(' ')[1]);
+      return (
+        Number.isSafeInteger(page) &&
+        report.units.some(
+          (
+            unit: NonNullable<SourceConversionRun['report']>['units'][number],
+          ): boolean =>
+            unit.location.kind === 'pages' &&
+            unit.location.start === page &&
+            unit.location.end === page &&
+            unit.content.trim().length > 0,
+        )
+      );
+    });
+  }
   /** 변환의 부분·실패·영수증 미확정을 원본 보관 완료와 별도로 표시합니다. */
   #applyConversion(run: SourceConversionRun | null): boolean {
     if (!run) {
+      this.#stopAutomaticPreparation();
       this.#update({
         phase: 'conversion_unconfirmed',
         canRefresh: true,
@@ -292,6 +346,7 @@ export class ImportProcessingSession {
       run.state === 'report_unconfirmed' ||
       run.receiptState === 'unconfirmed'
     ) {
+      this.#stopAutomaticPreparation();
       this.#update({
         phase: 'conversion_unconfirmed',
         canRetryConversion: false,
@@ -301,32 +356,52 @@ export class ImportProcessingSession {
       return false;
     }
     if (
+      run.receiptState === 'saved' &&
+      (run.state === 'complete' ||
+        (run.state === 'partial' && this.#hasReviewText(run))) &&
+      !this.#sameConversionReference(run)
+    ) {
+      this.#fail({
+        code: 'scope_changed',
+        message:
+          '변환 확인 결과가 원래 요청과 일치하지 않아 분석에 전달하지 않았습니다.',
+      });
+      return false;
+    }
+    if (
+      run.state === 'partial' &&
+      run.receiptState === 'saved' &&
+      this.#hasReviewText(run)
+    ) {
+      this.#stopAutomaticPreparation();
+      this.#update({
+        phase: 'conversion_review',
+        canPrepare: false,
+        canRetryConversion: false,
+        canExecute: false,
+        message:
+          '변환 문자는 보관됐습니다. 알림에서 경고가 있는 쪽을 원본과 대조하고 승인하면 준비된 PC에서 이어갈 수 있습니다.',
+      });
+      return false;
+    }
+    if (
       run.state !== 'complete' ||
       run.receiptState !== 'saved' ||
       !run.reference ||
       !run.report?.complete
     ) {
+      this.#stopAutomaticPreparation();
       this.#update({
         phase: 'conversion_failed',
         canRetryConversion: true,
         message:
-          run.message ||
-          '원본은 보관됐지만 전체 본문 변환을 완료하지 못했습니다. 미독 구간과 변환 안내를 확인해 주세요.',
-      });
-      return false;
-    }
-    if (
-      run.reference.sourceId !== this.#source.sourceId ||
-      run.reference.sourceVersion !== this.#source.sourceVersion ||
-      run.reference.sourceSha256 !== this.#source.sourceSha256 ||
-      run.reference.registrationRevision !==
-        this.#source.registrationRevision ||
-      run.reference.requestId !== run.requestId
-    ) {
-      this.#fail({
-        code: 'scope_changed',
-        message:
-          '변환 확인 결과이 원래 요청과 일치하지 않아 분석에 전달하지 않았습니다.',
+          run.state === 'partial' &&
+          run.receiptState === 'saved' &&
+          conversionNeedsPageApproval(run.report) &&
+          !this.#hasReviewText(run)
+            ? '확인 대상 위치의 보관 문자를 찾지 못해 계속할 수 없습니다. 변환 보고와 원본을 확인해 주세요.'
+            : run.message ||
+              '원본은 보관됐지만 전체 본문 변환을 완료하지 못했습니다. 미독 구간과 변환 안내를 확인해 주세요.',
       });
       return false;
     }
@@ -376,10 +451,19 @@ export class ImportProcessingSession {
       return;
     }
     if (
+      result.data.job.request_id !== this.#registrationRequestId ||
       result.data.job.source_ref.source_id !== this.#source.sourceId ||
       result.data.job.source_ref.source_version !==
         this.#source.sourceVersion ||
-      result.data.job.targets[0]?.document !== this.#targetDocument
+      result.data.job.source_ref.source_sha256 !== this.#source.sourceSha256 ||
+      result.data.job.source_ref.registration_revision !==
+        this.#source.registrationRevision ||
+      result.data.job.targets[0]?.document !== this.#targetDocument ||
+      (reference &&
+        (result.data.job.registration?.conversion_ref?.conversion_id !==
+          reference.conversionId ||
+          result.data.job.registration?.conversion_ref?.conversion_revision !==
+            reference.conversionRevision))
     ) {
       this.#fail({
         code: 'scope_changed',
@@ -561,7 +645,13 @@ export class ImportProcessingSession {
         await this.#autoExecute();
         return;
       }
+      const previousReview =
+        this.#snapshot.conversion?.state === 'partial' &&
+        conversionNeedsPageApproval(this.#snapshot.conversion.report)
+          ? this.#snapshot.conversion
+          : null;
       if (
+        !previousReview &&
         this.#snapshot.conversion &&
         this.#applyConversion(this.#snapshot.conversion)
       ) {
@@ -575,8 +665,25 @@ export class ImportProcessingSession {
         this.#snapshot.taskId ?? undefined,
       );
       if (!existing.ok) {
+        this.#stopAutomaticPreparation();
         this.#update({ canPrepare: true });
         this.#fail(existing.error);
+        return;
+      }
+      if (
+        previousReview &&
+        existing.data &&
+        (existing.data.requestId !== previousReview.requestId ||
+          existing.data.reference?.conversionId !==
+            previousReview.reference?.conversionId ||
+          existing.data.reference?.conversionRevision !==
+            previousReview.reference?.conversionRevision)
+      ) {
+        this.#fail({
+          code: 'scope_changed',
+          message:
+            '확인한 변환 보고가 바뀌어 등록을 중단했습니다. 현재 작업의 보고를 다시 확인해 주세요.',
+        });
         return;
       }
       if (existing.data || this.#conversionRequested) {
@@ -610,6 +717,7 @@ export class ImportProcessingSession {
   };
   /** 알 수 없는 변환 시작 결과는 읽기로 확인하며 확정 실패만 재시도를 엽니다. */
   #conversionFailure(error: ImportProcessingError): void {
+    this.#stopAutomaticPreparation();
     const definiteLocalFailure = [
       'converter_unavailable',
       'conversion_busy',
@@ -717,6 +825,7 @@ export class ImportProcessingSession {
       this.#snapshot.taskId ?? undefined,
     );
     if (!result.ok) {
+      this.#stopAutomaticPreparation();
       this.#fail(result.error);
       return;
     }

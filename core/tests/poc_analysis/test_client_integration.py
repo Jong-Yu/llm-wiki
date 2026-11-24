@@ -55,7 +55,18 @@ class ClientIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_selected_input_view_real_transport_resume_and_configuration_guard(self):
         await self.registration_flow('current-review-v1')
 
-    async def registration_flow(self, input_view):
+    async def test_unbound_device_claim_reaches_real_mcp_and_stops_before_ai(self):
+        await self.registration_flow('full', execution_claim_id=uuid4().hex)
+
+    async def test_invalid_device_claim_stops_before_network_or_work_directory(self):
+        with patch('core.client.analysis.httpx2.AsyncClient') as client:
+            with self.assertRaises(AnalysisClientError) as failed:
+                await prepare(base_url='http://127.0.0.1:8766', tenant='test', job_id=uuid4().hex,
+                    token='not-used', work_dir='/not-used', execution_claim_id='../../wrong')
+        self.assertEqual(failed.exception.code, 'invalid_identifier')
+        client.assert_not_called()
+
+    async def registration_flow(self, input_view, execution_claim_id=None):
         with TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             (root / 'data').mkdir()
@@ -106,6 +117,11 @@ class ClientIntegration(unittest.IsolatedAsyncioTestCase):
                 from core.client.ai import workflow
                 actual_tool = workflow.tool_call
                 wiki_submissions = []
+                claims = []
+                async def observe_claim(client, tool, arguments):
+                    if tool == 'analysis_job_claim':
+                        claims.append(arguments.copy())
+                    return await actual_tool(client, tool, arguments)
                 async def lose_wiki_response(client, tool, arguments):
                     result = await actual_tool(client, tool, arguments)
                     if tool == 'analysis_job_wiki_write':
@@ -113,13 +129,20 @@ class ClientIntegration(unittest.IsolatedAsyncioTestCase):
                         raise OSError('simulated transport response loss after commit')
                     return result
                 with patch('core.client.analysis.httpx2.AsyncClient', side_effect=local_client), patch.object(
-                        workflow, 'tool_call', side_effect=lose_wiki_response):
+                        workflow, 'tool_call', side_effect=lose_wiki_response), patch(
+                        'core.client.analysis.tool_call', side_effect=observe_claim):
                     with self.assertRaises(Exception) as stopped:
                         await prepare(base_url=base, tenant=tenant, job_id=created['job_id'], token=user['token'],
-                            work_dir=root / 'work', adapter=adapter, input_view=input_view)
+                            work_dir=root / 'work', adapter=adapter, input_view=input_view, execution_claim_id=execution_claim_id)
+                    if execution_claim_id is not None:
+                        self.assertEqual(client_error_code(stopped.exception), 'mcp_request_failed')
+                        self.assertEqual(len(claims), 1)
+                        self.assertEqual(claims[0]['execution_claim_id'], execution_claim_id)
+                        self.assertEqual(adapter.calls, 0)
+                        return
                     self.assertEqual(client_error_code(stopped.exception), 'synthetic_graph_failure')
                     output = await prepare(base_url=base, tenant=tenant, job_id=created['job_id'], token=user['token'],
-                        work_dir=root / 'work', adapter=adapter, reclaim=True, input_view=input_view)
+                        work_dir=root / 'work', adapter=adapter, reclaim=True, input_view=input_view, execution_claim_id=execution_claim_id)
                     again = await prepare(base_url=base, tenant=tenant, job_id=created['job_id'], token=user['token'],
                         work_dir=root / 'work', adapter=adapter, input_view=input_view)
                     with self.assertRaises(Exception) as changed:
@@ -128,6 +151,9 @@ class ClientIntegration(unittest.IsolatedAsyncioTestCase):
                             input_view='full' if input_view != 'full' else 'current-review-v1')
                     self.assertEqual(client_error_code(changed.exception), 'analysis_execution_settings_changed')
                 self.assertEqual(output['ai_execution']['status'], 'stored')
+                self.assertEqual(len(claims), 2)
+                for claim in claims:
+                    self.assertNotIn('execution_claim_id', claim)
                 self.assertFalse(again['ai_execution']['new_execution'])
                 self.assertEqual(adapter.calls, 2)
                 self.assertEqual(output['ai_execution']['usage_observations']['adapter_call_count'], 1)

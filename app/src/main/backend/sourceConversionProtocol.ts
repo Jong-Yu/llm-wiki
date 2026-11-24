@@ -3,9 +3,11 @@ import { z } from 'zod';
 import {
   conversionProgressSchema,
   conversionReportSchema,
+  conversionNeedsTextReview,
 } from '@contracts/sourceConversion.contract';
 import type {
   ConversionSource,
+  ConversionReviewReport,
   SourceConversionRun,
 } from '@contracts/sourceConversion.contract';
 import { sourceFormatSchema } from '@contracts/documents.contract';
@@ -126,7 +128,10 @@ export function matchesConversionSource(
   );
 }
 /** 완료 상태를 사람 검증이나 원본 전체 포함으로 표시하지 않습니다. */
-export function conversionMessage(state: SourceConversionRun['state']): string {
+export function conversionMessage(
+  state: SourceConversionRun['state'],
+  report?: ConversionReviewReport | null,
+): string {
   switch (state) {
     case 'running':
       return '이 PC에서 원본을 내려받아 문자를 변환하고 있습니다.';
@@ -135,6 +140,8 @@ export function conversionMessage(state: SourceConversionRun['state']): string {
     case 'complete':
       return '변환 보고를 저장했습니다. 문자 정확도와 원본 전체 포함은 검증하지 않았습니다.';
     case 'partial':
+      if (conversionNeedsTextReview(report))
+        return '변환된 문자는 보관되어 있으며 OCR 문자 확인이 필요합니다. 원본과 대조해 주세요. 같은 조건으로 다시 변환해도 경고가 남을 수 있습니다.';
       return '일부 구간만 변환했습니다. 미독 구간과 보고 저장 상태를 확인해 주세요.';
     case 'cancelled':
       return '변환을 중단했습니다. 이미 받은 원본과 변환 결과는 이 PC에 보존됩니다.';

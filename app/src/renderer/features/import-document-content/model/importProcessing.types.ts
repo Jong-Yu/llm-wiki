@@ -43,6 +43,7 @@ export type ImportProcessingSnapshot = {
   phase:
     | 'idle'
     | 'converting'
+    | 'conversion_review'
     | 'conversion_failed'
     | 'conversion_unconfirmed'
     | 'planning'

@@ -8,6 +8,7 @@ import {
 import type { JSX } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { AnalysisDetail, AnalysisJob } from '@contracts/analysis.contract';
+import { conversionNeedsPageApproval } from '@contracts/sourceConversion.contract';
 import type {
   DocumentTask,
   DocumentTaskDetailResult,
@@ -40,6 +41,10 @@ import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
 import { Button } from '@renderer/shared/ui/Button';
 import { WorkspacePage } from '@renderer/shared/ui/WorkspacePage';
 import { documentTaskScope } from './documentTaskScope';
+import {
+  NotificationWorkflow,
+  notificationWorkflowPath,
+} from '@renderer/features/review-source-notifications';
 
 type TaskListProps = { scope: ImportScope };
 type TaskDetailProps = { scope: ImportScope; taskId: string };
@@ -296,12 +301,23 @@ function TaskDetail({ scope, taskId }: TaskDetailProps): JSX.Element {
     readFailed: error !== null,
     canWrite: scope.canPrepare,
   });
+  const currentConversion = snapshot?.conversion ?? data.conversion;
+  const conversionReference = conversionNeedsPageApproval(
+    currentConversion?.report,
+  )
+    ? currentConversion?.reference
+    : null;
   return (
     <DocumentTaskDetail
       task={view}
       busy={busy || snapshot?.busy}
       error={error}
       onAction={act}
+      textReviewPath={
+        conversionReference
+          ? notificationWorkflowPath(conversionReference.conversionId)
+          : undefined
+      }
       executionContent={
         view.jobId ? (
           <AnalysisJobWorkspace
@@ -337,6 +353,20 @@ export function DocumentTasksPage(): JSX.Element {
       </WorkspacePage>
     );
   const scope = model.state.scope;
+  const workflowId = parameters.get('workflowId');
+  if (workflowId)
+    return /^[a-f0-9]{32}$/.test(workflowId) ? (
+      <NotificationWorkflow
+        key={`${importScopeKey(scope)}:${workflowId}`}
+        scope={scope}
+        workflowId={workflowId}
+      />
+    ) : (
+      <WorkspacePage title="작업">
+        <p role="alert">작업 주소를 확인할 수 없습니다.</p>
+        <Link to="/notifications">알림 목록</Link>
+      </WorkspacePage>
+    );
   const taskId = parameters.get('taskId');
   if (taskId && !/^[a-f0-9]{32}$/.test(taskId))
     return (

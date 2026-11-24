@@ -460,7 +460,10 @@ export class SourceConversionService {
               : event.receipt.state === 'rejected'
                 ? 'failed'
                 : event.state;
-          record.value.message = conversionMessage(record.value.state);
+          record.value.message = conversionMessage(
+            record.value.state,
+            record.value.report,
+          );
           if (
             event.state === 'complete' &&
             event.receipt.state === 'not_submitted'
@@ -521,7 +524,10 @@ export class SourceConversionService {
           record.value.receiptState = record.submitted
             ? 'unconfirmed'
             : 'not_submitted';
-          record.value.message = conversionMessage(record.value.state);
+          record.value.message = conversionMessage(
+            record.value.state,
+            record.value.report,
+          );
         }
         void execution
           .cleanupAuth()
@@ -614,7 +620,10 @@ export class SourceConversionService {
         requestId: record.value.requestId,
       };
       record.value.state = report.complete ? 'complete' : 'partial';
-      record.value.message = conversionMessage(record.value.state);
+      record.value.message = conversionMessage(
+        record.value.state,
+        record.value.report,
+      );
     } catch {
       record.value.state = 'report_unconfirmed';
       record.value.message = conversionMessage('report_unconfirmed');

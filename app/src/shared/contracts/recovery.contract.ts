@@ -14,6 +14,10 @@ export const recoveryKindSchema = z.enum([
   'pending-source-conversion',
   'pending-analysis',
   'document-tasks',
+  'notification-delivery',
+  'notification-outbox',
+  'notification-approvals',
+  'notification-executions',
 ]);
 export type RecoveryKind = z.infer<typeof recoveryKindSchema>;
 const key = z.string().regex(/^[a-zA-Z0-9_.:-]{1,160}$/);

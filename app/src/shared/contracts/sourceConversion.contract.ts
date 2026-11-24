@@ -160,6 +160,39 @@ export type SourceConversionCancelRequest = z.infer<
   typeof sourceConversionCancelSchema
 >;
 export type SourceConversionRun = z.infer<typeof sourceConversionRunSchema>;
+export type ConversionReviewReport = Pick<
+  NonNullable<SourceConversionRun['report']>,
+  'complete' | 'unread_ranges' | 'warnings'
+>;
+/** 보존된 OCR 문자의 저신뢰만 구분하며 원본 전체 포함이나 정확도를 승인하지 않습니다. */
+export function conversionNeedsTextReview(
+  report: ConversionReviewReport | null | undefined,
+): boolean {
+  return (
+    report?.complete === false &&
+    report.unread_ranges.length > 0 &&
+    report.unread_ranges.every((range: string): boolean =>
+      /^(?:page|frame) [1-9][0-9]*: ocr_low_or_missing_confidence_text_retained_manual_review_required$/.test(
+        range,
+      ),
+    ) &&
+    !report.warnings.some((warning: string): boolean =>
+      warning.includes('worker:'),
+    )
+  );
+}
+
+/** 첫 승인 범위는 원본 페이지를 대조할 수 있는 PDF 쪽 보고로 한정합니다. */
+export function conversionNeedsPageApproval(
+  report: ConversionReviewReport | null | undefined,
+): boolean {
+  return (
+    conversionNeedsTextReview(report) &&
+    !!report?.unread_ranges.every((range: string): boolean =>
+      range.startsWith('page '),
+    )
+  );
+}
 export type SourceConversionResult = z.infer<typeof resultSchema>;
 export type SourceConversionBridge = {
   start: (

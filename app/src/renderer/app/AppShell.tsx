@@ -49,6 +49,12 @@ type ConnectionDisplay =
 
 const navigation: readonly NavigationItem[] = [
   {
+    path: '/notifications',
+    label: '알림',
+    icon: 'bell',
+    routes: ['/notifications'],
+  },
+  {
     path: '/documents',
     label: '문서',
     icon: 'files',
@@ -93,6 +99,7 @@ const navigation: readonly NavigationItem[] = [
 ];
 
 const pageTitles: Readonly<Record<string, string>> = {
+  '/notifications': '알림',
   '/documents': '문서',
   '/templates': '템플릿',
   '/register': '문서 등록',

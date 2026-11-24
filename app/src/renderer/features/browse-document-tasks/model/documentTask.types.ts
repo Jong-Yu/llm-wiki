@@ -3,6 +3,7 @@ export type DocumentTaskState =
   | 'running'
   | 'failed'
   | 'partial'
+  | 'review'
   | 'unconfirmed'
   | 'complete'
   | 'stopped';
@@ -20,6 +21,7 @@ export type DocumentTaskStepState =
   | 'waiting'
   | 'ready'
   | 'unconfirmed'
+  | 'review'
   | 'stopped';
 export type DocumentTaskStep = {
   title: string;
@@ -60,6 +62,8 @@ export type DocumentTaskView = {
   hasPreviousResults: boolean;
   attempts: readonly DocumentTaskAttemptView[];
   warnings: readonly string[];
+  textReviewScopes: readonly string[];
+  textReviewUnits: readonly { label: string; content: string }[];
   primaryAction: { id: DocumentTaskAction; label: string } | null;
 };
 
@@ -72,7 +76,12 @@ export type DocumentTaskStatusFilter =
 
 /** 열람·읽음 여부는 해결이 필요한 상태의 판정에 사용하지 않습니다. */
 export function documentTaskNeedsAttention(task: DocumentTaskView): boolean {
-  return ['failed', 'partial', 'unconfirmed', 'stopped'].includes(task.state);
+  return (
+    task.textReviewScopes.length > 0 ||
+    ['failed', 'partial', 'review', 'unconfirmed', 'stopped'].includes(
+      task.state,
+    )
+  );
 }
 
 /** 목록 필터는 상태를 바꾸지 않고 표시 범위만 좁힙니다. */

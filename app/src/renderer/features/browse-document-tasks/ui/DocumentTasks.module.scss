@@ -161,6 +161,7 @@
     color: var(--wiki-color-status-danger);
   }
   &[data-state='partial'],
+  &[data-state='review'],
   &[data-state='unconfirmed'] {
     color: var(--wiki-color-status-warning);
   }
@@ -258,7 +259,8 @@
       color: var(--wiki-color-status-danger);
     }
   }
-  li[data-state='unconfirmed'] {
+  li[data-state='unconfirmed'],
+  li[data-state='review'] {
     border-color: var(--wiki-color-status-warning);
     svg,
     span {
@@ -271,6 +273,23 @@
     span {
       color: var(--wiki-color-action-primary);
     }
+  }
+}
+
+.reviewScopes {
+  overflow-wrap: anywhere;
+  line-height: var(--wiki-component-control-line-height);
+}
+
+.reviewUnits {
+  display: grid;
+  gap: var(--wiki-space-8);
+
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+    line-height: var(--wiki-component-control-line-height);
   }
 }
 

@@ -22,6 +22,7 @@ export type ApiFailure = Extract<ConnectionResult, { ok: false }>;
 export type ReadApiResult = { ok: true; value: unknown } | ApiFailure;
 type ReadApiOptions = {
   maxResponseBytes?: number;
+  timeoutMs?: number;
   method?: 'GET' | 'POST';
   body?: unknown;
 };
@@ -227,7 +228,7 @@ async function readApi(
   accept: string,
   options: ReadApiOptions = {},
 ): Promise<ReadApiResult> {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS);
   const signal = AbortSignal.any([controller.signal, timeout]);
   try {
     const response = await fetch(url, {
@@ -432,5 +433,47 @@ export async function readApiSourceBytes(
       return bytes;
     },
     sourceMediaType(expected.format),
+  );
+}
+
+/** 고정 판본의 제한된 PNG 미리보기만 읽으며 임의 URL·파일 형식은 받지 않습니다. */
+export async function readApiPageBytes(
+  url: string,
+  token: string,
+  controller: AbortController,
+  expected: {
+    sourceSha256: string;
+    sourceVersion: string;
+    registrationRevision: string;
+    page: number;
+  },
+): Promise<ReadApiResult> {
+  return readApi(
+    url,
+    token,
+    controller,
+    async (response: Response): Promise<Uint8Array> => {
+      if (
+        response.headers.get('content-type') !== 'image/png' ||
+        response.headers.get('x-source-sha256') !== expected.sourceSha256 ||
+        response.headers.get('x-source-version') !== expected.sourceVersion ||
+        response.headers.get('x-registration-revision') !==
+          expected.registrationRevision ||
+        response.headers.get('x-source-page') !== String(expected.page)
+      ) {
+        await response.body?.cancel();
+        throw new Error('source_mismatch');
+      }
+      const bytes = await responseBytes(response, 8 * 1024 * 1024);
+      if (
+        !Buffer.from(bytes.subarray(0, 8)).equals(
+          Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+        )
+      )
+        throw new Error('invalid_response');
+      return bytes;
+    },
+    'image/png',
+    { timeoutMs: 25_000 },
   );
 }

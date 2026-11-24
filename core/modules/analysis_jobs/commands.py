@@ -135,6 +135,13 @@ def create(self, *, tenant, user_id, request_id, source_id, source_version, sour
         conversion = None
         if registration is not None:
             from .registration import materialize
+            if registration['conversion_ref']:
+                from core.modules.notifications.store import NotificationStore
+                notifications = NotificationStore(self.store, actor, rulesets=self.rulesets)
+                reference = registration['conversion_ref']
+                report = notifications._conversion(reference)
+                notifications.require_approval_locked(report['manifest'], reference,
+                    request_id=request_id, target=targets[0])
             _, conversion = materialize(self, job, actor)
         record = {"operation": "analysis_job_create", "tenant": tenant, "user_id": user_id,
                   "request_id": request_id, "payload_hash": digest, "job_id": job_id,
@@ -199,13 +206,18 @@ def save_state(self, job, kind, actor, **details):
     return queries.project(self, value)
 
 
-def claim(self, job_id, *, tenant, user_id, expected_job_revision, authorize, reclaim=False):
+def claim(self, job_id, *, tenant, user_id, expected_job_revision, authorize, reclaim=False, execution_claim_id=None):
     # 이번 run에 실행권을 발급한다. reclaim=True는 만료/중단 후 새 실행을 받겠다는 명시적 요청이다.
     limits.revision(expected_job_revision)
+    if execution_claim_id is not None:
+        limits.identifier(execution_claim_id)
     if type(reclaim) is not bool:
         raise JobValidationError("reclaim must be explicit boolean.")
     with self.sources._coordination_lock():
         job, actor = opened(self, job_id, tenant, user_id, authorize)
+        from core.modules.notifications.store import NotificationStore
+        notifications = NotificationStore(self.store, actor, rulesets=self.rulesets, clock=self.clock)
+        notifications.consume_claim_locked(job, execution_claim_id)
         current = canonical_json_hash(job)
         lease = records.lease(self, job)
         active = lease is not None and limits.instant(lease["expires_at"]) > self._now()
@@ -235,6 +247,7 @@ def claim(self, job_id, *, tenant, user_id, expected_job_revision, authorize, re
                                   "claimed", actor, expected_job_revision=expected_job_revision, reclaim=reclaim,
                                   run_id=run_id, previous_run_id=job["run_id"])
         records.preflight(lease)
+        notifications.consume_claim_locked(job, execution_claim_id, run_id)
         # 두 파일의 한도를 모두 먼저 검사해 실패한 claim마다 불필요한 lease가 쌓이지 않게 한다.
         self._write(self.job_root(job_id) / "leases" / (run_id + ".json"), lease)
         self._write(records.state_path(self, job_id), candidate)

@@ -172,17 +172,18 @@ def _register_analysis_job_tools(server, get_store):
     # 현재 작업 버전으로 실행 사용권을 받는다. reclaim=True는 만료/중단된 실행을 명시적으로 다시 맡을 때 사용한다.
     @server.tool(annotations=ADDITIVE, structured_output=False)
     def analysis_job_claim(job_id: Identifier, expected_job_revision: SourceRevisionInput,
-                           reclaim: StrictBool = False) -> CallToolResult:
+                           reclaim: StrictBool = False, execution_claim_id: Identifier | None = None) -> CallToolResult:
         """Claim your current job for a CLI run using source_write permission.
 
         Read analysis_job_query first. A live duplicate claim retains its run.
         Set reclaim=true only for an explicitly reviewed expired/stopped/failed run.
         Claiming confirms server reception, never model execution or stored results.
         execution_ready=false lists the common-ruleset/input-bundle prerequisites.
+        Approved conversion workflows additionally require their device execution_claim_id.
         """
         return invoke("analysis_job_claim", lambda jobs, scope: jobs.claim(job_id,
             tenant=scope.tenant, user_id=scope.user_id, expected_job_revision=expected_job_revision,
-            reclaim=reclaim, authorize=_authorize))
+            reclaim=reclaim, authorize=_authorize, execution_claim_id=execution_claim_id))
 
     # 자기 작업의 고정 원본·lease·진행 보고와 저장 영수증 집계를 읽는다. 조회가 작업을 실행시키지는 않는다.
     @server.tool(annotations=read_only, structured_output=False)

@@ -24,6 +24,7 @@ def main():
     job_scope.add_argument("--batch-jobs", type=Path,
                            help="JSON list of explicitly selected job_id/expected_job_revision pairs (1-8).")
     parser.add_argument("--expected-job-revision", help="Exact job revision observed before explicit execution.")
+    parser.add_argument("--execution-claim-id", help="Server-issued device claim for an approved conversion workflow.")
     parser.add_argument("--semantic-check", action="store_true", help="Run a separate personal semantic check and retain its report before graph save.")
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--work-dir", type=Path, required=True)
@@ -53,12 +54,12 @@ def main():
                                      token=token, work_dir=args.work_dir, reclaim=args.reclaim,
                                      adapter=adapter, profile=args.profile, expected_job_revision=expected_job_revision,
                                      semantic_check=args.semantic_check, input_view=args.input_view, rules_view=args.rules_view,
-                                     session_registry=args.session_registry,
+                                     session_registry=args.session_registry, execution_claim_id=args.execution_claim_id,
                                      prepare_input=args.prepare_input, context_documents=[{
                                          "document": document, "required": True, "reason": "Explicit CLI context selection"}
                                          for document in args.context_document] if args.context_document is not None else None)
         if args.batch_jobs is not None:
-            if args.expected_job_revision is not None or not args.run_ai:
+            if args.expected_job_revision is not None or args.execution_claim_id is not None or not args.run_ai:
                 raise AnalysisClientError("invalid_analysis_batch")
             from core.client.analysis_batch import run_selected, selection
             with args.batch_jobs.open("rb") as source:
