@@ -304,6 +304,8 @@ export class SourceRegistrationService {
               'pdf',
               'xlsx',
               'docx',
+              'pptx',
+              'ppt',
               'png',
               'jpg',
               'jpeg',
@@ -326,7 +328,7 @@ export class SourceRegistrationService {
       if (format === null)
         return apiFailure(
           'unsupported_source',
-          'MD·TXT·PDF·XLSX·DOCX 또는 PNG·JPEG·GIF·WebP·BMP·TIFF 파일을 선택해 주세요.',
+          'MD·TXT·PDF·XLSX·DOCX·PPTX·PPT 또는 PNG·JPEG·GIF·WebP·BMP·TIFF 파일을 선택해 주세요.',
         );
       const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
       let bytes: Buffer;
@@ -419,7 +421,7 @@ export class SourceRegistrationService {
     if (format === null)
       return apiFailure(
         'unsupported_source',
-        'MD·TXT·PDF·XLSX·DOCX 또는 PNG·JPEG·GIF·WebP·BMP·TIFF 파일을 선택해 주세요.',
+        'MD·TXT·PDF·XLSX·DOCX·PPTX·PPT 또는 PNG·JPEG·GIF·WebP·BMP·TIFF 파일을 선택해 주세요.',
       );
     if (bytes.byteLength > MAX_SOURCE_BYTES)
       return apiFailure('source_limit', '원본 파일은 20 MiB 이내여야 합니다.');

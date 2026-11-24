@@ -25,6 +25,8 @@ SOURCE_MEDIA_TYPES = {
     "md": "text/markdown", "txt": "text/plain", "pdf": "application/pdf",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "ppt": "application/vnd.ms-powerpoint",
     "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif",
     "webp": "image/webp", "bmp": "image/bmp", "tif": "image/tiff", "tiff": "image/tiff",
 }
@@ -83,7 +85,7 @@ def metadata(*, kind, title, format, filename=None):
     # 입력의 표시 정보만 검증해 dict로 반환한다. filename은 서버 저장 경로로 사용하지 않는다.
     # * 뒤 인자는 kind=...처럼 이름을 붙여 전달해 인자 순서 실수를 줄인다.
     if kind not in ("file", "text") or type(format) is not str or format not in SOURCE_MEDIA_TYPES:
-        raise UnsupportedSourceError("Use Markdown, text, PDF, XLSX, DOCX, PNG, JPEG, GIF, WebP, BMP or TIFF originals.")
+        raise UnsupportedSourceError("Use Markdown, text, PDF, XLSX, DOCX, PPTX, PPT, PNG, JPEG, GIF, WebP, BMP or TIFF originals.")
     if kind == "text" and format not in {"md", "txt"}:
         raise UnsupportedSourceError("Binary originals must be uploaded as files.")
     if type(title) is not str or not title.strip() or len(title) > 200 or any(ord(c) < 32 for c in title):

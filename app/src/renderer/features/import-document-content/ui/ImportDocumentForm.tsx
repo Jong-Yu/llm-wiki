@@ -237,7 +237,7 @@ export function ImportDocumentForm({
                 )}
                 <small>
                   문서 제목과 저장 이름은 파일명으로 정합니다 · MD, TXT, PDF,
-                  XLSX, DOCX, 이미지 · 최대 20 MiB
+                  XLSX, DOCX, PPTX, PPT, 이미지 · 최대 20 MiB
                 </small>
               </div>
               <Button

@@ -192,6 +192,10 @@ class WikiStore:
         try:
             with self._write_lock():
                 target = self._document_path(self.wiki_dir, document)
+                from .trash import is_trashed
+                if is_trashed(self, document):
+                    # 삭제된 경로를 분석 재시도나 신규 저장으로 부활시키지 않는다.
+                    raise RevisionConflictError(document, expected_revision, None)
                 try:
                     previous = self._read_document(target, document)
                 except FileNotFoundError:
@@ -262,7 +266,9 @@ class WikiStore:
         source = parsed.metadata.get("source")
         if source is not None:
             from core.modules.sources.store import SourceStore
-            catalog = SourceStore(self)._get_source_locked(source["id"])
+            # 원본의 휴지통 이동은 이미 연결된 Wiki의 편집·복원 계보를 끊지 않는다.
+            from core.modules.sources.queries import get_source_locked
+            catalog = get_source_locked(SourceStore(self), source["id"], include_deleted=True)
             if not any(item["source_version"] == source["version"] for item in catalog["versions"]):
                 raise DocumentMetadataError("The fixed original version is not registered")
 

@@ -156,6 +156,9 @@ def find(self, text, *, documents=None, include_history=False, application_conte
                     identities.add(key)
         for cid in capture.scan_correspondences():
             detail = capture.correspondence(cid, purpose="discovery", required_by=["find"], evaluate=True)
+            from core.modules.documents.trash import is_trashed
+            if any(is_trashed(self.store, document) for document in detail.get("documents", {}).values()):
+                continue
             if paths and not set(paths).intersection(detail.get("documents", {}).values()):
                 continue
             for match in self._correspondence_matches(detail, needle, include_history):

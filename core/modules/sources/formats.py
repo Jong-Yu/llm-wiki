@@ -10,6 +10,7 @@ from .contracts import UnsupportedSourceError
 MAX_DOCX_ENTRIES = 10000
 MAX_CONTENT_TYPES_BYTES = 256 * 1024
 DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+PPTX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
 
 
 class _NoDoctype(ET.TreeBuilder):
@@ -17,15 +18,16 @@ class _NoDoctype(ET.TreeBuilder):
         raise ValueError("Document types are not accepted in package metadata")
 
 
-def _docx(stream):
+def _ooxml(stream, format):
     # 압축을 풀어 파일로 쓰지 않는다. DOCX 식별 표식만 제한된 크기로 읽는다.
     # XLSX/일반 ZIP를 .docx로 바꾼 경우를 구분하되 본문 정확성/안전을 보증하지 않는다.
+    part, content_type = ("word/document.xml", DOCX_CONTENT_TYPE) if format == "docx" else ("ppt/presentation.xml", PPTX_CONTENT_TYPE)
     with ZipFile(stream) as archive:
         entries = archive.infolist()
         names = [entry.filename for entry in entries]
         if len(entries) > MAX_DOCX_ENTRIES or len(set(names)) != len(names):
             raise ValueError("Invalid package directory")
-        for name in ("[Content_Types].xml", "_rels/.rels", "word/document.xml"):
+        for name in ("[Content_Types].xml", "_rels/.rels", part):
             info = archive.getinfo(name)
             if info.is_dir() or info.flag_bits & 1 or info.file_size == 0:
                 raise ValueError("Missing or encrypted document marker")
@@ -41,9 +43,9 @@ def _docx(stream):
         if root.tag != namespace + "Types":
             raise ValueError("Invalid package content types")
         document_types = [node.attrib.get("ContentType") for node in root
-            if node.tag == namespace + "Override" and node.attrib.get("PartName") == "/word/document.xml"]
-        if document_types != [DOCX_CONTENT_TYPE]:
-            raise ValueError("The package is not a DOCX document")
+            if node.tag == namespace + "Override" and node.attrib.get("PartName") == "/" + part]
+        if document_types != [content_type]:
+            raise ValueError("The package does not match its document format")
 
 
 def validate_binary(stream, format):
@@ -53,6 +55,9 @@ def validate_binary(stream, format):
         "pdf": header.startswith(b"%PDF-"),
         "xlsx": header.startswith(b"PK\x03\x04"),
         "docx": header.startswith(b"PK\x03\x04"),
+        "pptx": header.startswith(b"PK\x03\x04"),
+        # 구형 PPT는 OLE 컨테이너 표식만 확인한다. 문서 해석은 개인 변환기가 맡는다.
+        "ppt": header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
         "png": header.startswith(b"\x89PNG\r\n\x1a\n"),
         "jpg": header.startswith(b"\xff\xd8\xff"),
         "jpeg": header.startswith(b"\xff\xd8\xff"),
@@ -64,9 +69,9 @@ def validate_binary(stream, format):
     }
     if not signatures.get(format, False):
         raise UnsupportedSourceError("The binary file signature does not match its format.")
-    if format == "docx":
+    if format in {"docx", "pptx"}:
         try:
             stream.seek(0)
-            _docx(stream)
+            _ooxml(stream, format)
         except (BadZipFile, KeyError, ValueError, RuntimeError, NotImplementedError, EOFError, zlib.error, ET.ParseError):
-            raise UnsupportedSourceError("The file does not contain supported DOCX package markers.") from None
+            raise UnsupportedSourceError("The file does not contain supported " + format.upper() + " package markers.") from None

@@ -1,0 +1,47 @@
+{
+  "checks": [
+    "현재 제품 AppShell·등록 진행·문서 목록의 동일 합성 자료 기준 화면",
+    "열람만으로 실패 해소·재실행 없음; 검색·필터를 유지해 출발 목록 복귀",
+    "같은 작업에서 원본 재등록 없이 처음부터 재변환하는 모의 행동",
+    "실제 문서 목록에서 구체 상태·이전 성공을 구분하고 동일 상세로 이동",
+    "부분 결과 보존; 조건 확인과 미완료 단계 실행을 별도 클릭으로 분리",
+    "저장 미확정은 원래 요청의 결과 확인만 제공",
+    "기존 등록 폼의 모의 접수→새 작업 상세, 진행 중이던 다른 작업 유지",
+    "모의 PDF 등록의 변환 단계 및 현재/개선안 비교 전환 중 동일 자료 보존",
+    "원본·문서·관계에서 동일 작업으로 복귀; 원본에도 저장 미확정 유지",
+    "실행 전·로컬 중단을 진행 중과 구별하고 상태별 행동 제공",
+    "320/720/1280 폭의 가로 넘침 없음, 실제 다크 테마 적용과 키보드 초점",
+    "브라우저 실행 오류 0 · 외부 HTTP 요청 0"
+  ],
+  "errors": [],
+  "requests": [],
+  "screenshots": [
+    "before-tasks-1280.png",
+    "before-failure-1280.png",
+    "before-documents-1280.png",
+    "after-tasks-1280.png",
+    "after-failure-1280.png",
+    "after-documents-1280.png",
+    "after-partial-1280.png",
+    "after-unconfirmed-1280.png",
+    "after-complete-1280.png",
+    "registration-existing-form-1280.png",
+    "after-failure-720.png",
+    "after-tasks-720.png",
+    "after-failure-320.png",
+    "after-tasks-320.png",
+    "after-failure-dark-1280.png"
+  ],
+  "limitation": "합성 자료를 사용한 UI 시안 검증. 실제 저장·변환·AI·재시작 복원·Windows 앱 검증 아님.",
+  "artifact": {
+    "file": "../preview.html",
+    "bytes": 744891,
+    "sha256": "c7e8175590dd373416a83c93ddf60352f9d01890c9892e44caf8ca03a2fb5a0b"
+  },
+  "staticChecks": [
+    "strict TypeScript passed",
+    "Oxc lint passed",
+    "Oxfmt passed",
+    "standalone HTML build passed"
+  ]
+}

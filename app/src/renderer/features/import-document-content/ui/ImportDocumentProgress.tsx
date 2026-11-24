@@ -41,6 +41,7 @@ const conversionMethods: Record<string, string> = {
   ocr: '문자 인식',
   xlsx_values: '스프레드시트 값 읽기',
   docx_text: 'Word 문자 읽기',
+  pptx_text: 'PowerPoint 슬라이드 문자 읽기',
 };
 type ConversionWarningsProps = {
   report: { unread_ranges: string[]; warnings: string[] };
@@ -58,11 +59,21 @@ function stepState(
 }
 
 const conversionFailures: Record<string, string> = {
+  legacy_ppt_requires_libreoffice_or_pptx:
+    '구형 PPT 변환에는 이 PC의 LibreOffice가 필요합니다. PowerPoint에서 PPTX로 저장해 다시 등록할 수도 있습니다. 업로드한 원본은 보관되어 있습니다.',
+  legacy_ppt_conversion_timeout:
+    '구형 PPT 변환 시간이 초과되었습니다. PPTX로 저장해 다시 등록해 주세요.',
+  legacy_ppt_conversion_failed:
+    '구형 PPT를 변환하지 못했습니다. PowerPoint에서 파일을 열어 PPTX로 저장한 뒤 다시 등록해 주세요.',
   empty_conversion:
     '원본에서 읽을 수 있는 본문을 얻지 못했습니다. 원본 파일과 문자 인식 상태를 확인해 주세요.',
   worker_failed:
     '변환 프로그램이 중단되어 나머지 원본을 읽지 못했습니다. 이 기록에는 구체적인 중단 원인이 남아 있지 않습니다.',
   conversion_timeout: '변환 시간이 제한을 넘어 나머지 원본을 읽지 못했습니다.',
+  conversion_idle_timeout:
+    '변환이 2분 동안 진행되지 않아 중단됐습니다. 저장된 중간 결과는 보존됩니다.',
+  conversion_checkpoint_read_failed:
+    '변환 중간 결과 파일을 읽지 못해 중단됐습니다. 이미 확인한 결과는 보존됩니다.',
   conversion_cancelled: '변환을 취소해 나머지 원본을 읽지 않았습니다.',
   conversion_checkpoint_locked:
     '중간 결과 파일이 잠겨 변환을 이어가지 못했습니다.',

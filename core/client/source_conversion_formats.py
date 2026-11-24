@@ -21,6 +21,7 @@ from xml.etree import ElementTree
 from core.runtime.client_process import no_window_options
 
 from . import source_conversion_xlsx as xlsx_view
+from . import source_conversion_presentation as presentation_view
 from .source_conversion_report import Conversion, OutputLimit, MAX_TEXT, MAX_UNITS
 
 MAX_PAGES = 500
@@ -511,6 +512,10 @@ def convert_file(path, format, *, ocr="auto", language="eng", checkpoint=None):
             xlsx(path, result)
         elif format == "docx":
             docx(path, result)
+        elif format == "pptx":
+            presentation_view.pptx(path, result)
+        elif format == "ppt":
+            presentation_view.ppt(path, result)
         elif format in {"png", "jpeg", "jpg", "tiff", "tif", "webp", "bmp", "gif"}:
             image(path, result, ocr, language)
         elif format in {"md", "txt"}:

@@ -15,6 +15,7 @@ description: LLM Wiki API/MCP 서버와 터널을 macOS 터미널 창에서 (재
    ```
 2. 런처가 하는 일: 정책·자료를 읽기만 해서 확인한 뒤, 포트를 쓰는 서버의 부모가 이 프로젝트의 `start-mac.command` 런처이면 그 런처만 정상 종료(TERM)합니다(서버·터널이 함께 내려감). 포트가 비면 macOS 터미널 창을 열어 런처를 실행합니다. 터미널 창이라 Claude 세션이 끝나도 서버가 유지됩니다.
 3. 끝나면 새 앱·MCP 주소가 출력됩니다. 주소는 `.local/last-server-url.txt`에도 있습니다(`.local/`은 git 제외, 인증 정보 없음).
+4. `.local/address-gist-id`가 있으면 런처가 새 주소를 사용자의 비공개 GitHub 메모에도 올립니다(결과는 새 터미널 창에 표시). 사용자에게 메모 링크(`https://gist.github.com/<그 파일의 ID>`)에서 새 주소를 볼 수 있다고 알립니다.
 
 ## 지킬 것
 

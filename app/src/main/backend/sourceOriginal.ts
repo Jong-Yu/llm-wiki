@@ -9,6 +9,8 @@ export function sourceFileFormat(filename: string): SourceFormat | null {
   if (extension === '.pdf') return 'pdf';
   if (extension === '.xlsx') return 'xlsx';
   if (extension === '.docx') return 'docx';
+  if (extension === '.pptx') return 'pptx';
+  if (extension === '.ppt') return 'ppt';
   if (extension === '.png') return 'png';
   if (extension === '.jpg') return 'jpg';
   if (extension === '.jpeg') return 'jpeg';
@@ -36,6 +38,10 @@ export function sourceMediaType(format: SourceFormat): string {
       return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     case 'docx':
       return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    case 'ppt':
+      return 'application/vnd.ms-powerpoint';
     case 'jpg':
     case 'jpeg':
       return 'image/jpeg';
@@ -68,7 +74,7 @@ export function sourceSignatureMatches(
       bytes[3] === 0x46 &&
       bytes[4] === 0x2d
     );
-  if (format === 'xlsx' || format === 'docx')
+  if (format === 'xlsx' || format === 'docx' || format === 'pptx')
     return (
       bytes.length >= 4 &&
       bytes[0] === 0x50 &&
@@ -82,6 +88,7 @@ export function sourceSignatureMatches(
     prefix.every(
       (byte: number, index: number): boolean => bytes[index] === byte,
     );
+  if (format === 'ppt') return begins([208, 207, 17, 224, 161, 177, 26, 225]);
   if (format === 'png') return begins([137, 80, 78, 71, 13, 10, 26, 10]);
   if (format === 'jpg' || format === 'jpeg') return begins([255, 216, 255]);
   if (format === 'gif')

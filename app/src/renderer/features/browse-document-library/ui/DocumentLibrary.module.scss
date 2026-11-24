@@ -118,6 +118,64 @@
 .tableWrap {
   min-width: 0;
 }
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+}
+.trashPanel {
+  margin-bottom: var(--wiki-space-16);
+  padding: var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  h2 {
+    margin: 0;
+    font-size: var(--wiki-font-size-16);
+  }
+}
+.trashList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--wiki-space-12);
+    padding-block: var(--wiki-space-12);
+    border-top: 1px solid var(--wiki-color-border-default);
+    > div {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+  }
+  small {
+    display: block;
+    color: var(--wiki-color-text-secondary);
+    margin-top: var(--wiki-space-4);
+  }
+}
+.trashDialog {
+  box-sizing: border-box;
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: var(--wiki-space-24);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-component-control-radius);
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+  overflow-wrap: anywhere;
+  h2 {
+    margin-top: 0;
+    font-size: var(--wiki-font-size-16);
+  }
+  &::backdrop {
+    background: rgb(0 0 0 / 40%);
+  }
+}
 .table {
   border-collapse: collapse;
   width: 100%;
@@ -529,6 +587,13 @@
     .numeric {
       text-align: left;
     }
+    .actionColumn {
+      width: auto;
+      text-align: left;
+    }
+    .rowActions {
+      justify-content: flex-start;
+    }
     tbody tr[data-selected='true'] {
       box-shadow: inset 2px 0 var(--wiki-color-action-primary);
       td:first-child {
@@ -555,6 +620,9 @@
     }
     .rowHint {
       grid-column: 2;
+    }
+    .rowActions {
+      grid-column: 1 / -1;
     }
     .textButton {
       justify-self: start;

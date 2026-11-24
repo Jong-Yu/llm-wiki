@@ -2,7 +2,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/login.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "로그인 탭에서 계정 이름과 예시 서버 주소를 입력한 상태입니다.",
     "hotspots": [
       {
@@ -47,7 +47,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/ai-settings.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "개인 AI 연결을 시작하는 설정 화면입니다. 아직 로그인과 실제 응답을 확인하지 않은 상태입니다.",
     "hotspots": [
       {
@@ -83,7 +83,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/import.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "텍스트 붙여넣기로 자료를 입력한 상태입니다. 등록하기 전 화면입니다.",
     "hotspots": [
       {
@@ -119,7 +119,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/document.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "예시 문서의 본문을 연 상태입니다. 이 예시는 원본 연결과 추출된 관계가 없는 문서입니다.",
     "hotspots": [
       {
@@ -155,7 +155,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/edit.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "문서의 본문을 편집 중인 화면입니다. 변경한 초안을 저장하기 전 상태입니다.",
     "hotspots": [
       {
@@ -191,7 +191,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/sessions.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "아직 실행한 AI 작업이 없는 새 계정의 화면입니다. 실행 후에는 이곳에서 작업과 결과를 확인합니다.",
     "hotspots": [
       {
@@ -218,7 +218,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/chat.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 모의 AI 답변",
+    "label": "2026.11.07 화면 예시 · 모의 AI 답변",
     "description": "질문 입력과 답변 내려받기 위치를 보여 줍니다. 화면의 답변은 모의 예시입니다.",
     "hotspots": [
       {
@@ -254,7 +254,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/evidence.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 모의 AI 답변",
+    "label": "2026.11.07 화면 예시 · 모의 AI 답변",
     "description": "모의 답변의 근거 칩을 눌러 인용과 원문 위치를 펼친 상태입니다.",
     "hotspots": [
       {
@@ -281,7 +281,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/ontology.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "검색한 개념을 선택해 관계와 원문 설명을 펼친 연습용 예시입니다.",
     "hotspots": [
       {
@@ -317,7 +317,7 @@ window.LLM_WIKI_SCREENS = {
   "assets/review.png": {
     "width": 1440,
     "height": 960,
-    "label": "실제 앱 화면 · 연습용 자료",
+    "label": "2026.11.07 화면 예시 · 연습용 자료",
     "description": "원문 관계를 읽고 승인을 선택해 이유를 작성한 상태입니다. 실제 판단 저장은 하지 않았습니다.",
     "hotspots": [
       {

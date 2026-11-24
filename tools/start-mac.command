@@ -17,6 +17,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     printf '같은 포트에서 이 프로젝트의 이전 런처가 실행 중이면 먼저 정상 종료하고 다시 시작합니다.\n'
     printf '%s\n' '--new-window: 새 터미널 창에서 실행하고 새 주소를 출력한 뒤 돌아옵니다.'
     printf '터널 실행 파일: 프로젝트의 .local/cloudflared\n'
+    printf '.local/address-gist-id가 있으면 새 주소를 비공개 GitHub 메모에 올립니다(tools/publish-server-address.sh).\n'
     exit 0
 fi
 new_window=0
@@ -189,6 +190,11 @@ printf '%s\n' "$public_url" >"$url_file"
 printf '\n앱 서버 주소: %s\nMCP 주소:     %s/mcp\n' "$public_url" "$public_url"
 printf '기존 개인 인증을 사용하세요. 주소는 재실행할 때 바뀝니다.\n'
 printf '이 창을 열어 두세요. 종료: Ctrl+C 또는 창 닫기\n\n'
+# 사용자가 주소 메모를 켰으면(.local/address-gist-id) 새 주소를 비공개 GitHub 메모에 올린다.
+# 네트워크를 기다리지 않도록 따로 실행하며, 실패해도 서버와 터널은 계속 실행한다.
+if [[ -f "$project_dir/.local/address-gist-id" ]]; then
+    "$project_dir/tools/publish-server-address.sh" "$public_url" &
+fi
 while kill -0 "$server_pid" 2>/dev/null && kill -0 "$tunnel_pid" 2>/dev/null; do sleep 1; done
 cat "$run_dir/server.log" >&2
 tail -25 "$run_dir/tunnel.log" >&2

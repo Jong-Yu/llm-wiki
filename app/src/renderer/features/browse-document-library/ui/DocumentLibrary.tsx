@@ -23,6 +23,8 @@ import type {
 } from '../model/documentLibrary.types';
 import { SkeletonBar, SkeletonList } from '@renderer/shared/ui/Skeleton';
 import { WikiDocumentIdentity } from './WikiDocumentIdentity';
+import { useDocumentTrash } from '../model/useDocumentTrash';
+import { DocumentTrash } from './DocumentTrash';
 import styles from './DocumentLibrary.module.scss';
 
 type DocumentLibraryProps = {
@@ -145,6 +147,7 @@ export function DocumentLibrary({
     onOpenDocument(path);
   }
   const ready = library.state.status === 'ready' ? library.state.result : null;
+  const trash = useDocumentTrash(ready?.scope ?? null, library.refresh);
   const rows = ready?.rows ?? [];
   const aiRequired = useAiConnection().status === 'required';
   const sourceItems = rows.flatMap((row: LibraryRow): LibrarySourceItem[] =>
@@ -198,10 +201,20 @@ export function DocumentLibrary({
       )}
       {library.refreshError && <p role="alert">{library.refreshError}</p>}
       <HeaderActions>
+        {ready && (
+          <Button
+            variant="surface"
+            aria-expanded={trash.open}
+            onClick={(): void => trash.setOpen(!trash.open)}
+          >
+            <Icon name="trash-2" /> 휴지통
+          </Button>
+        )}
         <Link className={styles.primary} to="/register">
           <Icon name="plus" /> 문서 등록
         </Link>
       </HeaderActions>
+      <DocumentTrash model={trash} />
       {!isEmpty && library.state.status !== 'unselected' && (
         <section className={styles.finder} aria-label="문서 찾기">
           <div className={styles.toolbar}>
@@ -505,40 +518,51 @@ export function DocumentLibrary({
                           )}
                         </td>
                         <td data-label="행동" className={styles.actionColumn}>
-                          {item.kind === 'source' &&
-                            ((): JSX.Element | null => {
-                              const view = analysis.viewOf(item);
-                              if (view.progressPath)
-                                return (
+                          <div className={styles.rowActions}>
+                            {item.kind === 'source' &&
+                              ((): JSX.Element | null => {
+                                const view = analysis.viewOf(item);
+                                if (view.progressPath)
+                                  return (
+                                    <Link
+                                      className={styles.textButton}
+                                      to={view.progressPath}
+                                      state={{ workflowReturnTo: '/documents' }}
+                                    >
+                                      작업 보기
+                                    </Link>
+                                  );
+                                if (view.kind === 'none')
+                                  return (
+                                    <button
+                                      className={styles.textButton}
+                                      disabled={aiRequired}
+                                      onClick={(): void => {
+                                        void analysis.start(item);
+                                      }}
+                                    >
+                                      분석 시작
+                                    </button>
+                                  );
+                                return view.jobId ? (
                                   <Link
                                     className={styles.textButton}
-                                    to={view.progressPath}
-                                    state={{ workflowReturnTo: '/documents' }}
+                                    to={`/jobs?jobId=${encodeURIComponent(view.jobId)}`}
                                   >
                                     작업 보기
                                   </Link>
-                                );
-                              if (view.kind === 'none')
-                                return (
-                                  <button
-                                    className={styles.textButton}
-                                    disabled={aiRequired}
-                                    onClick={(): void => {
-                                      void analysis.start(item);
-                                    }}
-                                  >
-                                    분석 시작
-                                  </button>
-                                );
-                              return view.jobId ? (
-                                <Link
-                                  className={styles.textButton}
-                                  to={`/jobs?jobId=${encodeURIComponent(view.jobId)}`}
-                                >
-                                  작업 보기
-                                </Link>
-                              ) : null;
-                            })()}
+                                ) : null;
+                              })()}
+                            <button
+                              type="button"
+                              className={styles.textButton}
+                              disabled={trash.busy}
+                              aria-label={`${title} 삭제`}
+                              onClick={(): void => trash.choose(item)}
+                            >
+                              <Icon name="trash-2" size={16} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

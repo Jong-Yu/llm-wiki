@@ -221,6 +221,22 @@ const routes: { [O in Operation]: RouteSpec<O> } = {
   history: ['POST', 'history/query'],
   questionContext: ['POST', 'question-context/prepare'],
   saveDocument: ['PUT', 'documents/content', 'write'],
+  trashDocument: ['POST', 'documents/trash', 'write'],
+  restoreTrashedDocument: ['POST', 'documents/trash/restore', 'write'],
+  documentTrash: ['GET', 'documents/trash'],
+  trashSource: [
+    'POST',
+    ['sources', 'source_id', 'trash'],
+    'source_write',
+    ['source_id'],
+  ],
+  restoreTrashedSource: [
+    'POST',
+    ['sources', 'source_id', 'restore'],
+    'source_write',
+    ['source_id'],
+  ],
+  sourceTrash: ['GET', 'sources-trash'],
   documentVersions: [
     'GET',
     'documents/versions',

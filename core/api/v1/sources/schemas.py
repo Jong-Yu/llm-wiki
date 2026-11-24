@@ -18,6 +18,12 @@ class SourceReadQuery(Model):
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
 
 
+class TrashSource(Model):
+    """등록 원본의 삭제·복원은 목록에서 읽은 등록 기준을 확인한다."""
+    expected_registration_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+
+
 class SourceListQuery(Model):
     limit: int = Field(20, ge=1, le=50, strict=False)
     cursor: str | None = Field(None, min_length=1, max_length=16384)
@@ -44,7 +50,7 @@ class TextVersion(TextRegistration):
 class FileRegistration(Model):
     request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     title: str = Field(min_length=1, max_length=200)
-    file: str = Field(description="One original, at most 20 MiB: MD, TXT, PDF, XLSX, DOCX, PNG, JPEG, GIF, WebP, BMP or TIFF. Filename suffix and file markers must match. Upload does not perform conversion or OCR.", json_schema_extra={"format": "binary"})
+    file: str = Field(description="One original, at most 20 MiB: MD, TXT, PDF, XLSX, DOCX, PPTX, PPT, PNG, JPEG, GIF, WebP, BMP or TIFF. Filename suffix and file markers must match. Upload does not perform conversion or OCR.", json_schema_extra={"format": "binary"})
 
 
 class FileVersion(FileRegistration):

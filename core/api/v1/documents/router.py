@@ -11,9 +11,34 @@ from core.modules.access.policy import AccessScope
 from core.modules.knowledge.catalogue import list_catalogue
 from core.modules.documents.history import list_versions, read_version, save_content, restore_version
 from core.modules.documents.changes import document_fields
-from .schemas import ContentQuery, DocumentContent, DocumentPage, ListQuery, VersionsQuery, SaveContent, RestoreContent
+from .schemas import ContentQuery, DocumentContent, DocumentPage, ListQuery, VersionsQuery, SaveContent, RestoreContent, TrashDocument, TrashQuery
+from core.modules.documents import trash
 
 router = APIRouter(tags=["documents"])
+
+
+@router.get("/documents/trash", response_model=Envelope[dict[str, JsonValue]])
+def document_trash(query: Annotated[TrashQuery, Query()], scope: Annotated[AccessScope, Depends(authorized)]):
+    """현재 권한 범위의 복원 가능한 문서 목록을 읽는다."""
+    return envelope({**trash.list_trash(scope.store), "access": access_value(scope)})
+
+
+@router.post("/documents/trash", response_model=Envelope[dict[str, JsonValue]], openapi_extra=body_schema(TrashDocument))
+async def trash_document(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    """현재 문서를 전체 이력과 함께 보존하고 일반 읽기에서 제거한다."""
+    def operation(scope, body):
+        return trash.move_to_trash(scope.store, body.document, body.expected_revision, actor=access_value(scope),
+            before_commit=lambda: reauthorize(request, tenant, token, "write", body.profile, expected=scope))
+    return await json_operation(request, tenant, token, TrashDocument, "write", operation)
+
+
+@router.post("/documents/trash/restore", response_model=Envelope[dict[str, JsonValue]], openapi_extra=body_schema(TrashDocument))
+async def restore_trashed_document(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    """명시한 휴지통 판본을 원래 경로로 복원한다."""
+    def operation(scope, body):
+        return trash.restore(scope.store, body.document, body.expected_revision,
+            before_commit=lambda: reauthorize(request, tenant, token, "write", body.profile, expected=scope))
+    return await json_operation(request, tenant, token, TrashDocument, "write", operation)
 
 
 @router.get("/documents", response_model=Envelope[DocumentPage])

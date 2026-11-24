@@ -5,6 +5,7 @@
 
 from functools import partial
 from typing import Annotated
+from pydantic import JsonValue
 
 from anyio import fail_after
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -25,7 +26,10 @@ from .ingress import SourceHttpError, invalid, upload_input
 from .schemas import (
     EmptyQuery, FileRegistration, FileVersion, SourceCatalog, SourceListQuery,
     SourcePage, SourceReadQuery, SourceResult, TextRegistration, TextVersion,
+    TrashSource,
 )
+from core.api.operations import json_operation, body_schema, reauthorize
+from core.modules.sources import trash
 from core.api.v1.analysis_jobs.schemas import CreatedJob
 from core.modules.analysis_jobs.store import JobStore
 from core.modules.sources.contracts import SOURCE_MEDIA_TYPES
@@ -34,6 +38,30 @@ from core.modules.sources.contracts import SOURCE_MEDIA_TYPES
 router = APIRouter(tags=["sources"])
 Identifier = Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
 UPLOAD_WAIT_SECONDS = 5
+
+
+@router.get("/sources-trash", response_model=Envelope[dict[str, JsonValue]])
+def source_trash(query: Annotated[SourceReadQuery, Query()], scope: Annotated[AccessScope, Depends(authorized)]):
+    """판본을 보존한 등록 원본 휴지통을 조회한다."""
+    return envelope({**trash.list_trash(SourceStore(scope.store)), "access": access_value(scope)})
+
+
+@router.post("/sources/{source_id}/trash", response_model=Envelope[dict[str, JsonValue]], openapi_extra=body_schema(TrashSource))
+async def trash_source(request: Request, tenant: str, source_id: Identifier, token: Annotated[str, Depends(credential)]):
+    """원본만 휴지통으로 보낸다. 파생 Wiki·과거 작업은 유지한다."""
+    def operation(scope, body):
+        return trash.set_state(SourceStore(scope.store), source_id, body.expected_registration_revision,
+            authorize=lambda: access_value(reauthorize(request, tenant, token, "source_write", body.profile, expected=scope)))
+    return await json_operation(request, tenant, token, TrashSource, "source_write", operation)
+
+
+@router.post("/sources/{source_id}/restore", response_model=Envelope[dict[str, JsonValue]], openapi_extra=body_schema(TrashSource))
+async def restore_source(request: Request, tenant: str, source_id: Identifier, token: Annotated[str, Depends(credential)]):
+    """같은 원본·판본을 유지한 채 휴지통 상태만 해제한다."""
+    def operation(scope, body):
+        return trash.set_state(SourceStore(scope.store), source_id, body.expected_registration_revision, restore=True,
+            authorize=lambda: access_value(reauthorize(request, tenant, token, "source_write", body.profile, expected=scope)))
+    return await json_operation(request, tenant, token, TrashSource, "source_write", operation)
 
 
 def request_body(version=False):

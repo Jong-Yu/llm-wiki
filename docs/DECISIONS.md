@@ -154,5 +154,9 @@
 | D-144 | `platform` | [이전 앱 사본의 실행기 경로를 현재 앱 실행기로 바꾸기](domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22) |
 | D-145 | `ui` | [AI 채팅 답변 본문의 실시간 표시](domains/ui/DECISIONS.md#d-145--ai-채팅-답변-본문의-실시간-표시-2026-11-23) |
 | D-146 | `ui` | [AI 추가 질문의 사용자 답변 대기와 작업 이어가기](domains/ui/DECISIONS.md#d-146--ai-추가-질문의-사용자-답변-대기와-작업-이어가기-2026-11-23) |
+| D-147 | `documents` | [원본과 Wiki의 개별 휴지통·복원](domains/documents/DECISIONS.md#d-147--원본과-wiki의-개별-휴지통복원-2026-11-23) |
+| D-148 | `sources` | [PPTX·PPT 원본 보관과 개인 변환](domains/sources/DECISIONS.md#d-148--pptxppt-원본-보관과-개인-변환-2026-11-23) |
+| D-149 | `sources` | [변환의 전체 상한과 무진행 제한 분리](domains/sources/DECISIONS.md#d-149--변환의-전체-상한과-무진행-제한-분리-2026-11-23) |
 | D-150 | `ui` | [등록 이후 독립 작업 목록과 단일 처리 상세](domains/ui/DECISIONS.md#d-150--등록-이후-독립-작업-목록과-단일-처리-상세-2026-11-23) |
 | D-151 | `platform` | [기기별 문서 처리 식별과 보호된 복원 기록](domains/platform/DECISIONS.md#d-151--기기별-문서-처리-식별과-보호된-복원-기록-2026-11-23) |
+| D-152 | `knowledge` | [일상어 질문 검색 개선 실험을 앱에 넣지 않고 마치기](domains/knowledge/DECISIONS.md#d-152--일상어-질문-검색-개선-실험을-앱에-넣지-않고-마치기-2026-11-24) |

@@ -18,9 +18,12 @@ from .commands import result
 from .contracts import SourceCorruptError, SourceLimitError
 
 
-def get_source_locked(self, source_id):
+def get_source_locked(self, source_id, *, include_deleted=False):
     # 특정 등록의 전체 판본을 검증해 반환한다. 파일명은 사용자 표시 제목으로 만들지 않는다.
     limits.identifier(source_id)
+    from .trash import is_trashed
+    if not include_deleted and is_trashed(self, source_id):
+        raise FileNotFoundError("The source is in the trash")
     path = self._catalog_path(source_id)
     value = validation.catalog(files.read_json(self.store, path), source_id)
     if len(value["versions"]) > limits.MAX_VERSIONS:
@@ -43,7 +46,8 @@ def _catalog_ids_locked(self):
         path = files.checked(self.store, self.sources_dir / name / "catalog.json")
         if path.exists():
             ids.add(name)
-    return sorted(ids)
+    from .trash import is_trashed
+    return [source_id for source_id in sorted(ids) if not is_trashed(self, source_id)]
 
 
 def capture_catalog_locked(self):
@@ -97,6 +101,8 @@ def _update_catalog_entries_locked(self, previous, paths):
     changed = set()
     for path in paths:
         parts = path.split("/")
+        if parts[:2] == ["_trash", "sources"]:
+            return None
         if len(parts) == 3 and parts[0] == "_sources" and parts[2] == "catalog.json":
             source_id = parts[1]
         elif len(parts) == 2 and parts[0] == "_registrations" and parts[1].endswith(".json"):
@@ -297,7 +303,7 @@ def request_receipt(self, *, tenant, user_id, request_id):
             return result(record, replayed=True)
         # 원본과 현재 카탈로그 양쪽이 같은 영구 intent의 결과인 경우에만 읽기 증거로 확정한다.
         try:
-            catalog = self._get_source_locked(record["source_id"])
+            catalog = get_source_locked(self, record["source_id"], include_deleted=True)
             expected = record["manifest"]
             directory = self._version_path(record["source_id"], record["source_version"])
             actual = files.read_json(self.store, directory / "manifest.json")
@@ -320,7 +326,8 @@ def open_original(self, source_id, source_version):
     limits.identifier(source_id)
     limits.identifier(source_version)
     with self._coordination_lock():
-        catalog = self._get_source_locked(source_id)
+        # 이미 고정된 과거 근거의 명시 판본 다운로드는 삭제 후에도 보존한다.
+        catalog = get_source_locked(self, source_id, include_deleted=True)
         expected = next((item for item in catalog["versions"] if item["source_version"] == source_version), None)
         if expected is None:
             raise FileNotFoundError()

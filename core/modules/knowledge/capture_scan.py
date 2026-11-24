@@ -101,6 +101,11 @@ def scan_documents(self):
                 if path.stem not in allowed or self.reviews._path(name) != path:
                     raise ReviewCorruptError("Review filename differs from its document identity")
                 self._unresolved_review_files.remove(row_key)
+                from core.modules.documents.trash import is_trashed
+                if is_trashed(self.store, name):
+                    # 명시 삭제는 우연한 원문 유실과 다르다. 판단은 보존하되 일반 발견에서 제외한다.
+                    self._rows.pop(("review", row_key), None)
+                    continue
                 self._reserve("review", name)
                 self._rows.pop(("review", row_key), None)
                 previous = row

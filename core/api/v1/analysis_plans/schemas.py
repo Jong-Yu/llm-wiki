@@ -28,7 +28,7 @@ class WikiRef(Model):
 
 
 class Location(Model):
-    kind: Literal["whole", "pages", "lines", "cells", "blocks", "paragraphs"]
+    kind: Literal["whole", "pages", "slides", "lines", "cells", "blocks", "paragraphs"]
     start: int | None = Field(None, ge=1, le=1000000)
     end: int | None = Field(None, ge=1, le=1000000)
     sheet: str | None = Field(None, min_length=1, max_length=200)
@@ -37,7 +37,7 @@ class Location(Model):
     @model_validator(mode="after")
     def shape(self):
         """페이지/줄/DOCX 본문 블록은 닫힌 범위, 셀은 시트와 A1 범위다."""
-        if self.kind in {"pages", "lines", "blocks", "paragraphs"}:
+        if self.kind in {"pages", "slides", "lines", "blocks", "paragraphs"}:
             if self.start is None or self.end is None or self.end < self.start or self.sheet is not None or self.cells is not None:
                 raise ValueError("A page, line or block selection needs an ordered numeric range")
         elif self.kind == "cells":
@@ -68,7 +68,7 @@ class ConversionUnit(Model):
 class CreateConversion(Profile):
     request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     source_ref: SourceRef
-    method: Literal["verbatim", "pdf_text", "ocr", "xlsx_values", "docx_text"]
+    method: Literal["verbatim", "pdf_text", "ocr", "xlsx_values", "docx_text", "pptx_text"]
     units: list[ConversionUnit] = Field(min_length=1, max_length=1000)
     complete: bool
     unread_ranges: list[str] = Field(default_factory=list, max_length=100)

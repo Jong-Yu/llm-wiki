@@ -118,7 +118,15 @@ const correspondenceUndo = z.strictObject({
 /** 원본 전체·닫힌 줄/페이지 범위·시트/셀 위치를 서로 섞지 않습니다. */
 const analysisRangeLocationSchema = z
   .strictObject({
-    kind: z.enum(['whole', 'pages', 'lines', 'cells', 'blocks', 'paragraphs']),
+    kind: z.enum([
+      'whole',
+      'pages',
+      'slides',
+      'lines',
+      'cells',
+      'blocks',
+      'paragraphs',
+    ]),
     start: z.number().int().min(1).max(1_000_000).nullable().optional(),
     end: z.number().int().min(1).max(1_000_000).nullable().optional(),
     sheet: z.string().min(1).max(200).nullable().optional(),
@@ -130,7 +138,14 @@ const analysisRangeLocationSchema = z
   })
   .refine(
     (value: {
-      kind: 'whole' | 'pages' | 'lines' | 'cells' | 'blocks' | 'paragraphs';
+      kind:
+        | 'whole'
+        | 'pages'
+        | 'slides'
+        | 'lines'
+        | 'cells'
+        | 'blocks'
+        | 'paragraphs';
       start?: number | null;
       end?: number | null;
       sheet?: string | null;
@@ -138,6 +153,7 @@ const analysisRangeLocationSchema = z
     }): boolean => {
       if (
         value.kind === 'pages' ||
+        value.kind === 'slides' ||
         value.kind === 'lines' ||
         value.kind === 'blocks' ||
         value.kind === 'paragraphs'
@@ -196,7 +212,14 @@ export const createConversionInputSchema = z
   .strictObject({
     request_id: id,
     source_ref: analysisSourceRef,
-    method: z.enum(['verbatim', 'pdf_text', 'ocr', 'xlsx_values', 'docx_text']),
+    method: z.enum([
+      'verbatim',
+      'pdf_text',
+      'ocr',
+      'xlsx_values',
+      'docx_text',
+      'pptx_text',
+    ]),
     units: z.array(conversionUnit).min(1).max(1000),
     complete: z.boolean(),
     unread_ranges: z.array(z.string().max(1000)).max(100).optional(),
@@ -506,6 +529,48 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
     expectedScope,
     operation: z.literal('documentVersions'),
     input: pageInput,
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('trashDocument'),
+    input: z.strictObject({ document, expected_revision: revision }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('restoreTrashedDocument'),
+    input: z.strictObject({ document, expected_revision: revision }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('trashSource'),
+    input: z.strictObject({
+      source_id: id,
+      expected_registration_revision: revision,
+    }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('restoreTrashedSource'),
+    input: z.strictObject({
+      source_id: id,
+      expected_registration_revision: revision,
+    }),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('documentTrash'),
+    input: z.strictObject({}),
+  }),
+  z.strictObject({
+    connectionId,
+    expectedScope: workspaceScopeSchema,
+    operation: z.literal('sourceTrash'),
+    input: z.strictObject({}),
   }),
   z.strictObject({
     connectionId,

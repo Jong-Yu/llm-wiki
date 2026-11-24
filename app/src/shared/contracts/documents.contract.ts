@@ -70,6 +70,8 @@ export const sourceFormatSchema = z.enum([
   'pdf',
   'xlsx',
   'docx',
+  'pptx',
+  'ppt',
   'png',
   'jpg',
   'jpeg',

@@ -109,11 +109,14 @@ class PlanStore:
             _, original, stream = self._original_locked(value["source_ref"])
             stream.close()
             expected = {"pdf": {"pdf_text", "ocr"}, "xlsx": {"xlsx_values", "ocr"}, "md": {"verbatim"}, "txt": {"verbatim"},
-                "docx": {"docx_text"}, **{format: {"ocr"} for format in IMAGE_FORMATS}}
+                "docx": {"docx_text"}, "pptx": {"pptx_text"}, "ppt": {"pptx_text"},
+                **{format: {"ocr"} for format in IMAGE_FORMATS}}
             if value["method"] not in expected[original["format"]]:
                 raise ValueError("The conversion method does not match the original format")
             locations = {"pdf": {"pages", "whole"}, "xlsx": {"cells", "whole"}, "md": {"lines", "whole"}, "txt": {"lines", "whole"},
-                "docx": {"blocks", "paragraphs", "table_cells", "whole"}, **{format: {"pages", "whole"} for format in IMAGE_FORMATS}}
+                "docx": {"blocks", "paragraphs", "table_cells", "whole"},
+                "pptx": {"slides", "whole"}, "ppt": {"slides", "whole"},
+                **{format: {"pages", "whole"} for format in IMAGE_FORMATS}}
             if any(unit["location"]["kind"] not in locations[original["format"]] for unit in units):
                 raise ValueError("The reported location does not match the original format")
             manifest = {"source_ref": value["source_ref"], "method": value["method"], "origin": "client_reported",
@@ -184,13 +187,13 @@ class PlanStore:
                 if location["end"] > len(lines):
                     raise ValueError("The selected lines exceed the actual text")
                 selected.append("".join(lines[location["start"] - 1:location["end"]]))
-            elif location["kind"] == "pages":
+            elif location["kind"] in {"pages", "slides"}:
                 # 페이지별 보고가 있으면 2~4페이지처럼 연속 범위도 실제 보고 단위로만 조합한다.
                 pages = {unit["location"]["start"]: unit["content"] for unit in units
-                    if unit["location"]["kind"] == "pages" and unit["location"]["start"] == unit["location"]["end"]
+                    if unit["location"]["kind"] == location["kind"] and unit["location"]["start"] == unit["location"]["end"]
                     and location["start"] <= unit["location"]["start"] <= location["end"]}
                 if len(pages) != location["end"] - location["start"] + 1:
-                    raise ValueError("Every selected page must have its own reported text")
+                    raise ValueError("Every selected page or slide must have its own reported text")
                 selected.extend(pages[number] for number in sorted(pages))
             else:
                 raise ValueError("Select exact reported conversion locations")

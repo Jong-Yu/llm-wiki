@@ -25,7 +25,8 @@ def _new_report(format, method):
 class Conversion:
     def __init__(self, format, checkpoint=None):
         self.result = _new_report(format, {"pdf": "pdf_text", "xlsx": "xlsx_values",
-            "docx": "docx_text", "txt": "verbatim", "md": "verbatim"}.get(format, "ocr"))
+            "docx": "docx_text", "pptx": "pptx_text", "ppt": "pptx_text",
+            "txt": "verbatim", "md": "verbatim"}.get(format, "ocr"))
         self.checkpoint = checkpoint or (lambda result: None)
         self.total_bytes = 0
         self.checkpoint(self.result)

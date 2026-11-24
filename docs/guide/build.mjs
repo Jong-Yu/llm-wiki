@@ -36,7 +36,7 @@ for (const file of ['assets/images-start.json', 'assets/images-knowledge.json'])
     screens[`assets/${image.file}`] = {
       width: image.width,
       height: image.height,
-      label: image.mockAiResponse ? '실제 앱 화면 · 모의 AI 답변' : '실제 앱 화면 · 연습용 자료',
+      label: image.mockAiResponse ? '2026.11.07 화면 예시 · 모의 AI 답변' : '2026.11.07 화면 예시 · 연습용 자료',
       description: descriptions[image.file] ?? image.description,
       hotspots: image.highlights.map((point) => ({
         label: aliases[point.label] ?? point.label,
@@ -70,8 +70,9 @@ markdown.renderer.rules.heading_open = (tokens, index, options, environment, ren
 markdown.renderer.rules.link_open = (tokens, index, options, environment, renderer) => {
   const link = tokens[index];
   const href = link.attrGet('href');
-  if (href === 'USER_GUIDE.md' || href === 'INTRODUCTION.md') {
-    link.attrSet('href', href === 'USER_GUIDE.md' ? '#llm-wiki-사용자-가이드' : '#llm-wiki-이해하기');
+  const documentLink = href?.match(/^(USER_GUIDE|INTRODUCTION)\.md(#.*)?$/);
+  if (documentLink) {
+    link.attrSet('href', documentLink[2] ?? (documentLink[1] === 'USER_GUIDE' ? '#llm-wiki-사용자-가이드' : '#llm-wiki-이해하기'));
     return renderer.renderToken(tokens, index, options);
   }
   if (href && /^https:\/\//i.test(href)) {

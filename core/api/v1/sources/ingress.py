@@ -160,7 +160,7 @@ async def upload_input(request, *, version):
             raise invalid("The upload filename must be a display basename without a path.")
         suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if suffix not in SOURCE_MEDIA_TYPES:
-            raise SourceHttpError(415, "unsupported_source", "Use .md, .txt, .pdf, .xlsx, .docx, .png, .jpg, .jpeg, .gif, .webp, .bmp, .tif or .tiff originals.")
+            raise SourceHttpError(415, "unsupported_source", "Use .md, .txt, .pdf, .xlsx, .docx, .pptx, .ppt, .png, .jpg, .jpeg, .gif, .webp, .bmp, .tif or .tiff originals.")
         yield validated.model_dump(exclude={"content", "format"}), upload.file, {
             "kind": "file", "format": suffix, "filename": filename}
     except MultiPartException:

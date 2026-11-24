@@ -8,7 +8,7 @@ import signal
 import tempfile
 
 from core.client.analysis import read_token
-from core.client.source_conversion import convert_source
+from core.client.source_conversion import convert_source, MAX_CONVERSION_SECONDS, MAX_IDLE_SECONDS
 from core.client.source_conversion_formats import diagnostics
 from core.client.transport import AnalysisClientError
 
@@ -30,7 +30,10 @@ def main():
     parser.add_argument("--submit", action="store_true", help="Store the conversion report separately from the original.")
     parser.add_argument("--ocr", choices=["auto", "never", "always"], default="auto")
     parser.add_argument("--ocr-language", default="eng")
-    parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--timeout", type=float, default=MAX_CONVERSION_SECONDS,
+                        help="Total conversion limit in seconds (maximum 1800).")
+    parser.add_argument("--idle-timeout", type=float, default=MAX_IDLE_SECONDS,
+                        help="Limit without a changed checkpoint in seconds (maximum 120).")
     args = parser.parse_args()
     if args.diagnose:
         emit({"schema_version": 1, "type": "result", "ok": True, "diagnostics": diagnostics(args.ocr_language)})
@@ -50,7 +53,8 @@ def main():
             result = asyncio.run(convert_source(base_url=args.server, tenant=args.tenant, token=read_token(args.token_file),
                 source_ref={key: getattr(args, key) for key in ("source_id", "source_version", "source_sha256", "registration_revision")},
                 work_dir=args.work_dir, profile=args.profile, request_id=args.request_id, cancel_file=cancel_file,
-                submit=args.submit, ocr=args.ocr, ocr_language=args.ocr_language, timeout=args.timeout, on_event=emit))
+                submit=args.submit, ocr=args.ocr, ocr_language=args.ocr_language, timeout=args.timeout,
+                idle_timeout=args.idle_timeout, on_event=emit))
             # 시작 전 오류에는 변환 방법이 없다. 로컬 진단은 보존하고 UI에는 null로 보낸다.
             converted = result.get("conversion")
             emit({**result, "type": "result", "conversion": converted if converted and converted.get("method") else None})

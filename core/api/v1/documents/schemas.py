@@ -25,6 +25,11 @@ class ContentQuery(Model):
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
 
 
+class TrashQuery(Model):
+    """휴지통 조회의 허용 관점만 선택한다."""
+    profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+
+
 class VersionsQuery(ListQuery):
     """기존 목록의 페이지/관점 규칙을 문서 버전 조회에도 재사용한다."""
     document: str = Field(min_length=1, max_length=4096)
@@ -47,6 +52,13 @@ class RestoreContent(Model):
     expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     reason: str | None = Field(None, max_length=2000)
+
+
+class TrashDocument(Model):
+    """삭제·휴지통 복원은 읽은 전체 본문의 동일 기준을 요구한다."""
+    document: str = Field(min_length=1, max_length=4096)
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
 
 
 class DocumentContent(Model):

@@ -40,7 +40,7 @@ function pickFile(): Promise<File | null> {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept =
-        '.md,.txt,.pdf,.xlsx,.docx,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff';
+        '.md,.txt,.pdf,.xlsx,.docx,.pptx,.ppt,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff';
       input.setAttribute('aria-label', '업로드할 원본 파일');
       input.hidden = true;
       let settled = false;

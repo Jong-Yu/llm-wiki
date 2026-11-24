@@ -24,10 +24,12 @@ from core.runtime.client_platform import is_windows
 from core.runtime.client_process import WindowsJob, process_arguments, spawn_options, stop_windows
 from .analysis import _private_directory, server_url
 from .transport import AnalysisClientError, api_call
-from .source_conversion_worker import atomic_json
+from .source_conversion_worker import atomic_json, transient_checkpoint_error
 from .source_conversion_report import empty_conversion, interrupt_conversion
 
 MAX_ORIGINAL = 20 * 1024 * 1024
+MAX_CONVERSION_SECONDS = 30 * 60
+MAX_IDLE_SECONDS = 120
 SOURCE_KEYS = ("source_id", "source_version", "source_sha256", "registration_revision")
 WORKER_FAILURE_CODES = frozenset({"conversion_checkpoint_locked", "conversion_checkpoint_write_failed",
     "conversion_memory_failed", "conversion_worker_io_failed", "conversion_worker_exception"})
@@ -116,19 +118,41 @@ async def stop_worker(process):
     if is_windows():
         await stop_windows(process)
         return
-    if process.returncode is not None:
-        return
+    # worker가 먼저 끝나도 OCR/Office 자식이 같은 전용 세션에 남을 수 있다.
+    # 직접 만든 group만 정리하며 사용자의 다른 프로그램에는 신호를 보내지 않는다.
     with suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
     await process.wait()
 
 
-async def run_worker(original, format, result_path, *, ocr, language, timeout, cancel_file, emit):
+async def read_checkpoint(path, *, final=False):
+    """진행 조회의 짧은 Windows 공유 충돌은 실행 실패로 바꾸지 않는다."""
+    for attempt in range(8 if final else 1):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            if not transient_checkpoint_error(error):
+                raise AnalysisClientError("conversion_checkpoint_read_failed") from None
+            if not final:
+                return None
+            if attempt < 7:
+                await asyncio.sleep(min(.01 * 2 ** attempt, .2))
+        except (ValueError, UnicodeError):
+            raise AnalysisClientError("conversion_checkpoint_read_failed") from None
+    raise AnalysisClientError("conversion_checkpoint_read_failed")
+
+
+async def run_worker(original, format, result_path, *, ocr, language, timeout, cancel_file, emit,
+                     idle_timeout=MAX_IDLE_SECONDS):
     scratch = Path(tempfile.mkdtemp(prefix="scratch-", dir=result_path.parent))
     failure_path = scratch / "worker-failure.json"
     environment = {**os.environ, "TMPDIR": str(scratch), "TEMP": str(scratch), "TMP": str(scratch)}
     process, job = None, None
     reason, previous, deadline = None, None, time.monotonic() + timeout
+    idle_deadline = time.monotonic() + idle_timeout
+    latest = None
     failure = None
     try:
         job = WindowsJob() if is_windows() else None
@@ -155,28 +179,50 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
                 reason = "conversion_cancelled" if cancelled(cancel_file) else "conversion_timeout"
                 await stop_worker(process)
                 break
-            if result_path.exists():
-                snapshot = json.loads(result_path.read_text(encoding="utf-8"))
+            snapshot = await read_checkpoint(result_path)
+            if snapshot is not None:
+                # 단위·미독·OCR 처리 기록 등 실제 보고 변경만 무진행 제한을 연장한다.
+                # 같은 보고의 반복 기록은 전체·무진행 상한 어느 쪽도 우회하지 않는다.
+                if snapshot != latest:
+                    idle_deadline = time.monotonic() + idle_timeout
+                    latest = snapshot
                 progress = (len(snapshot["units"]), len(snapshot["unread_ranges"]))
                 if progress != previous:
                     previous = progress
                     emit("convert", completed=progress[0], total=snapshot.get("total_units"), unread=progress[1])
+            if time.monotonic() >= idle_deadline:
+                reason = "conversion_idle_timeout"
+                await stop_worker(process)
+                break
             await asyncio.sleep(0.1)
         await process.wait()
         if process.returncode != 0 and reason is None:
             failure = worker_exit_failure(failure_path, process.returncode)
+    except AnalysisClientError as error:
+        reason = error.code
+        if process is not None:
+            await stop_worker(process)
     except asyncio.CancelledError:
         if process is not None:
             await stop_worker(process)
         raise
     finally:
-        if process is not None and process.returncode is None:
+        if process is not None:
             await stop_worker(process)
         if job is not None:
             job.close()
         shutil.rmtree(scratch)
+    checkpoint_unread = False
+    try:
+        value = await read_checkpoint(result_path, final=True)
+    except AnalysisClientError as error:
+        # 마지막 파일 조회가 실패해도 이전에 확인한 전체 checkpoint를 잃지 않는다.
+        # 읽지 못한 파일에는 더 새 단위가 있을 수 있으므로 이 사본으로 덮지 않는다.
+        checkpoint_unread = True
+        reason = reason or error.code
+        value = latest
     code = reason or (failure or {}).get("code", "worker_failed")
-    value = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else empty_conversion(format, code)
+    value = value if value is not None else latest if latest is not None else empty_conversion(format, code)
     if reason or process.returncode != 0 or value.get("state") == "running":
         interrupt_conversion(value, code)
         failure = failure or {"code": code, "exit_code": process.returncode}
@@ -185,7 +231,8 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
         warning = "worker: " + ";".join(f"{key}={item}" for key, item in failure.items())
         if len(value["warnings"]) < 100:
             value["warnings"].append(warning)
-    atomic_json(result_path, value)
+    if not checkpoint_unread:
+        atomic_json(result_path, value)
     return value
 
 
@@ -247,14 +294,15 @@ async def submit_report(http, base, query, body, user_id, emit):
 
 
 async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profile=None, request_id=None,
-                         cancel_file=None, submit=False, ocr="auto", ocr_language="eng", timeout=120,
-                         on_event=None, http=None):
+                         cancel_file=None, submit=False, ocr="auto", ocr_language="eng", timeout=MAX_CONVERSION_SECONDS,
+                         idle_timeout=MAX_IDLE_SECONDS, on_event=None, http=None):
     """원본 기준을 고정하고 다운로드→격리 변환→선택한 보고 저장을 실행한다."""
     base_url = server_url(base_url)
     check_ref(source_ref)
     if (not isinstance(tenant, str) or re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", tenant) is None
             or (profile is not None and re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", profile) is None)
-            or ocr not in {"auto", "never", "always"} or not 0 < timeout <= 120
+            or ocr not in {"auto", "never", "always"} or not 0 < timeout <= MAX_CONVERSION_SECONDS
+            or not 0 < idle_timeout <= MAX_IDLE_SECONDS
             or re.fullmatch(r"[A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)*", ocr_language) is None):
         raise AnalysisClientError("invalid_conversion_options")
     request_id = request_id or uuid4().hex
@@ -291,7 +339,7 @@ async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profi
                               directory, original, cancel_file, emit)
         local["original_file"] = str(path)
         conversion = await run_worker(path, original["format"], result_path, ocr=ocr, language=ocr_language,
-                                     timeout=timeout, cancel_file=cancel_file, emit=emit)
+                                     timeout=timeout, idle_timeout=idle_timeout, cancel_file=cancel_file, emit=emit)
         local["conversion"] = conversion
         if conversion.get("worker_failure"):
             # 첫 checkpoint 이전 실패는 UI가 method 없는 보고를 null로 투영하므로 코드도 별도로 보낸다.

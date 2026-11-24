@@ -48,7 +48,14 @@ export const conversionUnitSchema = z.object({
 export const conversionReportSchema = z
   .object({
     method: z
-      .enum(['verbatim', 'pdf_text', 'ocr', 'xlsx_values', 'docx_text'])
+      .enum([
+        'verbatim',
+        'pdf_text',
+        'ocr',
+        'xlsx_values',
+        'docx_text',
+        'pptx_text',
+      ])
       .nullable(),
     units: z.array(conversionUnitSchema).max(1000),
     complete: z.boolean(),
