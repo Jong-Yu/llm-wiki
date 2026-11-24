@@ -171,7 +171,7 @@ npm run package               # 현재 OS: macOS DMG/ZIP, Windows NSIS, Linux ta
 
 설치 프로그램 없이 ZIP 전체를 새 폴더에 풀어 실행할 수 있습니다. 기존 설치 파일·공개 업데이트 경로는 유지합니다.
 
-Windows 포터블 0.3.1은 0.3.0의 문서 처리 작업 화면을 유지하고 대표 아이콘을 통일한 패치입니다. 배경은 투명하고 주황색 두 점은 고정하며 나머지 색은 테마에 따라 바뀝니다. [0.3.1 배포 페이지](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.3.1-portable)에서 ZIP과 SHA-256을 제공합니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. Python/OCR·한영 언어 데이터가 포함되며 Codex/Claude CLI 설치·로그인은 별도입니다. 기존 설정·사용자 자료는 유지하며 설치형 자동 업데이트 대상은 `app-0.1.2`입니다. 실제 Windows 테마 전환·고정 작업 표시줄 표시는 별도 확인이 필요합니다.
+현재 Windows 포터블은 [0.3.1 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.3.1-portable)입니다. 0.3.0의 문서 처리 작업·실시간 AI 답변·추가 질문 기능을 유지하고 대표 아이콘을 통일한 패치입니다. 배경은 투명하고 주황 두 점은 고정하며 나머지 색은 테마에 따라 바뀝니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. Python/OCR·한영 언어 데이터가 포함되며 Codex/Claude CLI 설치·로그인은 별도입니다. 기존 설정·사용자 자료는 유지합니다. 패키지·공개 다운로드 SHA256 검증을 통과했으며 실제 Windows 테마 전환·고정 작업 표시줄 표시는 별도 확인이 필요합니다. 설치형 자동 업데이트 대상은 `app-0.1.2`를 유지합니다.
 
 기존0.1.0 포터블은 [GitHub 포터블 Release](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.0-portable)에서 ZIP·SHA256을 내려받습니다. 기존 설치판 Release는 게시 후 파일 추가가 잠겨 있어 별도 포터블 배포를 만들었으며, 현재 설치판의 최신 업데이트 대상은 [0.1.2](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.2)입니다. 해당 0.1.0 Mac 포터블의 개인 실행기 ZIP은 당시 공개 파일을 재사용하며 내부 파일 내용이 포터블 빌드와 같음을 확인했습니다. GitHub 게시는 OS의 실행 파일 서명·공증을 대신하지 않습니다.
 
