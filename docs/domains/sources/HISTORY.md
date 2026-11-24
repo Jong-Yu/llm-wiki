@@ -1,5 +1,12 @@
 # 원본 저장 작업 기록
 
+## 2026-11-24 — Windows checkpoint 읽기의 errno 재시도 누락 수정
+
+- 관측: 사용자가 두 번의 OCR 변환에서 `conversion_checkpoint_read_failed`와 부분 결과를 보고했다. Windows 파일 열기는 공유 충돌에도 `winerror` 없이 `errno=EACCES`를 반환할 수 있지만 기존 코드는 WinError 5/32/33만 재시도했다. 수정 전 동일한 예외를 한 번 주입해 최종 읽기가 즉시 실패하는 것을 재현했다. [CPython의 파일 열기 구현](https://github.com/python/cpython/blob/v3.12.8/Modules/_io/fileio.c#L361-L374)과 [Microsoft의 EACCES 설명](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/open-wopen?view=msvc-170#return-value)을 대조했으며, 사용자 로그에는 OS 숫자가 없어 해당 기기의 원인을 확정하지는 않았다.
+- 변경: Windows 읽기에만 errno-only EACCES를 기존 재시도 대상으로 포함했다. 쓰기 교체의 분류·전체30분/무진행120초·최종8회 제한은 유지한다. 영구 오류와 깨진 JSON/UTF-8은 거부하며 최신 파일을 읽지 못하면 이전 단위만 부분 결과로 보존하고 파일을 덮지 않는다. 실패의 안전한 errno/winerror를 남기고, 앞선 작업자 실패·취소/시간 제한과 마지막 읽기 오류는 `checkpoint_errno`/`checkpoint_winerror`로 구분한다. 경고100개에서도 마지막 문구를 보존한 채 합산1000자 안에서 실패 요약을 붙여 보고에 전달한다.
+- 검증: 기존 변환·보고·PPT40개 통과. 최종 감독15개 중14개 통과·Windows native 공유 잠금1개 skip. 실제 자식 프로세스에 CRT형 읽기 실패1/3회를 주입한 후 완료, 지속 잠금의 취소/전체·무진행 제한, 원본·기존 단위·최신 파일 보존, 재시도8회 상한, 비Windows 권한 거부·다른 IO·JSON/UTF-8 오류, 민감 문자열 비노출, 경고100개에서 제출 본문까지 진단 보존을 확인했다. 작성 중 진단 필드명 변경에 따른3건의 기대값 오류는 조정 후 감독 묶음을 다시 통과했다. 독립 검토에서 찾은 작업자 종료와 최종 읽기 복합실패의 분류 손실도 보완하고 종료17·기존 분류·읽기 숫자·파일 보존 회귀를 추가했다. `git diff --check` 통과.
+- 미실행: Windows 실제 공유 잠금 검사는 이 Mac에서 실행하지 못했다. 사용자 PDF 전체 재변환·배포본 반영도 미실행이며 원본·기존 변환 보고·위키·이력은 변경하지 않았다. OCR 저신뢰/방향/배치 경고는 별도 문자 품질 문제로 유지한다.
+
 ## 2026-11-24 — PPT·변환 감독·원본 휴지통 0.4.0 반영
 
 - D-148의 PPTX/PPT 보관·개인 변환, D-149의 전체30분/무진행120초 감독과 D-147의 원본 휴지통을 [0.4.0 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.4.0-portable) 및 운영 서버에 반영했습니다. PPT11·감독8·휴지통16검사와 앱 PPT 입력/계약/브라우저3그룹을 통과했습니다. 새 커밋의 개인 실행기 소스333개·전체2969파일과 공개 ZIP 무결성을 확인했습니다.

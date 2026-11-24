@@ -6,6 +6,7 @@
 
 import asyncio
 from contextlib import suppress
+import errno
 from hashlib import sha256
 import json
 import os
@@ -125,6 +126,25 @@ async def stop_worker(process):
     await process.wait()
 
 
+def transient_checkpoint_read_error(error):
+    # Windows의 built-in open은 CRT를 거쳐 공유 충돌에도 winerror 없이 EACCES를 낸다.
+    # os.replace의 Win32 오류 분류나 다른 플랫폼의 권한 거부에는 적용하지 않는다.
+    return transient_checkpoint_error(error) or (is_windows()
+        and getattr(error, "winerror", None) is None and error.errno == errno.EACCES)
+
+
+class CheckpointReadError(AnalysisClientError):
+    """원시 오류·경로 대신 읽기 실패의 코드와 안전한 OS 숫자만 보존한다."""
+
+    def __init__(self, error):
+        super().__init__("conversion_checkpoint_read_failed")
+        self.failure = {"code": self.code}
+        for key in ("errno", "winerror"):
+            number = getattr(error, key, None)
+            if type(number) is int and -(2 ** 31) <= number < 2 ** 32:
+                self.failure[key] = number
+
+
 async def read_checkpoint(path, *, final=False):
     """진행 조회의 짧은 Windows 공유 충돌은 실행 실패로 바꾸지 않는다."""
     for attempt in range(8 if final else 1):
@@ -133,15 +153,14 @@ async def read_checkpoint(path, *, final=False):
         except FileNotFoundError:
             return None
         except OSError as error:
-            if not transient_checkpoint_error(error):
-                raise AnalysisClientError("conversion_checkpoint_read_failed") from None
+            if not transient_checkpoint_read_error(error) or (final and attempt == 7):
+                raise CheckpointReadError(error) from None
             if not final:
                 return None
             if attempt < 7:
                 await asyncio.sleep(min(.01 * 2 ** attempt, .2))
-        except (ValueError, UnicodeError):
-            raise AnalysisClientError("conversion_checkpoint_read_failed") from None
-    raise AnalysisClientError("conversion_checkpoint_read_failed")
+        except (ValueError, UnicodeError) as error:
+            raise CheckpointReadError(error) from None
 
 
 async def run_worker(original, format, result_path, *, ocr, language, timeout, cancel_file, emit,
@@ -200,6 +219,8 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
             failure = worker_exit_failure(failure_path, process.returncode)
     except AnalysisClientError as error:
         reason = error.code
+        if isinstance(error, CheckpointReadError):
+            failure = error.failure
         if process is not None:
             await stop_worker(process)
     except asyncio.CancelledError:
@@ -219,18 +240,29 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
         # 마지막 파일 조회가 실패해도 이전에 확인한 전체 checkpoint를 잃지 않는다.
         # 읽지 못한 파일에는 더 새 단위가 있을 수 있으므로 이 사본으로 덮지 않는다.
         checkpoint_unread = True
-        reason = reason or error.code
+        if reason is None:
+            reason = error.code
+        if isinstance(error, CheckpointReadError):
+            if failure is None and reason == error.code:
+                failure = error.failure
+            else:
+                # 작업자 실패·취소·시간 제한과 마지막 읽기 오류를 구분한다.
+                failure = {**(failure or {"code": reason}),
+                    **{"checkpoint_" + key: number for key, number in error.failure.items() if key != "code"}}
         value = latest
     code = reason or (failure or {}).get("code", "worker_failed")
     value = value if value is not None else latest if latest is not None else empty_conversion(format, code)
     if reason or process.returncode != 0 or value.get("state") == "running":
         interrupt_conversion(value, code)
-        failure = failure or {"code": code, "exit_code": process.returncode}
+        failure = {**(failure or {"code": code}), "exit_code": process.returncode}
         value["worker_failure"] = failure
         # 기존 불변 보고에도 원인 분류와 종료 숫자가 남아 앱 재시작 뒤 조회할 수 있다.
         warning = "worker: " + ";".join(f"{key}={item}" for key, item in failure.items())
         if len(value["warnings"]) < 100:
             value["warnings"].append(warning)
+        elif len(value["warnings"][-1]) + len(warning) + 3 <= 1000:
+            # 긴 OCR의 경고 상한에서도 기존 마지막 안내를 유지하고 실패 원인을 전달한다.
+            value["warnings"][-1] += " | " + warning
     if not checkpoint_unread:
         atomic_json(result_path, value)
     return value
