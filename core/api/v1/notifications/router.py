@@ -8,7 +8,7 @@ from core.api.schemas import Envelope
 from core.api.v1.analysis_plans.router import guard
 from core.api.v1.analysis_plans.schemas import Profile
 from core.modules.notifications.store import NotificationStore
-from .schemas import Listing, CreateWorkflow, ReadFlags, PageDecisions, Approve, Claim, Execution, ReportedEvent
+from .schemas import Listing, DetailQuery, ContentQuery, CreateWorkflow, ReadFlags, PageDecisions, PageCorrection, Approve, Claim, Execution, ReportedEvent
 
 router = APIRouter(tags=['notifications'])
 Identifier = Annotated[str, Path(pattern=r'^[a-f0-9]{32}$')]
@@ -25,8 +25,13 @@ def listing(request: Request, query: Annotated[Listing, Query()], scope=Depends(
 
 
 @router.get('/notification-workflows/{workflow_id}', response_model=Response)
-def detail(workflow_id: Identifier, request: Request, query: Annotated[Profile, Query()], scope=Depends(authorized)):
-    return envelope({**service(scope, request).detail(workflow_id), 'access': access_value(scope)})
+def detail(workflow_id: Identifier, request: Request, query: Annotated[DetailQuery, Query()], scope=Depends(authorized)):
+    return envelope({**service(scope, request).detail(workflow_id, include_content=query.include_content), 'access': access_value(scope)})
+
+
+@router.get('/notification-workflows/{workflow_id}/content', response_model=Response)
+def content(workflow_id: Identifier, request: Request, query: Annotated[ContentQuery, Query()], scope=Depends(authorized)):
+    return envelope({**service(scope, request).content(workflow_id, query), 'access': access_value(scope)})
 
 
 @router.post('/notification-workflows', response_model=Response, openapi_extra=body_schema(CreateWorkflow))
@@ -57,6 +62,12 @@ async def pages(workflow_id: Identifier, request: Request, tenant: str, token: A
 async def approve(workflow_id: Identifier, request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     return await json_operation(request, tenant, token, Approve, 'source_write',
         lambda scope, value: service(scope, request).mutate(workflow_id, 'approve', value, guard(scope, request, token)))
+
+
+@router.post('/notification-workflows/{workflow_id}/corrections', response_model=Response, openapi_extra=body_schema(PageCorrection))
+async def corrections(workflow_id: Identifier, request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    return await json_operation(request, tenant, token, PageCorrection, 'source_write',
+        lambda scope, value: service(scope, request).mutate(workflow_id, 'corrections', value, guard(scope, request, token)))
 
 
 @router.post('/notification-workflows/{workflow_id}/claim', response_model=Response, openapi_extra=body_schema(Claim))

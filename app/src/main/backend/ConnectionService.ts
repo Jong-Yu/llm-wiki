@@ -8,7 +8,6 @@ import type {
 } from './ProtectedConnectionStore';
 import type { BrowserWindow } from 'electron';
 import { writeFile } from 'node:fs/promises';
-import { parseDocumentKnowledgeResponse } from '@contracts/knowledge.contract';
 import type {
   DocumentKnowledgeRequest,
   DocumentKnowledgeResult,
@@ -27,22 +26,21 @@ import type {
 import { SourceRegistrationService } from './SourceRegistrationService';
 import type { RegistrationSession } from './SourceRegistrationService';
 import type { ApiFailure } from './readApi';
-import {
-  parseDocumentContentResponse,
-  parseDocumentListResponse,
-  parseSourceCatalog,
-} from '@contracts/documents.contract';
 import type {
   DocumentContentRequest,
   DocumentContentResult,
-  DocumentListPage,
   DocumentListRequest,
   DocumentListResult,
   SourcePreviewRequest,
   SourcePreviewResult,
 } from '@contracts/documents.contract';
-import { apiFailure, readApiJson, readApiSourceBytes } from './readApi';
-import { isTextSource, sourceText } from './sourceOriginal';
+import { apiFailure, readApiJson } from './readApi';
+import { DocumentReadService } from './DocumentReadService';
+import type {
+  DocumentReadContext,
+  SourceOriginalResult,
+} from './DocumentReadService';
+export type { SourceOriginalResult } from './DocumentReadService';
 import {
   sameAccessRevision,
   parseAccessContext,
@@ -63,16 +61,6 @@ import type {
 
 type Connected = Extract<ConnectionSnapshot, { status: 'connected' }>;
 type PendingRequest = { controller: AbortController; generation: number };
-// 바이트와 변환되지 않은 텍스트는 main 내부에서만 보관하고 공개 미리보기와 분리합니다.
-type SourceOriginal = SourcePreviewRequest & {
-  bytes: Uint8Array;
-  text: string | null;
-  access: DocumentListPage['access'];
-  traceId: string;
-};
-export type SourceOriginalResult =
-  | { ok: true; data: SourceOriginal }
-  | ApiFailure;
 /** 토큰을 포함하므로 main 안에서만 사용합니다. renderer 응답에는 넣지 않습니다. */
 export type AnalysisContext = {
   active: Connected;
@@ -80,7 +68,6 @@ export type AnalysisContext = {
   generation: number;
   selection: { tenant: string; profile: string };
 };
-const MAX_CONTENT_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 /** 새 요청에 대체된 이전 작업의 결과를 상태에 반영하지 않도록 알립니다. */
 const superseded = (): ReturnType<typeof apiFailure> =>
@@ -143,10 +130,6 @@ export class ConnectionService {
   #token: string | null = null;
   #generation = 0;
   #pending: AbortController | null = null;
-  #listPending: AbortController | null = null;
-  #listGeneration = 0;
-  #contentRequests = new Set<AbortController>();
-  #contentGeneration = 0;
   #scopeListeners = new Set<() => void>();
 
   readonly preferences: AccountPreferencesStore | undefined;
@@ -539,6 +522,17 @@ export class ConnectionService {
   #invalidateAnalysis(): void {
     for (const listener of this.#scopeListeners) listener();
   }
+  #documents = new DocumentReadService({
+    context: (connectionId: string): DocumentReadContext | ApiFailure =>
+      this.#documentContext(connectionId),
+    isCurrent: (context: DocumentReadContext): boolean =>
+      this.#isDocumentCurrent(context),
+    disconnect: (): void => {
+      this.disconnect();
+    },
+    clearSelection: (): void => this.#clearSelection(),
+    contentFailure: (failure: ApiFailure): void => this.#sourceFailure(failure),
+  });
   #sources = new SourceRegistrationService(
     (): RegistrationSession | null => this.#sourceSession(),
     (failure: ApiFailure): void => this.#sourceFailure(failure),
@@ -577,8 +571,7 @@ export class ConnectionService {
     this.#invalidateAnalysis();
     this.#generation += 1;
     this.#sources.cancel();
-    this.#cancelList();
-    this.#cancelContent();
+    this.#documents.cancel();
     this.#pending?.abort();
     this.#pending = null;
     this.#active = null;
@@ -593,8 +586,7 @@ export class ConnectionService {
   #begin(): PendingRequest {
     this.#invalidateAnalysis();
     this.#sources.cancel();
-    this.#cancelList();
-    this.#cancelContent();
+    this.#documents.cancel();
     this.#pending?.abort();
     const controller = new AbortController();
     this.#pending = controller;
@@ -920,36 +912,11 @@ export class ConnectionService {
     return this.getState();
   }
 
-  /** 연결이나 선택이 바뀔 때 이전 목록이 새 범위에 도착하지 않도록 취소합니다. */
-  #cancelList(): void {
-    this.#listPending?.abort();
-    this.#listPending = null;
-    this.#listGeneration += 1;
-  }
-
-  /** 목록·본문 응답이 현재 선택의 인증 사용자·정책·관점과 일치하는지 확인합니다. */
-  #matchesAccess(
-    access: DocumentListPage['access'],
-    active: Connected,
-    profile: WorkspaceProfile,
-  ): boolean {
-    return (
-      access.userId === active.userId &&
-      access.tenant === active.selection?.tenant &&
-      access.profileId === active.selection?.profile &&
-      access.domain === profile.domain &&
-      access.viewpoint === profile.viewpoint &&
-      sameAccessRevision(access, active)
-    );
-  }
-
-  /** main의 토큰과 확정된 선택으로만 문서 목록을 조회하고 늦은 범위의 응답을 거부합니다. */
-  async listDocuments(
-    request: DocumentListRequest,
-  ): Promise<DocumentListResult> {
+  /** 조회 시작 때 현재 연결·선택·읽기 권한을 한 번 검사합니다. */
+  #documentContext(connectionId: string): DocumentReadContext | ApiFailure {
     const active = this.#active;
     const token = this.#token;
-    if (!active || !token || active.connectionId !== request.connectionId)
+    if (!active || !token || active.connectionId !== connectionId)
       return apiFailure(
         'connection_changed',
         '연결이 변경되었습니다. 서버 연결을 다시 확인해 주세요.',
@@ -980,71 +947,26 @@ export class ConnectionService {
         '현재 작업 공간의 조회 권한을 다시 확인해 주세요.',
       );
     }
-    this.#cancelList();
-    const controller = new AbortController();
-    this.#listPending = controller;
-    const generation = this.#generation;
-    const listGeneration = this.#listGeneration;
-    const url = new URL(
-      `${active.serverUrl}tenants/${encodeURIComponent(selection.tenant)}/documents`,
-    );
-    url.searchParams.set('profile', selection.profile);
-    url.searchParams.set('limit', String(request.limit));
-    if (request.cursor !== null) url.searchParams.set('cursor', request.cursor);
-    const result = await readApiJson(url.href, token, controller);
-    const current = this.#active;
-    if (
-      generation !== this.#generation ||
-      listGeneration !== this.#listGeneration ||
-      current?.connectionId !== active.connectionId ||
-      current.userId !== active.userId ||
-      !sameAccessRevision(current, active) ||
-      current.selection?.tenant !== selection.tenant ||
-      current.selection.profile !== selection.profile
-    )
-      return superseded();
-    this.#listPending = null;
-    if (!result.ok) {
-      if (result.error.status === 401) this.disconnect();
-      else if (result.error.status === 403) {
-        this.#clearSelection();
-      }
-      return result;
-    }
-    let page: DocumentListPage;
-    try {
-      page = parseDocumentListResponse(result.value, active.connectionId);
-    } catch {
-      return apiFailure(
-        'invalid_response',
-        '서버의 문서 목록 응답 형식을 확인할 수 없습니다.',
-      );
-    }
-    if (page.access.userId !== active.userId) {
-      this.disconnect();
-      return apiFailure(
-        'subject_changed',
-        '인증 사용자가 변경되었습니다. 새로 연결해 주세요.',
-      );
-    }
-    if (
-      page.scope.tenant !== selection.tenant ||
-      !this.#matchesAccess(page.access, active, profile)
-    ) {
-      this.#clearSelection();
-      return apiFailure(
-        'scope_changed',
-        '권한 또는 조회 범위가 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
-      );
-    }
-    return { ok: true, data: page };
+    return { active, token, selection, profile, generation: this.#generation };
   }
 
-  /** 범위 변경 시 독립 자료의 대기 조회를 모두 취소하고 이전 응답을 무효화합니다. */
-  #cancelContent(): void {
-    for (const controller of this.#contentRequests) controller.abort();
-    this.#contentRequests.clear();
-    this.#contentGeneration += 1;
+  /** 완료된 읽기가 시작할 때와 같은 연결·사용자·조회 범위인지 확인합니다. */
+  #isDocumentCurrent(context: DocumentReadContext): boolean {
+    const current = this.#active;
+    const { active, selection, generation } = context;
+    return (
+      generation === this.#generation &&
+      current?.connectionId === active.connectionId &&
+      current.userId === active.userId &&
+      sameAccessRevision(current, active) &&
+      current.selection?.tenant === selection.tenant &&
+      current.selection.profile === selection.profile
+    );
+  }
+
+  /** 현재 선택의 문서 목록 조회를 위임합니다. */
+  listDocuments(request: DocumentListRequest): Promise<DocumentListResult> {
+    return this.#documents.listDocuments(request);
   }
 
   /** 권한 회수나 범위 변경이 감지되면 모든 대기 조회와 선택을 무효화합니다. */
@@ -1054,8 +976,7 @@ export class ConnectionService {
     this.#remembered = false;
     this.#generation += 1;
     this.#sources.cancel();
-    this.#cancelList();
-    this.#cancelContent();
+    this.#documents.cancel();
   }
 
   /** 원본 작업도 main의 확정된 선택·토큰·세대만 사용합니다. */
@@ -1071,7 +992,7 @@ export class ConnectionService {
     };
   }
 
-  /** 원본 쓰기/영수증 조회에서 확인한 인증·범위 무효화를 기존 연결 수명에 반영합니다. */
+  /** 원본·분석·본문 조회의 인증·범위 무효화를 기존 연결 수명에 반영합니다. */
   #sourceFailure(failure: ApiFailure): void {
     if (
       failure.error.status === 401 ||
@@ -1121,187 +1042,18 @@ export class ConnectionService {
     return this.#sources.receipt(request);
   }
 
-  /** 위키와 원본의 조회 수명·현재 권한 검사를 공유하고 본문별 전송만 분리합니다. */
-  async #readSelectedContent<
-    T extends { connectionId: string; access: DocumentListPage['access'] },
-  >(
-    connectionId: string,
-    load: (
-      active: Connected,
-      selection: { tenant: string; profile: string },
-      token: string,
-      controller: AbortController,
-      profile: WorkspaceProfile,
-    ) => Promise<{ ok: true; data: T } | ReturnType<typeof apiFailure>>,
-  ): Promise<{ ok: true; data: T } | ReturnType<typeof apiFailure>> {
-    const active = this.#active;
-    const token = this.#token;
-    if (!active || !token || active.connectionId !== connectionId)
-      return apiFailure(
-        'connection_changed',
-        '연결이 변경되었습니다. 서버 연결을 다시 확인해 주세요.',
-      );
-    const selection = active.selection;
-    if (!selection)
-      return apiFailure(
-        'selection_required',
-        '작업 공간을 먼저 선택해 주세요.',
-      );
-    if (this.#pending)
-      return apiFailure(
-        'connection_changed',
-        '연결 확인이 진행 중입니다. 현재 연결을 다시 확인해 주세요.',
-      );
-    const workspace = active.workspaces.find(
-      (item: WorkspaceMembership): boolean => item.id === selection.tenant,
-    );
-    const profile = workspaceDefault(workspace);
-    if (
-      !profile ||
-      profile.id !== selection.profile ||
-      !workspace?.permissions.includes('read')
-    ) {
-      this.#clearSelection();
-      return apiFailure(
-        'access_changed',
-        '현재 작업 공간의 조회 권한을 다시 확인해 주세요.',
-      );
-    }
-    // 여러 문서의 주장과 원문은 함께 읽을 수 있어야 하며 화면별 선택 수명은 renderer가 검사합니다.
-    if (this.#contentRequests.size >= 16)
-      return apiFailure(
-        'read_busy',
-        '자료를 읽고 있습니다. 잠시 후 다시 확인해 주세요.',
-      );
-    const controller = new AbortController();
-    this.#contentRequests.add(controller);
-    const generation = this.#generation;
-    const contentGeneration = this.#contentGeneration;
-    let result: Awaited<ReturnType<typeof load>>;
-    try {
-      result = await load(active, selection, token, controller, profile);
-    } finally {
-      this.#contentRequests.delete(controller);
-    }
-    const current = this.#active;
-    if (
-      generation !== this.#generation ||
-      contentGeneration !== this.#contentGeneration ||
-      current?.connectionId !== active.connectionId ||
-      current.userId !== active.userId ||
-      !sameAccessRevision(current, active) ||
-      current.selection?.tenant !== selection.tenant ||
-      current.selection.profile !== selection.profile
-    )
-      return superseded();
-    if (!result.ok) {
-      if (
-        result.error.status === 401 ||
-        result.error.code === 'subject_changed'
-      )
-        this.disconnect();
-      else if (
-        result.error.status === 403 ||
-        result.error.code === 'scope_changed'
-      )
-        this.#clearSelection();
-      return result;
-    }
-    const document = result.data;
-    if (document.access.userId !== active.userId) {
-      this.disconnect();
-      return apiFailure(
-        'subject_changed',
-        '인증 사용자가 변경되었습니다. 새로 연결해 주세요.',
-      );
-    }
-    if (!this.#matchesAccess(document.access, active, profile)) {
-      this.#clearSelection();
-      return apiFailure(
-        'scope_changed',
-        '권한 또는 조회 범위가 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
-      );
-    }
-    return { ok: true, data: document };
-  }
-
-  /** 선택된 위키의 최신 본문과 실제 revision을 조회합니다. */
-  async readDocumentContent(
+  /** 현재 선택의 본문·판본 조회를 위임합니다. */
+  readDocumentContent(
     request: DocumentContentRequest,
   ): Promise<DocumentContentResult> {
-    return this.#readSelectedContent(
-      request.connectionId,
-      async (
-        active: Connected,
-        selection: { tenant: string; profile: string },
-        token: string,
-        controller: AbortController,
-      ): Promise<DocumentContentResult> => {
-        const url = new URL(
-          `${active.serverUrl}tenants/${encodeURIComponent(selection.tenant)}/documents/content`,
-        );
-        url.searchParams.set('document', request.document);
-        url.searchParams.set('profile', selection.profile);
-        // 본문 1 MiB가 JSON escape로 커지는 경우에만 응답 한도를 넓힙니다.
-        const result = await readApiJson(url.href, token, controller, {
-          maxResponseBytes: MAX_CONTENT_RESPONSE_BYTES,
-        });
-        if (!result.ok) return result;
-        try {
-          const data = parseDocumentContentResponse(
-            result.value,
-            active.connectionId,
-          );
-          if (data.document !== request.document)
-            throw new Error('invalid_response');
-          return { ok: true, data };
-        } catch {
-          return apiFailure(
-            'invalid_response',
-            '서버의 문서 본문 응답 형식을 확인할 수 없습니다.',
-          );
-        }
-      },
-    );
+    return this.#documents.readDocumentContent(request);
   }
 
-  /** 허용한 문서의 현재 기계층/유효 지식·판단 이력을 원형 그대로 읽습니다. */
-  async readDocumentKnowledge(
+  /** 현재 선택의 기계층·유효 지식 조회를 위임합니다. */
+  readDocumentKnowledge(
     request: DocumentKnowledgeRequest,
   ): Promise<DocumentKnowledgeResult> {
-    return this.#readSelectedContent(
-      request.connectionId,
-      async (
-        active: Connected,
-        selection: { tenant: string; profile: string },
-        token: string,
-        controller: AbortController,
-      ): Promise<DocumentKnowledgeResult> => {
-        const url = new URL(
-          `${active.serverUrl}tenants/${encodeURIComponent(selection.tenant)}/documents/knowledge`,
-        );
-        url.searchParams.set('document', request.document);
-        url.searchParams.set('profile', selection.profile);
-        const result = await readApiJson(url.href, token, controller, {
-          maxResponseBytes: 16 * 1024 * 1024,
-        });
-        if (!result.ok) return result;
-        try {
-          const data = parseDocumentKnowledgeResponse(
-            result.value,
-            active.connectionId,
-          );
-          if (data.document !== request.document)
-            throw new Error('document_mismatch');
-          return { ok: true, data };
-        } catch {
-          return apiFailure(
-            'invalid_response',
-            '저장된 지식의 응답 형식을 확인할 수 없습니다.',
-          );
-        }
-      },
-    );
+    return this.#documents.readDocumentKnowledge(request);
   }
 
   /** 일반 API의 인증/범위 거부를 앱의 현재 선택 수명에 반영합니다. */
@@ -1325,7 +1077,7 @@ export class ConnectionService {
   readSourceDownload(
     request: SourceDownloadRequest,
   ): Promise<SourceOriginalResult> {
-    return this.#readSourceOriginal(request);
+    return this.#documents.readSourceOriginal(request);
   }
 
   /** 원본 해시를 확인한 전체 바이트만 사용자가 고른 새 파일로 저장합니다. */
@@ -1351,7 +1103,7 @@ export class ConnectionService {
     if (selected.canceled || !selected.filePath)
       return { ok: true, data: { saved: false } };
     // 저장 창을 기다린 뒤 현재 권한·카탈로그와 실제 바이트를 다시 확인해 보관합니다.
-    const result = await this.#readSourceOriginal(request);
+    const result = await this.#documents.readSourceOriginal(request);
     if (!result.ok) return result;
     if (generation !== this.#generation) return superseded();
     try {
@@ -1368,106 +1120,10 @@ export class ConnectionService {
     }
   }
 
-  /** 바이너리는 내용·경로 대신 고정 판본과 변환 미준비 상태만 공개합니다. */
-  async readSourcePreview(
+  /** 원본 읽기와 공개 미리보기 구분을 조회 서비스에 위임합니다. */
+  readSourcePreview(
     request: SourcePreviewRequest,
   ): Promise<SourcePreviewResult> {
-    const result = await this.#readSourceOriginal(request);
-    if (!result.ok) return result;
-    const base = {
-      ...request,
-      access: result.data.access,
-      traceId: result.data.traceId,
-    };
-    if (isTextSource(request.format)) {
-      if (result.data.text === null)
-        return apiFailure(
-          'source_mismatch',
-          '원본 텍스트를 확인할 수 없습니다.',
-        );
-      return {
-        ok: true,
-        data: {
-          ...base,
-          format: request.format,
-          previewStatus: 'text',
-          content: result.data.text,
-        },
-      };
-    }
-    return {
-      ok: true,
-      data: {
-        ...base,
-        format: request.format,
-        previewStatus: 'conversion_required',
-        content: null,
-      },
-    };
-  }
-
-  /** 원본 파일 읽기 전후 카탈로그의 접근 범위와 전체 바이트 무결성을 확인합니다. */
-  async #readSourceOriginal(
-    request: SourcePreviewRequest,
-  ): Promise<SourceOriginalResult> {
-    return this.#readSelectedContent(
-      request.connectionId,
-      async (
-        active: Connected,
-        selection: { tenant: string; profile: string },
-        token: string,
-        controller: AbortController,
-        profile: WorkspaceProfile,
-      ): Promise<SourceOriginalResult> => {
-        const catalogUrl = new URL(
-          `${active.serverUrl}tenants/${encodeURIComponent(selection.tenant)}/sources/${request.sourceId}`,
-        );
-        catalogUrl.searchParams.set('profile', selection.profile);
-        const before = await readApiJson(catalogUrl.href, token, controller);
-        if (!before.ok) return before;
-        try {
-          const catalog = parseSourceCatalog(before.value, request);
-          if (catalog.access.userId !== active.userId)
-            return apiFailure(
-              'subject_changed',
-              '인증 사용자가 변경되었습니다. 새로 연결해 주세요.',
-            );
-          if (!this.#matchesAccess(catalog.access, active, profile))
-            return apiFailure(
-              'scope_changed',
-              '권한 또는 조회 범위가 변경되었습니다. 작업 공간을 다시 선택해 주세요.',
-            );
-          const fileUrl = new URL(
-            `${active.serverUrl}tenants/${encodeURIComponent(selection.tenant)}/sources/${request.sourceId}/versions/${request.sourceVersion}/file`,
-          );
-          fileUrl.searchParams.set('profile', selection.profile);
-          const file = await readApiSourceBytes(
-            fileUrl.href,
-            token,
-            controller,
-            request,
-          );
-          if (!file.ok) return file;
-          if (!(file.value instanceof Uint8Array))
-            throw new Error('invalid_response');
-          const text = isTextSource(request.format)
-            ? sourceText(file.value)
-            : null;
-          // 파일 응답에는 access가 없으므로 전송 중 회수된 권한도 공개 전에 재확인합니다.
-          const after = await readApiJson(catalogUrl.href, token, controller);
-          if (!after.ok) return after;
-          const checked = parseSourceCatalog(after.value, request);
-          return {
-            ok: true,
-            data: { ...request, bytes: file.value, text, ...checked },
-          };
-        } catch {
-          return apiFailure(
-            'source_mismatch',
-            '선택한 원본의 판본 정보를 확인할 수 없습니다. 목록을 새로 불러와 주세요.',
-          );
-        }
-      },
-    );
+    return this.#documents.readSourcePreview(request);
   }
 }

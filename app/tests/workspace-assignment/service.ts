@@ -11,6 +11,7 @@ import type {
   ConnectionResult,
   ConnectionSnapshot,
 } from '../../src/shared/contracts/connection.contract';
+import { verifyDocumentReads } from './readChecks';
 const originalFetch = globalThis.fetch;
 const root = await mkdtemp('/private/tmp/wiki-assignment-service-');
 const token = 'isolated-waiting-account-token-123456789012';
@@ -72,7 +73,7 @@ globalThis.fetch = async (
   init?: RequestInit,
 ): Promise<Response> => {
   requests.push({
-    path: String(input),
+    path: input instanceof Request ? input.url : String(input),
     authenticated:
       new Headers(init?.headers).get('Authorization') === `Bearer ${token}`,
   });
@@ -255,6 +256,9 @@ try {
   checks.push(
     '지연 재확인 뒤 로그아웃 유지, 401과 인증 사용자 변경 시 연결 차단',
   );
+  const documentReads = await verifyDocumentReads();
+  checks.push(...documentReads.checks);
+  requests.push(...documentReads.requests);
   console.log(
     JSON.stringify(
       { passed: true, checks, requests: requests.length },

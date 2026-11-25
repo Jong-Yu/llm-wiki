@@ -5,6 +5,7 @@ from hashlib import sha256
 import os
 import re
 
+from core.common.cleanup import cleanup_details
 from core.common.json_codec import canonical_json_bytes
 from core.common.read_changes import before_change
 from . import changes
@@ -35,11 +36,6 @@ def write_record(store, path, value, failures):
     with store._staged_file(path.parent, canonical_json_bytes(value), failures) as staged:
         os.replace(staged.path, path)
         staged.consumed = True
-
-
-def cleanup_details(store, failures):
-    return [{"path": item.path.relative_to(store.data_dir).as_posix(),
-             "error_type": type(item.error).__name__, "errno": item.error.errno} for item in failures]
 
 
 def _record(store, location):
@@ -96,9 +92,9 @@ def move_to_trash(store, document, expected_revision, *, actor=None, before_comm
             os.rename(store._document_path(store.wiki_dir, document), location / "content.md")
     except Exception as error:
         if failures:
-            error.cleanup_failures = cleanup_details(store, failures)
+            error.cleanup_failures = cleanup_details(store.data_dir, failures)
         raise
-    return {**record, "state": "trashed", "cleanup_failures": cleanup_details(store, failures)}
+    return {**record, "state": "trashed", "cleanup_failures": cleanup_details(store.data_dir, failures)}
 
 
 def restore(store, document, expected_revision, *, before_commit=None):

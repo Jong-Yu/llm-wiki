@@ -18,6 +18,7 @@ class SearchQuery(Model):
     query: str = Field(min_length=1, max_length=200)
     limit: int = Field(20, ge=1, le=50, strict=False)
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    group_sources: bool = Field(False, strict=False)
 
     @field_validator("limit", mode="before")
     @classmethod

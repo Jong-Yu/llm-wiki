@@ -174,6 +174,15 @@ class DraftValidationTests(unittest.TestCase):
         self.assertFalse(result["repairable"])
         self.assertEqual(result["errors"][0]["code"], "work_limit")
 
+    def test_large_unicode_source_uses_bounded_actual_scan_paths(self):
+        source = BODY + "한😀" * (2 * 1024 * 1024)
+        result = self.check(source=source)
+        self.assertTrue(result["passed"], result)
+        with patch.object(draft, "MAX_SOURCE_SCAN_WORK", 100):
+            limited = self.check(source=source)
+        self.assertFalse(limited["passed"])
+        self.assertEqual(limited["full_validation"]["status"], "incomplete")
+
     def test_large_failed_draft_reuses_checked_entities_without_losing_item_checks(self):
         entity_quotes = [f"E{i:02d} exists." for i in range(60)]
         attribute_quotes = [f"E{i % 60:02d} P{i:02d} V{i:02d}." for i in range(93)]
@@ -214,7 +223,7 @@ class DraftValidationTests(unittest.TestCase):
         value = submission()
         value["relations"][0]["evidence"] = "Absent relation."
         # The whole graph fits, but the next source/item checks do not.
-        for name, limit in (("MAX_SOURCE_SCAN_WORK", len(BODY) * (1 + 3 * 16)),
+        for name, limit in (("MAX_SOURCE_SCAN_WORK", len(BODY) * (3 + 3)),
                             ("MAX_CORE_ITEM_VISITS", 3)):
             with self.subTest(name=name), patch.object(draft, name, limit):
                 result = self.check(value)

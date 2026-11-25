@@ -19,6 +19,26 @@ import type {
   AnalysisProposalResult,
 } from '@contracts/analysisProposals.contract';
 import type { RecoveryResult } from '@contracts/recovery.contract';
+import { aiArguments } from '@main/backend/personalAi';
+import type { PersonalAi } from '@main/backend/personalAi';
+
+// 제공자·모델 조합마다 인자 순서를 유지하며 호출별 실행 옵션은 추가하지 않습니다.
+for (const provider of ['codex', 'claude'] as const) {
+  for (const model of ['default', 'explicit-model']) {
+    const ai: PersonalAi = {
+      provider,
+      cli: '/fixture/path with spaces/ai',
+      model,
+    };
+    assert.deepEqual(aiArguments(ai), [
+      '--ai-provider',
+      provider,
+      '--ai-cli',
+      ai.cli,
+      ...(model === 'default' ? [] : ['--ai-model', model]),
+    ]);
+  }
+}
 
 const temp = process.env.WIKI_RUNTIME_TEST_ROOT!;
 const python = process.env.WIKI_RUNTIME_PYTHON!;
@@ -178,20 +198,26 @@ const proposalApi = {
     return {
       ok: true,
       data: {
-        proposal_id: input.proposal_id ?? one,
-        execution_id: input.execution_id ?? input.request_id ?? one,
+        proposal_id: 'proposal_id' in input ? input.proposal_id : one,
+        execution_id:
+          'execution_id' in input
+            ? input.execution_id
+            : 'request_id' in input
+              ? input.request_id
+              : one,
         canonical_changed: false,
         state: 'ready',
         job_id: one,
         job_revision: revision,
       },
+      traceId: one,
     };
   },
 };
 const recovery = {
   capture: async (): Promise<RecoveryResult> => ({
     ok: true,
-    data: { entries: [], complete: true, skipped: [], volatile: false },
+    data: { entries: [], cleanupWarningCount: 0 },
   }),
 };
 const proposals = new ProposalExecutionService(
@@ -437,7 +463,7 @@ try {
   let calls = 0;
   let provider: 'codex' | 'claude' = 'codex';
   const usage = new AccountUsageService(
-    async () => ({ provider, cli: python }),
+    async () => ({ provider, cli: python, model: 'default' }),
     async () => {
       calls++;
       return projected;
@@ -458,7 +484,7 @@ try {
     enteredUsage = resolve;
   });
   const switching = new AccountUsageService(
-    async () => ({ provider, cli: python }),
+    async () => ({ provider, cli: python, model: 'default' }),
     async () => {
       enteredUsage?.();
       await gateUsage;

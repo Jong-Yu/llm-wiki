@@ -40,6 +40,13 @@ export type LibraryRequest = {
 export type LibrarySourceItem = Extract<DocumentListItem, { kind: 'source' }>;
 /** 이미 등록된 원본의 분석 시작·진행 확인입니다. feature 간 참조 금지로 페이지가 주입합니다. */
 export type SourceAnalysisStarter = {
+  status?: (
+    item: LibrarySourceItem,
+    scope: LibraryScope,
+  ) => {
+    label: string;
+    kind: 'running' | 'attention' | 'pending' | 'complete';
+  } | null;
   start: (
     item: LibrarySourceItem,
     scope: LibraryScope,

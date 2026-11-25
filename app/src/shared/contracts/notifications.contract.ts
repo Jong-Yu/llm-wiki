@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isDocumentPath } from './documents.contract';
+import { isDocumentPath, sourceFormatSchema } from './documents.contract';
 import { sourceExpectedScopeSchema } from './sources.contract';
 import { conversionReportSchema } from './sourceConversion.contract';
 
@@ -7,6 +7,54 @@ const id = z.string().regex(/^[a-f0-9]{32}$/);
 const revision = z.string().regex(/^[a-f0-9]{64}$/);
 const text = z.string().min(1).max(4096);
 const timestamp = z.string().min(1).max(100);
+export const notificationCorrectionRefSchema = z.object({
+  correction_id: id,
+  correction_revision: revision,
+});
+export const notificationLocationFields = {
+  page: z.number().int().min(1).max(100000).optional(),
+  unit_id: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{1,64}$/)
+    .optional(),
+  whole_document: z.literal(true).optional(),
+};
+export type NotificationLocation = {
+  page?: number;
+  unit_id?: string;
+  whole_document?: true;
+};
+/** 하나의 보정이 가리키는 원본 위치를 배타적으로 검증합니다. */
+export function validNotificationLocation(
+  value: NotificationLocation,
+): boolean {
+  return (
+    [value.page, value.unit_id, value.whole_document].filter(
+      (part: number | string | boolean | undefined): boolean =>
+        part !== undefined,
+    ).length === 1
+  );
+}
+/** 화면·저장·응답 확인에서 같은 위치 식별자를 사용합니다. */
+export function notificationLocationKey(value: NotificationLocation): string {
+  if (value.page !== undefined) return `page:${value.page}`;
+  if (value.unit_id !== undefined) return `unit:${value.unit_id}`;
+  return 'whole_document';
+}
+/** 부가 상태를 제외하고 원본 위치만 요청에 전달합니다. */
+export function notificationLocation(
+  value: NotificationLocation,
+): NotificationLocation {
+  if (value.page !== undefined) return { page: value.page };
+  if (value.unit_id !== undefined) return { unit_id: value.unit_id };
+  return { whole_document: true };
+}
+const correctionSelection = z
+  .object({
+    ...notificationLocationFields,
+    correction_ref: notificationCorrectionRefSchema,
+  })
+  .refine(validNotificationLocation);
 export const NOTIFICATION_CHANNELS = {
   list: 'notifications:list',
   read: 'notifications:read',
@@ -16,7 +64,10 @@ export const NOTIFICATION_CHANNELS = {
   inspect: 'notifications:inspect',
   continue: 'notifications:continue',
   page: 'notifications:page',
-};
+  correct: 'notifications:correct',
+  retryPage: 'notifications:retry-page',
+  cancelRetry: 'notifications:cancel-retry',
+} as const;
 export const notificationSessionSchema = z.strictObject({
   connectionId: text,
   expectedScope: sourceExpectedScopeSchema,
@@ -41,20 +92,59 @@ const mutation = notificationReadSchema.extend({
 export const notificationDecideSchema = mutation.extend({
   decisions: z
     .array(
-      z.strictObject({
-        page: z.number().int().min(1),
-        state: z.enum(['pending', 'usable', 'held']),
-      }),
+      z
+        .strictObject({
+          ...notificationLocationFields,
+          state: z.enum(['pending', 'usable', 'held']),
+          correction_ref: notificationCorrectionRefSchema.optional(),
+        })
+        .refine(validNotificationLocation),
     )
     .min(1)
     .max(1000),
 });
 export const notificationApproveSchema = mutation.extend({
   targetDocument: text.refine(isDocumentPath).optional(),
+  correctionRefs: z.array(correctionSelection).max(1000).optional(),
+  correctionsRevision: revision.optional(),
 });
 export const notificationContinueSchema = mutation;
-export const notificationPageSchema = notificationReadSchema.extend({
+export const notificationContentSchema = z
+  .string()
+  .max(4 * 1024 * 1024)
+  .refine((value: string): boolean => !value.includes('\0'))
+  .refine(
+    (value: string): boolean =>
+      new TextEncoder().encode(value).byteLength <= 4 * 1024 * 1024,
+  );
+const correctionWarnings = z.array(z.string().max(1024)).max(100);
+export const notificationCorrectSchema = mutation
+  .extend({
+    ...notificationLocationFields,
+    content: notificationContentSchema,
+    method: z.enum(['manual', 'ocr', 'blank']),
+    warnings: correctionWarnings.optional(),
+  })
+  .refine(validNotificationLocation)
+  .refine(
+    (
+      value: NotificationLocation & {
+        method: 'manual' | 'ocr' | 'blank';
+        content: string;
+      },
+    ): boolean =>
+      value.method === 'blank'
+        ? value.content === '' && !value.whole_document
+        : !!value.content.trim(),
+  );
+export const notificationRetryPageSchema = mutation.extend({
   page: z.number().int().min(1).max(100000),
+});
+export const notificationCancelRetrySchema = notificationReadSchema.extend({
+  requestId: id,
+});
+export const notificationPageSchema = notificationReadSchema.extend({
+  page: z.number().int().min(1).max(1000000),
 });
 export const notificationSourceSchema = z.object({
   source_id: id,
@@ -90,14 +180,19 @@ export const notificationWorkflowSchema = z.object({
     'failed',
     'stopped',
   ]),
+  corrections_revision: revision.optional(),
   pages: z
     .array(
-      z.object({
-        page: z.number().int().min(1),
-        state: z.enum(['pending', 'usable', 'held']),
-      }),
+      z
+        .object({
+          ...notificationLocationFields,
+          state: z.enum(['pending', 'usable', 'held']),
+          input_required: z.boolean().optional(),
+          correction_ref: notificationCorrectionRefSchema.optional(),
+        })
+        .refine(validNotificationLocation),
     )
-    .max(1000),
+    .max(10101),
   approval: z
     .object({
       request_id: id,
@@ -144,7 +239,25 @@ export const notificationListDataSchema = z.object({
   access: notificationAccessSchema,
 });
 export const notificationDetailDataSchema = z.object({
+  sourcePageCount: z.number().int().min(1).max(1000000).nullable().optional(),
+  source_format: sourceFormatSchema.nullable().optional(),
   workflow: notificationWorkflowSchema,
+  corrections: z
+    .array(
+      z
+        .object({
+          correction_ref: notificationCorrectionRefSchema,
+          ...notificationLocationFields,
+          content: notificationContentSchema,
+          method: z.enum(['manual', 'ocr', 'blank']),
+          warnings: correctionWarnings,
+          created_at: timestamp,
+          request_id: id.optional(),
+        })
+        .refine(validNotificationLocation),
+    )
+    .max(10101)
+    .default([]),
   events: z
     .array(
       z.object({
@@ -168,7 +281,7 @@ export const notificationDetailDataSchema = z.object({
           .array(
             conversionReportSchema.shape.units.element.omit({ content: true }),
           )
-          .max(1000),
+          .max(10000),
       }),
       revision,
       components: z.record(z.string(), z.string().max(4 * 1024 * 1024)),
@@ -241,6 +354,36 @@ export const notificationPageResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: notificationPageDataSchema }),
   failure,
 ]);
+export const notificationRetryPageResultSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    data: z.object({
+      page: z.number().int().min(1),
+      content: z.string().max(4 * 1024 * 1024),
+      warnings: correctionWarnings,
+    }),
+  }),
+  failure,
+]);
+export const notificationCancelRetryResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: z.object({ cancelled: z.boolean() }) }),
+  failure,
+]);
+export type NotificationCorrectRequest = z.infer<
+  typeof notificationCorrectSchema
+>;
+export type NotificationRetryPageRequest = z.infer<
+  typeof notificationRetryPageSchema
+>;
+export type NotificationCancelRetryRequest = z.infer<
+  typeof notificationCancelRetrySchema
+>;
+export type NotificationRetryPageResult = z.infer<
+  typeof notificationRetryPageResultSchema
+>;
+export type NotificationCancelRetryResult = z.infer<
+  typeof notificationCancelRetryResultSchema
+>;
 export type NotificationSession = z.infer<typeof notificationSessionSchema>;
 export type NotificationListRequest = z.infer<typeof notificationListSchema>;
 export type NotificationReadRequest = z.infer<typeof notificationReadSchema>;
@@ -281,6 +424,15 @@ export type NotificationPageResult = z.infer<
   typeof notificationPageResultSchema
 >;
 export type NotificationsBridge = {
+  correct: (
+    request: NotificationCorrectRequest,
+  ) => Promise<NotificationMutationResult>;
+  retryPage: (
+    request: NotificationRetryPageRequest,
+  ) => Promise<NotificationRetryPageResult>;
+  cancelRetry: (
+    request: NotificationCancelRetryRequest,
+  ) => Promise<NotificationCancelRetryResult>;
   list: (request: NotificationListRequest) => Promise<NotificationListResult>;
   read: (request: NotificationReadRequest) => Promise<NotificationDetailResult>;
   markRead: (

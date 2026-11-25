@@ -4,6 +4,7 @@
 문자 추출 성공을 원본 전체 또는 의미 정확성의 검증으로 표시하지 않는다.
 """
 
+from hashlib import sha256
 from importlib import metadata, util
 from io import BytesIO
 from pathlib import Path
@@ -15,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import unicodedata
 from zipfile import ZipFile
 from xml.etree import ElementTree
 
@@ -22,12 +24,31 @@ from core.runtime.client_process import no_window_options
 
 from . import source_conversion_xlsx as xlsx_view
 from . import source_conversion_presentation as presentation_view
+from . import source_conversion_relations as relations_view
 from .source_conversion_report import Conversion, OutputLimit, MAX_TEXT, MAX_UNITS
 
 MAX_PAGES = 500
 MAX_PIXELS = 40_000_000
 PDF_OCR_DPI = 300
-PACKAGES = {"pypdf": "pypdf", "pypdfium2": "pypdfium2", "openpyxl": "openpyxl",
+# 내장 문자 판독 신호(D-157). 대체·사용자 정의·제어 문자가 이 비율 이상이거나,
+# 글자·숫자가 이 비율 미만이면 깨진 내장 문자로 보고 OCR한다.
+PDF_TEXT_MAX_ODD = .3
+PDF_TEXT_MIN_ALNUM = .3
+# 정상 내장 문자가 있는 쪽은 그림 영역만 따로 읽어 덧붙인다(D-159). 쪽 면적의 이 비율보다 작은
+# 그림(로고·아이콘)은 읽지 않고, 읽은 결과도 글자 수·신뢰도가 기준 미만이면 배경 잡음으로 버린다.
+PDF_IMAGE_OCR_MIN_FRACTION = .01
+PDF_IMAGE_OCR_MAX_PER_PAGE = 12
+PDF_IMAGE_TEXT_MIN_CHARS = 8
+PDF_IMAGE_TEXT_MIN_CONFIDENCE = 50
+LOW_CONFIDENCE = "ocr_low_or_missing_confidence_text_retained_manual_review_required"
+# kor+eng 읽기에서 한국어 단어가 영문 조각("결함을"→"SHS")으로 읽힌 경우만 그 단어를 kor로 다시 읽는다(D-161).
+HANGUL = re.compile("[가-힣]")
+LATIN_FRAGMENT = re.compile("^[A-Za-z]{2,}[^가-힣]*$")
+REREAD_MAX_SOURCE_CONFIDENCE = 80
+REREAD_MIN_CONFIDENCE = 70
+REREAD_MIN_HANGUL_SHARE = .6
+REREAD_MAX_WORDS = 60
+PACKAGES ={"pypdf": "pypdf", "pypdfium2": "pypdfium2", "openpyxl": "openpyxl",
             "python-docx": "docx", "Pillow": "PIL"}
 
 
@@ -137,7 +158,7 @@ def _ocr_attempt(image, engine, language, directory, deadline, *, psm=3):
     if len(raw) > MAX_TEXT:
         raise OutputLimit()
     text = raw.decode("utf-8")
-    score, count, weak = None, 0, 0
+    score, count, weak, words = None, 0, 0, []
     try:
         with output.with_suffix(".tsv").open("rb") as stream:
             raw = stream.read(MAX_TEXT * 4 + 1)
@@ -154,10 +175,81 @@ def _ocr_attempt(image, engine, language, directory, deadline, *, psm=3):
             weighted += confidence * size
             count += size
             weak += size if confidence < 60 else 0
+            words.append({"text": row["text"].strip(), "confidence": confidence,
+                          "line": (row["block_num"], row["par_num"], row["line_num"]),
+                          "box": tuple(int(row[key]) for key in ("left", "top", "width", "height"))})
         score = weighted / count if count else None
     except (OSError, ValueError, KeyError, TypeError, csv.Error):
-        score, count, weak = None, 0, 0
-    return text, score, count, weak, psm
+        score, count, weak, words = None, 0, 0, []
+    attempt = _Attempt((text, score, count, weak, psm))
+    attempt.words = words
+    return attempt
+
+
+class _Attempt(tuple):
+    """(문자, 평균 신뢰도, 글자 수, 약한 글자 수, psm). words는 TSV 단어의 문자·신뢰도·줄·위치다."""
+    words = ()
+
+
+def _reread_hangul_words(attempt, image, engine, language, directory, deadline):
+    """한국어 줄 안의 영문 조각 단어만 kor 단독으로 다시 읽어 바꾼 문자와 바꾼 단어 수를 돌려준다(D-161).
+
+    kor+eng 읽기는 한국어 단어를 "SHS"·"BAS" 같은 영문 조각으로 읽는 경우가 있다. 사전이나 추측으로 고치지 않고,
+    그 단어 위치의 그림만 다시 읽는다. 다시 읽은 결과가 대부분 한글이고 신뢰도가 70 이상이며 원래보다 높을 때만
+    바꾼다. txt 줄과 TSV 줄이 어긋나면 그 줄부터는 바꾸지 않는다.
+    """
+    text = attempt[0]
+    parts = language.split("+")
+    if "kor" not in parts or len(parts) < 2 or not getattr(attempt, "words", ()):
+        return text, 0
+    lines = {}
+    for word in attempt.words:
+        lines.setdefault(word["line"], []).append(word)
+    replacements = {}
+    for words in lines.values():
+        if not any(HANGUL.search(word["text"]) for word in words):
+            continue
+        for word in words:
+            if len(replacements) >= REREAD_MAX_WORDS or deadline - time.monotonic() < 1:
+                break
+            if not LATIN_FRAGMENT.match(word["text"]) or word["confidence"] >= REREAD_MAX_SOURCE_CONFIDENCE:
+                continue
+            left, top, width, height = word["box"]
+            pad = max(4, height // 4)
+            crop = image.crop((max(0, left - pad), max(0, top - pad), min(image.width, left + width + pad),
+                               min(image.height, top + height + pad)))
+            try:
+                candidate = _ocr_attempt(crop, engine, "kor", directory, deadline, psm=7)
+            except (OcrFailure, OutputLimit, OSError, UnicodeError):
+                break
+            found = "".join(item["text"] for item in getattr(candidate, "words", ()))
+            confidence = min((item["confidence"] for item in getattr(candidate, "words", ())), default=0)
+            if (found and len(HANGUL.findall(found)) >= len(found) * REREAD_MIN_HANGUL_SHARE
+                    and confidence >= max(REREAD_MIN_CONFIDENCE, word["confidence"])):
+                replacements[id(word)] = found
+    if not replacements:
+        return text, 0
+    output, order, changed = text.split("\n"), list(lines.values()), 0
+    cursor = 0
+    for index, line in enumerate(output):
+        # 한국어는 TSV가 글자 단위로 나누고 txt는 붙여 쓰는 경우가 있어, 공백을 뺀 글자 순서로 줄을 맞춘다.
+        positions = [offset for offset, char in enumerate(line) if not char.isspace()]
+        if not positions:
+            continue
+        if cursor >= len(order) or "".join(line[offset] for offset in positions) != "".join(
+                word["text"] for word in order[cursor]):
+            break
+        spans, start = [], 0
+        for word in order[cursor]:
+            spans.append((positions[start], positions[start + len(word["text"]) - 1] + 1, word))
+            start += len(word["text"])
+        for begin, end, word in reversed(spans):
+            if id(word) in replacements:
+                line = line[:begin] + replacements[id(word)] + line[end:]
+                changed += 1
+        output[index] = line
+        cursor += 1
+    return "\n".join(output), changed
 
 
 def _ocr_fragmented_retry(value, image, engine, language, directory, deadline, note):
@@ -202,8 +294,8 @@ def _ocr_orientation(image, engine, directory, deadline):
     return None, None
 
 
-def ocr_image(image, language, *, note=None):
-    note = note or (lambda code, **kwargs: None)
+def ocr_engine(language):
+    """OCR 실행 전 엔진·요청 언어를 확인한다. 준비되지 않으면 알려진 실패로 멈춘다."""
     engine = ocr_diagnostics(language)
     if engine["status"] == "invalid_ocr_language":
         raise OcrFailure("invalid_ocr_language")
@@ -214,6 +306,46 @@ def ocr_image(image, language, *, note=None):
         raise DependencyMissing("tesseract_languages:" + "+".join(engine["missing_languages"]))
     if not engine["ready"]:
         raise OcrFailure("ocr_" + engine["status"])
+    return engine
+
+
+def _white_background(image):
+    from PIL import Image
+    rgba = image.convert("RGBA")
+    background = Image.new("RGBA", rgba.size, "white")
+    return Image.alpha_composite(background, rgba).convert("RGB")
+
+
+def ocr_region_text(image, engine, language):
+    """그림 한 장의 문자를 읽는다(D-159). 신뢰도·글자 수가 기준 미만인 잡음은 None으로 버린다.
+
+    방향 보정은 하지 않는다. 화면 캡처·도식 그림은 바로 선 것으로 보고, 문자를 사전·추측으로 교정하지 않는다.
+    한국어 줄 속 영문 조각 단어만 그 위치를 kor로 다시 읽는다(D-161).
+    """
+    if image.width * image.height > MAX_PIXELS:
+        raise OutputLimit()
+    if image.width < 16 or image.height < 8:
+        return None
+    normalized = _white_background(image)
+    with tempfile.TemporaryDirectory(prefix="wiki-ocr-") as directory:
+        deadline = time.monotonic() + 40
+        best = _ocr_attempt(normalized, engine, language, directory, deadline)
+        if best[2] < PDF_IMAGE_TEXT_MIN_CHARS or best[1] is None or best[1] < PDF_IMAGE_TEXT_MIN_CONFIDENCE:
+            # 테두리 상자 안 문자처럼 자동 단락 나누기가 놓친 경우만 한 덩어리로 다시 읽는다.
+            candidate = _ocr_attempt(normalized, engine, language, directory, deadline, psm=6)
+            if candidate[1] is not None and (best[1] is None or candidate[1] > best[1]):
+                best = candidate
+        text, score, count, weak, psm = best
+        if not text.strip() or count < PDF_IMAGE_TEXT_MIN_CHARS or score is None or score < PDF_IMAGE_TEXT_MIN_CONFIDENCE:
+            return None
+        text, reread = _reread_hangul_words(best, normalized, engine, language, directory, deadline)
+    return {"text": text.strip(), "score": score, "count": count, "weak": weak, "psm": psm,
+            "low_confidence": score < 60 or weak > count * .3, "reread_words": reread}
+
+
+def ocr_image(image, language, *, note=None):
+    note = note or (lambda code, **kwargs: None)
+    engine = ocr_engine(language)
     if image.width * image.height > MAX_PIXELS:
         raise OutputLimit()
     # 셸 없이 실행한다. 부모 worker의 프로세스 그룹에 속해 취소 시 함께 종료된다.
@@ -226,6 +358,7 @@ def ocr_image(image, language, *, note=None):
         normalized = Image.alpha_composite(background, oriented).convert("RGB")
         deadline = time.monotonic() + 40
         selected = baseline = _ocr_attempt(normalized, engine, language, directory, deadline)
+        selected_image = normalized
         rotation, confidence = _ocr_orientation(normalized, engine, directory, deadline)
         applied, candidate_score = 0, None
         if rotation:
@@ -239,7 +372,7 @@ def ocr_image(image, language, *, note=None):
                 if (candidate_score is not None and candidate_score >= 70 and candidate[2] >= max(12, baseline[2] * .8)
                         and (baseline[1] is None or candidate_score >= baseline[1] + 5
                              or (confidence >= 15 and candidate_score >= baseline[1] - 2))):
-                    selected, applied = candidate, rotation
+                    selected, applied, selected_image = candidate, rotation, rotated
                 else:
                     note("ocr_orientation_candidate_rejected_manual_review_required", unread=False)
             except (OcrFailure, OutputLimit, OSError, UnicodeError):
@@ -248,7 +381,22 @@ def ocr_image(image, language, *, note=None):
             selected = _ocr_fragmented_retry(baseline, normalized, engine, language, directory, deadline, note)
         if confidence is None or confidence < 15 or rotation != applied:
             note("ocr_orientation_uncertain_manual_review_required", unread=False)
+        if not selected[0].strip():
+            # 자동 단락 나누기(psm 3)가 테두리 상자 안 문자를 통째로 놓치는 경우가 있다(D-159).
+            # 한 덩어리 읽기 결과는 충분한 신뢰도일 때만 쓴다.
+            try:
+                source = normalized.rotate(-applied, expand=True) if applied else normalized
+                candidate = _ocr_attempt(source, engine, language, directory, deadline, psm=6)
+                if candidate[1] is not None and candidate[1] >= 70 and candidate[2] >= 12:
+                    note("ocr_single_block_used_after_empty_page_layout", unread=False)
+                    selected, selected_image = candidate, source
+            except (OcrFailure, OutputLimit, OSError, UnicodeError):
+                note("ocr_single_block_retry_failed_empty_result_retained", unread=False)
         text, score, count, weak, psm = selected
+        if text.strip():
+            text, reread = _reread_hangul_words(selected, selected_image, engine, language, directory, deadline)
+            if reread:
+                note(f"ocr_hangul_words_reread_with_korean_model={reread}", unread=False)
         if text.strip() and (score is None or score < 60 or weak > count * .3):
             note("ocr_low_or_missing_confidence_text_retained_manual_review_required", unread=True)
         note(f"ocr_exif={exif if exif in range(1, 9) else 'unknown'};osd_clockwise={rotation};"
@@ -260,24 +408,161 @@ def ocr_image(image, language, *, note=None):
         return text
 
 
-def pdf(path, result, ocr, language):
+def picture_reader(language):
+    """슬라이드 그림 파일의 문자를 읽는 함수(D-159). 같은 그림은 한 번만 읽고, 실패는 알려진 코드로 돌려준다."""
+    state = {"cache": {}}
+
+    def read(raw):
+        key = sha256(raw).hexdigest()
+        if key in state["cache"]:
+            return state["cache"][key]
+        from PIL import Image
+        try:
+            with Image.open(BytesIO(raw)) as source:
+                if source.width * source.height > MAX_PIXELS:
+                    return {"failure": "picture_too_large_not_read"}
+                picture = source.convert("RGBA")
+        except (OSError, ValueError, Image.DecompressionBombError):
+            # EMF·WMF·SVG 등 그림 형식을 읽지 못하면 미독으로 남긴다.
+            return {"failure": "picture_format_not_read"}
+        try:
+            if "engine" not in state:
+                state["engine"] = ocr_engine(language)
+            found = ocr_region_text(picture, state["engine"], language)
+        except DependencyMissing as error:
+            return {"failure": "dependency_missing:" + error.name}
+        except OcrFailure as error:
+            return {"failure": str(error)}
+        except OutputLimit:
+            return {"failure": "picture_too_large_not_read"}
+        state["cache"][key] = found
+        return found
+    return read
+
+
+def pdf_text_problem(text):
+    """내장 문자의 판독 불가 신호만 본다. 읽을 수 있다고 판정해도 정확도를 보증하지 않는다."""
+    visible = [char for char in text if not char.isspace()]
+    if not visible:
+        return "pdf_text_empty"
+    odd = sum(char == "\ufffd" or unicodedata.category(char) in ("Co", "Cc", "Cs", "Cn") for char in visible)
+    if odd >= max(3, len(visible) * PDF_TEXT_MAX_ODD):
+        return "pdf_text_replacement_private_or_control_characters"
+    if len(visible) >= 10 and sum(char.isalnum() for char in visible) < len(visible) * PDF_TEXT_MIN_ALNUM:
+        return "pdf_text_mostly_symbols"
+    return None
+
+
+def pdf_image_regions(document, index, minimum=PDF_IMAGE_OCR_MIN_FRACTION):
+    """쪽 안 그림 객체(서식 묶음 안 포함)의 쪽 면적 비율과 위치. 쪽 밖으로 나간 부분은 뺀다.
+
+    minimum 이상인 그림만 원본 해상도 그림을 꺼낸다. 위치는 쪽 왼쪽 위 기준 백분율이다.
+    """
+    import pypdfium2.raw as pdfium_c
+    page = document[index]
+    try:
+        left, bottom, right, top = page.get_bbox()
+        width, height = right - left, top - bottom
+        if width <= 0 or height <= 0:
+            raise ValueError("empty page box")
+        regions = []
+        for item in page.get_objects(filter=(pdfium_c.FPDF_PAGEOBJ_IMAGE,)):
+            x0, y0, x1, y1 = item.get_bounds()
+            shown_width = max(0.0, min(x1, right) - max(x0, left))
+            shown_height = max(0.0, min(y1, top) - max(y0, bottom))
+            region = {"fraction": shown_width * shown_height / (width * height),
+                      "box": tuple(round(value * 100) for value in ((max(x0, left) - left) / width,
+                          (top - min(y1, top)) / height, shown_width / width, shown_height / height))}
+            if region["fraction"] >= minimum:
+                # PDFium이 소유한 원본 그림 버퍼이므로 직접 닫지 않고 복사본만 쓴다.
+                region["image"] = item.get_bitmap(render=False).to_pil().convert("RGBA")
+            regions.append(region)
+        return regions
+    finally:
+        page.close()
+
+
+def pdf_image_fractions(document, index):
+    return [region["fraction"] for region in pdf_image_regions(document, index, minimum=2)]
+
+
+def pdf(path, result, ocr, language, *, selected_page=None):
     require("pypdf")
     from pypdf import PdfReader
     reader = PdfReader(path)
+    state = {"cache": {}}
+
+    def regions(index):
+        require("pypdfium2")
+        import pypdfium2
+        if "document" not in state:
+            state["document"] = pypdfium2.PdfDocument(str(path))
+        return pdf_image_regions(state["document"], index)
+
+    def read_region(image):
+        # 같은 그림(장 구분 배경 등)은 문서 안에서 한 번만 읽는다.
+        key = sha256(image.tobytes()).hexdigest() + f":{image.size}"
+        if key not in state["cache"]:
+            if "engine" not in state:
+                state["engine"] = ocr_engine(language)
+            state["cache"][key] = ocr_region_text(image, state["engine"], language)
+        return state["cache"][key]
+    def relations(index):
+        require("pypdfium2")
+        import pypdfium2
+        if "document" not in state:
+            state["document"] = pypdfium2.PdfDocument(str(path))
+        return relations_view.pdf_page_relations(state["document"], index)
+    try:
+        _pdf_pages(path, reader, result, ocr, language, selected_page, regions, read_region, relations)
+    finally:
+        if "document" in state:
+            state["document"].close()
+
+
+def _pdf_pages(path, reader, result, ocr, language, selected_page, regions, read_region, relations):
     if reader.is_encrypted:
         result.note("encrypted_pdf_not_read", "whole source")
         return
     count = len(reader.pages)
     result.result["total_units"] = count
-    for index in range(min(count, MAX_PAGES)):
+    if selected_page is not None:
+        if not 1 <= selected_page <= count:
+            result.note("selected_pdf_page_out_of_range", "PDF")
+            return
+        # 후보를 전체 문서 변환 완료로 오인하지 않도록 건드리지 않은 범위를 남긴다.
+        result.note("selected_pdf_page_ocr_candidate", f"page {selected_page}", unread=False)
+        if selected_page > 1:
+            result.note("not_selected_for_page_ocr", f"pages 1-{selected_page - 1}")
+        if selected_page < count:
+            result.note("not_selected_for_page_ocr", f"pages {selected_page + 1}-{count}")
+    indices = [selected_page - 1] if selected_page is not None else range(min(count, MAX_PAGES))
+    summary = {"small": [], "added": [], "no_text": [], "relations": [], "review": [], "relation_failed": []}
+    for index in indices:
         page = reader.pages[index]
         scope = f"page {index + 1}"
-        text, method = "", "pdf_text"
+        text, method, problem, image_regions = "", "pdf_text", None, None
         try:
-            text = page.extract_text() or ""
-            images = bool(page.get("/Resources", {}).get("/XObject"))
-            needs_ocr = not text.strip() or images
-            if ocr == "always" or (ocr == "auto" and needs_ocr):
+            # 선택 쪽 재인식에서는 깨진 내장 문자 추출 때문에 OCR까지 막지 않는다.
+            if selected_page is None:
+                text = page.extract_text() or ""
+                problem = pdf_text_problem(text)
+                needs_ocr = problem is not None
+                # 정상 내장 문자를 기본으로 쓰고 그림은 영역만 따로 읽어 덧붙인다(D-157·D-159).
+                if not needs_ocr and ocr == "auto" and page.get("/Resources", {}).get("/XObject"):
+                    try:
+                        image_regions = regions(index)
+                    except DependencyMissing:
+                        raise
+                    except Exception:
+                        # 그림 위치를 재지 못하면 그림 안 문자를 놓치지 않도록 전체 쪽 OCR을 유지한다.
+                        result.note("pdf_image_size_unknown_whole_page_ocr_kept", scope, unread=False)
+                        needs_ocr = True
+            else:
+                needs_ocr = True
+            if selected_page is not None or ocr == "always" or (ocr == "auto" and needs_ocr):
+                if problem and problem != "pdf_text_empty":
+                    result.ocr_note(scope, problem + "_ocr_used")
                 require("pypdfium2")
                 require("PIL", "Pillow")
                 import pypdfium2
@@ -308,6 +593,8 @@ def pdf(path, result, ocr, language):
                     result.note("ocr_no_text_detected_manual_review_required", scope)
             elif needs_ocr:
                 result.note("ocr_required_but_disabled", scope)
+            elif image_regions:
+                text = _with_image_text(text, image_regions, read_region, result, scope, summary, index + 1)
         except DependencyMissing as error:
             result.note("dependency_missing:" + error.name, scope)
         except OcrFailure as error:
@@ -316,12 +603,69 @@ def pdf(path, result, ocr, language):
             result.note("page_render_or_text_limit", scope)
         except Exception:
             result.note("pdf_page_or_ocr_failed", scope)
+        if selected_page is None and method == "pdf_text" and text.strip():
+            # 도식이 있으면 상자·선 위치로 추정한 관계를 덧붙인다(D-160). 실패해도 쪽 변환은 계속한다.
+            try:
+                block, status = relations(index)
+            except Exception:
+                summary["relation_failed"].append(index + 1)
+            else:
+                if status == "added":
+                    text = text.rstrip() + "\n\n" + block + "\n"
+                    summary["relations"].append(index + 1)
+                elif status == "review":
+                    summary["review"].append(index + 1)
         if not text.strip():
             result.note("no_text_detected_manual_review_required", scope)
         result.add(f"page-{index + 1}", location("pages", start=index + 1, end=index + 1), text, method)
-    if count > MAX_PAGES:
+    if selected_page is None and count > MAX_PAGES:
         result.note("page_limit", f"pages {MAX_PAGES + 1}-{count}")
+    # 쪽마다 경고를 늘리지 않고 쪽 번호를 묶어서 남긴다.
+    for code, numbers in (("pdf_text_kept_small_images_not_ocr", summary["small"]),
+                          ("pdf_image_text_added_marked_as_ocr", summary["added"]),
+                          ("pdf_images_without_readable_text", summary["no_text"]),
+                          ("pdf_diagram_relations_added_estimated_by_position", summary["relations"]),
+                          ("pdf_diagram_relations_need_review", summary["review"]),
+                          ("pdf_diagram_relations_failed", summary["relation_failed"])):
+        for offset in range(0, len(numbers), 40):
+            result.note(code, "pages " + ",".join(map(str, numbers[offset:offset + 40])), unread=False)
     result.note("layout_annotations_images_and_reading_order_not_verified", "PDF", unread=False)
+
+
+def _with_image_text(text, regions, read_region, result, scope, summary, number):
+    """내장 문자 뒤에 그림 영역의 OCR 문자를 위치와 함께 덧붙인다. 내장 문자는 바꾸지 않는다."""
+    readable = sorted((region for region in regions if "image" in region), key=lambda region: region["box"][1::-1])
+    if len(readable) < len(regions):
+        summary["small"].append(number)
+    if len(readable) > PDF_IMAGE_OCR_MAX_PER_PAGE:
+        result.note("pdf_image_ocr_limit_remaining_images_not_read", scope)
+        largest = sorted(readable, key=lambda region: -region["fraction"])[:PDF_IMAGE_OCR_MAX_PER_PAGE]
+        readable = [region for region in readable if any(region is chosen for chosen in largest)]
+    sections, low = [], False
+    for region in readable:
+        try:
+            found = read_region(region["image"])
+        except OutputLimit:
+            result.note("pdf_image_too_large_not_read", scope)
+            continue
+        except OcrFailure as error:
+            result.note(str(error), scope)
+            continue
+        if found is None:
+            continue
+        left, top, width, height = region["box"]
+        sections.append(f"[그림 속 글자 {len(sections) + 1} · 쪽 안 위치: 왼쪽 {left}% 위 {top}% "
+                        f"크기 {width}%×{height}% · OCR]\n{found['text']}")
+        low = low or found["low_confidence"]
+    if not sections:
+        if readable:
+            summary["no_text"].append(number)
+        return text
+    summary["added"].append(number)
+    if low:
+        # 기존 저신뢰 검토·등록 계속 흐름(D-153·D-154)이 그대로 다루는 같은 표시를 쓴다.
+        result.note(LOW_CONFIDENCE, scope)
+    return text.rstrip() + "\n\n" + "\n\n".join(sections) + "\n"
 
 
 def cell_text(value):
@@ -489,8 +833,12 @@ def image(path, result, ocr, language):
             result.note("frame_limit", f"frames {MAX_PAGES + 1}-{count}")
 
 
-def convert_file(path, format, *, ocr="auto", language="eng", checkpoint=None):
+def convert_file(path, format, *, ocr="auto", language="eng", checkpoint=None, selected_page=None):
     """검증한 원본 사본을 읽으며 단위마다 부분 결과를 알린다."""
+    if selected_page is not None:
+        if format != "pdf" or type(selected_page) is not int or not 1 <= selected_page <= 1_000_000:
+            raise ValueError("invalid_page_conversion_options")
+        ocr = "always"
     result = Conversion(format, checkpoint)
     installed = diagnostics(language)
     versions = {name: value["version"] for name, value in installed["packages"].items() if value["available"]}
@@ -507,15 +855,15 @@ def convert_file(path, format, *, ocr="auto", language="eng", checkpoint=None):
         result.note("tesseract=" + installed["tesseract"]["version"], "tools", unread=False)
     try:
         if format == "pdf":
-            pdf(path, result, ocr, language)
+            pdf(path, result, ocr, language, selected_page=selected_page)
         elif format == "xlsx":
             xlsx(path, result)
         elif format == "docx":
             docx(path, result)
         elif format == "pptx":
-            presentation_view.pptx(path, result)
+            presentation_view.pptx(path, result, picture_text=picture_reader(language) if ocr != "never" else None)
         elif format == "ppt":
-            presentation_view.ppt(path, result)
+            presentation_view.ppt(path, result, picture_text=picture_reader(language) if ocr != "never" else None)
         elif format in {"png", "jpeg", "jpg", "tiff", "tif", "webp", "bmp", "gif"}:
             image(path, result, ocr, language)
         elif format in {"md", "txt"}:

@@ -1,7 +1,17 @@
 export { DocumentTaskList } from './ui/DocumentTaskList';
 export { documentTaskApi } from './api/documentTasks.api';
-export { DocumentTaskDetail } from './ui/DocumentTaskDetail';
-export { buildDocumentTaskView } from './model/buildDocumentTaskView';
+export {
+  DocumentTaskDetail,
+  DocumentTaskDetailLoading,
+} from './ui/DocumentTaskDetail';
+export type {
+  DocumentTaskDetailProps,
+  DocumentTaskDetailLoadingProps,
+} from './ui/DocumentTaskDetail';
+export {
+  buildDocumentTaskView,
+  buildAnalysisProgressView,
+} from './model/buildDocumentTaskView';
 export type { DocumentTaskProcessingView } from './model/buildDocumentTaskView';
 export {
   documentTaskNeedsAttention,
@@ -11,4 +21,7 @@ export type {
   DocumentTaskAction,
   DocumentTaskState,
   DocumentTaskView,
+  DocumentTaskStage,
+  DocumentTaskStep,
+  DocumentTaskMeasurement,
 } from './model/documentTask.types';

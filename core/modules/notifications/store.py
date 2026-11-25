@@ -12,11 +12,12 @@ import re
 import sqlite3
 from uuid import uuid4
 
-from core.common.json_codec import canonical_json_hash
+from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.modules.analysis_jobs import contracts as limits, records
 from core.modules.analysis_jobs.contracts import JobConflictError, JobValidationError
 from core.modules.sources import files
 from core.modules.sources.store import SourceStore
+from core.modules.analysis_plans.corrections import target, target_key, review_targets, selection_revision
 
 LOW = 'ocr_low_or_missing_confidence_text_retained_manual_review_required'
 PAGE = re.compile(r'^page ([1-9][0-9]*): ' + LOW + r'$')
@@ -126,6 +127,7 @@ class NotificationStore:
 
     def _put(self, db, value):
         value.pop('revision', None)
+        value['corrections_revision'] = selection_revision(value['pages'])
         value['revision'] = canonical_json_hash(value)
         execution = value.get('execution') or {}
         db.execute('INSERT INTO workflows VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant,user_id,profile,workflow_id) '
@@ -265,7 +267,7 @@ class NotificationStore:
     def _new(self, workflow_id, source_ref, conversion_ref, title, pages, target=None):
         now = self.now()
         return dict(workflow_id=workflow_id, source_ref=source_ref, conversion_ref=conversion_ref,
-                    title=title, pages=[dict(page=page, state='pending') for page in pages],
+                    title=title, pages=[dict(**(dict(page=page) if isinstance(page, int) else page), state='pending') for page in pages],
                     state='review' if pages else 'running', target_document=target,
                     actor=self.actor, approval=None, execution=None,
                     resume_request_id=identity('resume', *self.scope, workflow_id), created_at=now, updated_at=now)
@@ -273,9 +275,14 @@ class NotificationStore:
     def ensure_locked(self, reference, *, title=None, target=None, origin='existing_report'):
         report = self._conversion(reference)
         manifest = report['manifest']
-        pages = review_pages(manifest, report['components'])
+        pages = review_targets(manifest, report['components'])
+        if manifest.get('complete'):
+            from core.modules.analysis_plans.corrections import unit_target
+            pages = [unit_target(unit) for unit in manifest['units']]
         if not pages:
-            raise JobValidationError('Only retained low-confidence pages can enter approval.')
+            raise JobValidationError('This report requires file, environment, or interrupted-conversion recovery.')
+        from core.modules.analysis_plans.corrections import needs_input
+        pages = [dict(item, input_required=needs_input(report, item)) for item in pages]
         with self.database() as db:
             try:
                 value = self._get(db, reference['conversion_id'])
@@ -332,7 +339,7 @@ class NotificationStore:
                 db.execute('INSERT INTO requests VALUES(?,?,?,?,?,?)', (*self.scope, body.request_id, digest, '{}'))
             return dict(workflow=value, replayed=False)
 
-    def detail(self, workflow_id):
+    def detail(self, workflow_id, *, include_content=True):
         with self.sources._coordination_lock(create=True):
             self.reconcile_locked()
             with self.database() as db:
@@ -345,7 +352,140 @@ class NotificationStore:
                     'SELECT value FROM events WHERE tenant=? AND user_id=? AND profile=? AND workflow_id=? ORDER BY rowid',
                     (*self.scope, workflow_id))]
             conversion = self._conversion(value['conversion_ref']) if value['conversion_ref'] else None
-            return dict(workflow=value, events=events, conversion=conversion)
+            corrections = self._corrections(value, conversion) if conversion else []
+            # 미리보기 형식은 변환기의 이름에서 추정하지 않고 고정 원본에서 읽는다.
+            source_format = None
+            try:
+                catalog = self._source(value['source_ref'])
+                source_format = catalog['versions'][-1]['format']
+            except (FileNotFoundError, JobConflictError):
+                pass  # 바뀐 원본의 과거 검토 내용은 읽되 새 미리보기로 대체하지 않는다.
+            result = dict(workflow=value, events=events, conversion=conversion, corrections=corrections,
+                          corrections_revision=selection_revision(value['pages']), content_included=include_content,
+                          source_format=source_format)
+            if not include_content:
+                result = self._summary(result)
+            self._check_detail_size(result)
+            return result
+
+    def _summary(self, result):
+        from hashlib import sha256
+        result = dict(result, content_included=False)
+        if result.get('conversion'):
+            result['conversion'] = dict(result['conversion'], components={})
+        result['corrections'] = [dict(**{key: value for key, value in item.items() if key != 'content'},
+            content_sha256=sha256(item['content'].encode()).hexdigest(), size_bytes=len(item['content'].encode()),
+            total_characters=len(item['content'])) for item in result['corrections']]
+        return result
+
+    def content(self, workflow_id, query):
+        """한 workflow 판본의 원문/선택 문자를 잘라 읽는다. 보관 내용은 절단하지 않는다."""
+        from hashlib import sha256
+        from core.modules.analysis_plans.corrections import binding
+        with self.sources._coordination_lock(create=True):
+            self.reconcile_locked()
+            with self.database() as db:
+                value = self._get(db, workflow_id)
+                self._check(value, db=db)
+            if value['revision'] != query.expected_revision:
+                raise JobConflictError('conflict', current_revision=value['revision'])
+            selected_target = target(query)
+            report = self._conversion(value['conversion_ref'])
+            bound = binding(report, selected_target, allow_page_unit=True)
+            text = ('\n\n'.join(report['components'][unit['unit_id']] for unit in report['manifest']['units'])
+                    if selected_target.get('whole_document') else report['components'].get(bound['unit_id'], ''))
+            correction_ref = None
+            exists = bool(selected_target.get('whole_document') or bound['unit_id'] is not None)
+            if query.variant == 'selected':
+                item = next((item for item in value['pages'] if target_key(item) == target_key(selected_target)), None)
+                if item and item.get('correction_ref'):
+                    from core.modules.analysis_plans.store import PlanStore
+                    from core.modules.analysis_plans.corrections import load
+                    correction = load(PlanStore(self.store, self.actor), item['correction_ref'],
+                        workflow_id=workflow_id, source_ref=value['source_ref'], conversion_ref=value['conversion_ref'],
+                        report=report, selected_target=selected_target)
+                    text, correction_ref, exists = correction['content'], correction['correction_ref'], True
+            if query.offset > len(text):
+                raise JobValidationError('The content offset exceeds this exact text.')
+            end = min(len(text), query.offset + query.limit)
+            return dict(workflow_revision=value['revision'], target=selected_target, variant=query.variant,
+                correction_ref=correction_ref, exists=exists, content=text[query.offset:end], content_sha256=sha256(text.encode()).hexdigest(),
+                size_bytes=len(text.encode()), total_characters=len(text), next_offset=end if end < len(text) else None)
+
+    def _corrections(self, value, report):
+        """원보고와 별도로 선택된 불변 보정만 현재 허용 관점에서 읽는다."""
+        from core.modules.analysis_plans.store import PlanStore
+        from core.modules.analysis_plans.corrections import selected
+        return selected(PlanStore(self.store, self.actor), value, report)
+
+    def _check_detail_size(self, result):
+        """앱의 응답 경계를 넘는 본문은 자르지 않고 명시 거부한다."""
+        from core.modules.analysis_inputs.contracts import InputLimitError
+        if len(canonical_json_bytes(result)) > 8 * 1024 * 1024 - 16384:
+            raise InputLimitError('The page review response exceeds its byte limit; no text was truncated.')
+
+    def _correct(self, db, value, body, authorize):
+        """새 본문을 먼저 불변 공개하고 같은 DB 트랜잭션에서 확인 전 참조를 연결한다."""
+        from core.modules.analysis_plans.store import PlanStore, stable_id
+        from core.modules.analysis_plans import corrections
+        if value['state'] != 'review':
+            raise JobConflictError('approval_already_final')
+        selected_target = target(body)
+        key = target_key(selected_target)
+        report = self._conversion(value['conversion_ref'])
+        if not report['manifest']['complete'] and not review_targets(report['manifest'], report['components']):
+            raise JobValidationError('The original conversion requires recovery before content selection.')
+        bound = corrections.binding(report, selected_target)
+        if bound['unit_id'] is None and 'page' in selected_target:
+            catalog = self._source(value['source_ref'])
+            if catalog['versions'][-1]['format'] != 'pdf':
+                raise JobValidationError('Only a PDF report may identify an absent page.')
+        plans = PlanStore(self.store, self.actor)
+        selected = [item for item in corrections.selected(plans, value, report)
+                    if target_key(item) != key and not item.get('whole_document')]
+        if selected_target.get('whole_document'):
+            selected = []
+        now = self.now()
+        candidate = dict(**selected_target, content=body.content, method=body.method,
+                         warnings=list(body.warnings), created_at=now, request_id=body.request_id,
+                         correction_ref=dict(correction_id=stable_id('corrections', *self.scope[:2], body.request_id),
+                                             correction_revision='0' * 64))
+        selected.append(candidate)
+        corrections.effective_parts(report, selected)
+        events = [json.loads(row['value']) for row in db.execute(
+            'SELECT value FROM events WHERE tenant=? AND user_id=? AND profile=? AND workflow_id=? ORDER BY rowid',
+            (*self.scope, value['workflow_id']))]
+        # 다음 사건/참조의 최대 길이를 포함한 응답을 공개 전에 검사한다.
+        self._check_detail_size(self._summary(dict(workflow=value, conversion=report, corrections=selected, events=[*events,
+            dict(actor=self.actor, kind='corrections', created_at=now, event_id=body.request_id,
+                 details=dict(**selected_target, method=body.method, warnings=body.warnings,
+                              correction_ref=candidate['correction_ref'], source_ref=value['source_ref'],
+                              conversion_ref=value['conversion_ref'], resulting_revision='0' * 64,
+                              request_id=body.request_id, expected_revision=body.expected_revision))])))
+
+        def reauthorize():
+            current = records.authorized(authorize, *self.scope[:2])
+            records.check_access(value['actor'], current)
+            if current['profile_id'] != self.scope[2]:
+                raise JobConflictError('access_basis_changed')
+            self.actor = plans.actor = current
+
+        stored = corrections.publish(plans, value, report, body, reauthorize, now)
+        reauthorize()
+        reference = dict(correction_id=stored['manifest']['id'], correction_revision=stored['revision'])
+        if selected_target.get('whole_document'):
+            value['pages'] = [dict(**selected_target, state='pending', correction_ref=reference, input_required=False)]
+        else:
+            pages = value['pages']
+            if any(item.get('whole_document') for item in pages):
+                pages = [dict(**item, state='pending', input_required=corrections.needs_input(report, item))
+                         for item in review_targets(report['manifest'], report['components'])]
+            found = any(target_key(item) == key for item in pages)
+            value['pages'] = [dict(item, state='pending', correction_ref=reference, input_required=False)
+                             if target_key(item) == key else item for item in pages]
+            if not found:
+                value['pages'].append(dict(**selected_target, state='pending', correction_ref=reference, input_required=False))
+        return reference
 
     def list(self, *, filter='all', limit=30, cursor=None, after_seq=None, after_change_seq=None):
         if filter not in ('all', 'unread', 'approval') or not 1 <= limit <= 100:
@@ -397,6 +537,19 @@ class NotificationStore:
 
     def mutate(self, workflow_id, operation, body, authorize):
         payload = body.model_dump(exclude={'profile'})
+        payload = {key: item for key, item in payload.items() if key not in ('page', 'unit_id', 'whole_document') or item is not None}
+        # 새 선택 필드를 생략한 구 요청의 멱등 지문을 바꾸지 않는다.
+        if operation == 'pages':
+            payload['decisions'] = [{key: item for key, item in decision.items()
+                                    if key not in ('correction_ref', 'page', 'unit_id', 'whole_document') or item is not None}
+                                   for decision in payload['decisions']]
+        if operation == 'approve' and payload.get('correction_refs') is None:
+            payload.pop('correction_refs', None)
+        if operation == 'approve':
+            if payload.get('corrections_revision') is None:
+                payload.pop('corrections_revision', None)
+            if payload.get('correction_refs') is not None:
+                payload['correction_refs'] = [dict(**target(item), correction_ref=item['correction_ref']) for item in payload['correction_refs']]
         digest = canonical_json_hash(dict(workflow_id=workflow_id, operation=operation, **payload))
         with self.sources._coordination_lock(create=True):
             self.actor = records.authorized(authorize, *self.scope[:2])
@@ -415,19 +568,45 @@ class NotificationStore:
                 if operation == 'pages':
                     if value['state'] != 'review':
                         raise JobConflictError('approval_already_final')
-                    decisions = {entry.page: entry.state for entry in body.decisions}
-                    if len(decisions) != len(body.decisions) or set(decisions) - {p['page'] for p in value['pages']}:
-                        raise JobValidationError('Only distinct warned pages may be reviewed.')
-                    value['pages'] = [dict(page=p['page'], state=decisions.get(p['page'], p['state'])) for p in value['pages']]
+                    decisions = {target_key(entry): entry.state for entry in body.decisions}
+                    if len(decisions) != len(body.decisions) or set(decisions) - {target_key(p) for p in value['pages']}:
+                        raise JobValidationError('Only distinct workflow content targets may be selected.')
+                    by_page = {target_key(page): page for page in value['pages']}
+                    from core.modules.analysis_plans.corrections import needs_input
+                    report = self._conversion(value['conversion_ref'])
+                    for entry in body.decisions:
+                        current_ref = by_page[target_key(entry)].get('correction_ref')
+                        observed_ref = entry.correction_ref.model_dump() if entry.correction_ref else None
+                        if ((entry.state == 'usable' and current_ref != observed_ref)
+                                or (observed_ref is not None and current_ref != observed_ref)):
+                            raise JobConflictError('correction_basis_changed')
+                        if entry.state == 'usable' and current_ref is None and needs_input(report, target(entry)):
+                            raise JobConflictError('content_input_required')
+                    value['pages'] = [dict(p, state=decisions.get(target_key(p), p['state'])) for p in value['pages']]
+                elif operation == 'corrections':
+                    correction_ref = self._correct(db, value, body, authorize)
                 elif operation == 'approve':
                     if value['state'] != 'review' or not value['pages'] or any(p['state'] != 'usable' for p in value['pages']):
                         raise JobConflictError('page_approval_required')
+                    expected_corrections = [dict(**target(page), correction_ref=page['correction_ref'])
+                                            for page in value['pages'] if page.get('correction_ref')]
+                    observed_corrections = [item.model_dump(exclude_none=True) for item in body.correction_refs or []]
+                    if body.corrections_revision is not None:
+                        if body.corrections_revision != selection_revision(value['pages']):
+                            raise JobConflictError('correction_basis_changed')
+                    elif sorted(expected_corrections, key=target_key) != sorted(observed_corrections, key=target_key):
+                        raise JobConflictError('correction_basis_changed')
+                    if body.correction_refs is not None and sorted(expected_corrections, key=target_key) != sorted(observed_corrections, key=target_key):
+                        raise JobConflictError('correction_basis_changed')
                     if body.target_document:
                         if value['target_document'] not in (None, body.target_document):
                             raise JobConflictError('target_changed')
                         value['target_document'] = self._target(body.target_document)
                     if not value['target_document']:
                         raise JobValidationError('An explicit target document is required before approval.')
+                    from core.modules.analysis_plans.corrections import effective_parts
+                    report = self._conversion(value['conversion_ref'])
+                    effective_parts(report, self._corrections(value, report))
                     value['approval'] = dict(request_id=body.request_id, approved_at=self.now(), actor=self.actor,
                         device_id=body.device_id, device_name=body.device_name, source_ref=value['source_ref'],
                         conversion_ref=value['conversion_ref'], target_document=value['target_document'],
@@ -481,7 +660,10 @@ class NotificationStore:
                     raise JobValidationError('Unknown notification operation.')
                 value['updated_at'] = self.now()
                 self._put(db, value)
-                self._event(db, value, operation, body.request_id, details={**payload,
+                event_payload = {key: item for key, item in payload.items() if key != 'content'}
+                if operation == 'corrections':
+                    event_payload['correction_ref'] = correction_ref
+                self._event(db, value, operation, body.request_id, details={**event_payload,
                     'source_ref': value['source_ref'], 'conversion_ref': value['conversion_ref'],
                     'resulting_revision': value['revision']})
                 response = dict(workflow=value, replayed=False)
@@ -502,6 +684,11 @@ class NotificationStore:
             self._check(value, db=db)
             if value['conversion_ref'] != reference or not value['approval']:
                 raise JobConflictError('approval_required', workflow_id=value['workflow_id'])
+            if any(value['approval'].get(key) != value[key]
+                   for key in ('source_ref', 'conversion_ref', 'pages', 'target_document')):
+                raise JobConflictError('approval_basis_changed', workflow_id=value['workflow_id'])
+            report = self._conversion(reference)
+            self._corrections(value, report)
             if request_id is not None and request_id != value['resume_request_id']:
                 raise JobConflictError('resume_request_required', workflow_id=value['workflow_id'])
             if target is not None and target != value['target_document']:

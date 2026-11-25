@@ -1,6 +1,22 @@
-import { notificationDetailResultSchema } from '@contracts/notifications.contract';
+import {
+  notificationDetailResultSchema,
+  notificationLocation,
+  notificationLocationKey,
+} from '@contracts/notifications.contract';
+import type {
+  RegistrationDraftsBridge,
+  RegistrationDraftGetRequest,
+  RegistrationDraftSaveRequest,
+  RegistrationDraftClearRequest,
+  RegistrationDraftResult,
+} from '@contracts/registrationDrafts.contract';
 import type {
   NotificationApproveRequest,
+  NotificationCorrectRequest,
+  NotificationRetryPageRequest,
+  NotificationRetryPageResult,
+  NotificationCancelRetryRequest,
+  NotificationCancelRetryResult,
   NotificationContinueRequest,
   NotificationDecideRequest,
   NotificationDetailResult,
@@ -24,7 +40,16 @@ import {
 } from '../document-tasks/fixtures';
 
 type Detail = Extract<NotificationDetailResult, { ok: true }>['data'];
-type Method = 'list' | 'read' | 'page' | 'decide' | 'approve' | 'continue';
+type Method =
+  | 'list'
+  | 'read'
+  | 'page'
+  | 'decide'
+  | 'approve'
+  | 'continue'
+  | 'correct'
+  | 'retryPage'
+  | 'cancelRetry';
 export const workflowId = '1'.repeat(32);
 const deviceId = '2'.repeat(32);
 const source = {
@@ -48,9 +73,25 @@ type FixtureState = {
   ready: boolean;
   deny: boolean;
   calls: Record<string, number>;
+  trace: string[];
+  mutationReceipts: Record<string, string>;
   requests: Record<string, string[]>;
   fail: Method | null;
   lose: Method | null;
+  correctionReceipts: Record<string, string>;
+  ocrMode: 'normal' | 'empty' | 'delayed';
+  changeAfterDecision: boolean;
+  drafts: Record<
+    string,
+    {
+      data: Extract<RegistrationDraftResult, { ok: true }>['data'];
+      requestId: string;
+      request: string;
+    }
+  >;
+  draftRevision: number;
+  draftFailure: boolean;
+  draftReadFailure: boolean;
 };
 
 /** 격리된 170쪽·30경고 보고만 만들며 운영 자료를 읽지 않습니다. */
@@ -98,6 +139,7 @@ function initial(): FixtureState {
   );
   const detail: Detail = {
     workflow,
+    corrections: [],
     access,
     events: [
       {
@@ -149,9 +191,18 @@ function initial(): FixtureState {
     ready: true,
     deny: false,
     calls: {},
+    trace: [],
+    mutationReceipts: {},
     requests: {},
     fail: null,
     lose: null,
+    correctionReceipts: {},
+    ocrMode: 'normal',
+    changeAfterDecision: false,
+    drafts: {},
+    draftRevision: 0,
+    draftFailure: false,
+    draftReadFailure: false,
   };
 }
 let state = initial();
@@ -176,6 +227,7 @@ function persist(): void {
 /** 각 요청을 실제 계약 범위와 비교하고 실패·응답 유실을 재현합니다. */
 function enter(method: Method, request: NotificationSession): void {
   state.calls[method] = (state.calls[method] ?? 0) + 1;
+  (state.trace ??= []).push(method);
   if ('requestId' in request && typeof request.requestId === 'string') {
     state.requests[method] = [
       ...(state.requests[method] ?? []),
@@ -200,7 +252,8 @@ function mutation(
   request:
     | NotificationDecideRequest
     | NotificationApproveRequest
-    | NotificationContinueRequest,
+    | NotificationContinueRequest
+    | NotificationCorrectRequest,
 ): void {
   if (request.expectedRevision !== state.detail.workflow.revision)
     throw new Error(
@@ -220,6 +273,28 @@ function receipt(method: Method): void {
     throw new Error('합성 응답 유실: 저장 여부를 다시 확인해 주세요.');
   }
 }
+/** 서버의 동일 요청 재확인 의미를 보존하며 실패 시 새 요청으로 대체하지 않습니다. */
+function replayedMutation(
+  request:
+    | NotificationDecideRequest
+    | NotificationApproveRequest
+    | NotificationContinueRequest,
+): boolean {
+  const previous = (state.mutationReceipts ??= {})[request.requestId];
+  if (!previous) return false;
+  if (previous !== JSON.stringify(request))
+    throw new Error('같은 요청의 내용이 달라졌습니다.');
+  return true;
+}
+/** 확정된 합성 쓰기는 응답 유실 전에 기록합니다. */
+function rememberMutation(
+  request:
+    | NotificationDecideRequest
+    | NotificationApproveRequest
+    | NotificationContinueRequest,
+): void {
+  (state.mutationReceipts ??= {})[request.requestId] = JSON.stringify(request);
+}
 const denied = {
   ok: false,
   error: {
@@ -228,7 +303,105 @@ const denied = {
     message: '현재 자료에 접근할 수 없습니다.',
   },
 } as const;
+let completeRetry: (() => void) | null = null;
 const bridge: NotificationsBridge = {
+  correct: async (
+    request: NotificationCorrectRequest,
+  ): Promise<NotificationMutationResult> => {
+    enter('correct', request);
+    if (state.deny) return denied;
+    const previous = state.correctionReceipts[request.requestId];
+    if (previous) {
+      if (previous !== JSON.stringify(request))
+        throw new Error('수정 재시도 본문이 다릅니다.');
+      return {
+        ok: true,
+        data: {
+          workflow: structuredClone(state.detail.workflow),
+          replayed: true,
+          access,
+        },
+      };
+    }
+    mutation(request);
+    let page = state.detail.workflow.pages.find(
+      (entry: NotificationWorkflow['pages'][number]): boolean =>
+        notificationLocationKey(entry) === notificationLocationKey(request),
+    );
+    if (!page) {
+      const known = state.detail.conversion?.manifest.units.some(
+        (
+          unit: NonNullable<Detail['conversion']>['manifest']['units'][number],
+        ): boolean =>
+          request.page
+            ? unit.location.kind === 'pages' &&
+              unit.location.start === request.page &&
+              unit.location.end === request.page
+            : unit.unit_id === request.unit_id,
+      );
+      if (!known && !request.whole_document)
+        throw new Error('잘못된 수정 위치');
+      page = { ...notificationLocation(request), state: 'pending' };
+      state.detail.workflow.pages.push(page);
+    }
+    const correction_ref = {
+      correction_id: request.requestId,
+      correction_revision: state.detail.workflow.revision,
+    };
+    page.correction_ref = correction_ref;
+    page.state = 'pending';
+    state.detail.corrections = state.detail.corrections.filter(
+      (entry: Detail['corrections'][number]): boolean =>
+        notificationLocationKey(entry) !== notificationLocationKey(page),
+    );
+    state.detail.corrections.push({
+      correction_ref,
+      ...notificationLocation(page),
+      content: request.content,
+      method: request.method,
+      warnings: request.warnings ?? [],
+      created_at: now,
+    });
+    state.correctionReceipts[request.requestId] = JSON.stringify(request);
+    receipt('correct');
+    return {
+      ok: true,
+      data: {
+        workflow: structuredClone(state.detail.workflow),
+        replayed: false,
+        access,
+      },
+    };
+  },
+  retryPage: async (
+    request: NotificationRetryPageRequest,
+  ): Promise<NotificationRetryPageResult> => {
+    enter('retryPage', request);
+    if (state.deny) return denied;
+    if (request.expectedRevision !== state.detail.workflow.revision)
+      throw new Error('검토 기준이 변경되었습니다.');
+    if (state.ocrMode === 'delayed')
+      await new Promise<void>((resolve: () => void): void => {
+        completeRetry = resolve;
+      });
+    return {
+      ok: true,
+      data: {
+        page: request.page,
+        content:
+          state.ocrMode === 'empty'
+            ? ''
+            : `${request.page}쪽 새 OCR 후보입니다. 원본 대조가 필요합니다.`,
+        warnings: ['ocr_manual_review_required'],
+      },
+    };
+  },
+  cancelRetry: async (
+    request: NotificationCancelRetryRequest,
+  ): Promise<NotificationCancelRetryResult> => {
+    enter('cancelRetry', request);
+    return state.deny ? denied : { ok: true, data: { cancelled: true } };
+  },
   list: async (
     request: NotificationListRequest,
   ): Promise<NotificationListResult> => {
@@ -298,16 +471,44 @@ const bridge: NotificationsBridge = {
   ): Promise<NotificationMutationResult> => {
     enter('decide', request);
     if (state.deny) return denied;
+    if (replayedMutation(request))
+      return {
+        ok: true,
+        data: {
+          workflow: structuredClone(state.detail.workflow),
+          replayed: true,
+          access,
+        },
+      };
     mutation(request);
     request.decisions.forEach(
       (decision: NotificationDecideRequest['decisions'][number]): void => {
         const page = state.detail.workflow.pages.find(
           (item: NotificationWorkflow['pages'][number]): boolean =>
-            item.page === decision.page,
+            notificationLocationKey(item) === notificationLocationKey(decision),
         );
-        if (page) page.state = decision.state;
+        if (page) {
+          if (
+            decision.state === 'usable' &&
+            page.correction_ref &&
+            JSON.stringify(page.correction_ref) !==
+              JSON.stringify(decision.correction_ref)
+          )
+            throw new Error('수정 문자 판본 확인이 필요합니다.');
+          page.state = decision.state;
+        }
       },
     );
+    rememberMutation(request);
+    if (state.changeAfterDecision) {
+      state.changeAfterDecision = false;
+      const first = state.detail.workflow.pages[0];
+      if (first)
+        first.correction_ref = {
+          correction_id: 'e'.repeat(32),
+          correction_revision: 'e'.repeat(64),
+        };
+    }
     receipt('decide');
     return {
       ok: true,
@@ -323,15 +524,48 @@ const bridge: NotificationsBridge = {
   ): Promise<NotificationMutationResult> => {
     enter('approve', request);
     if (state.deny) return denied;
+    if (replayedMutation(request))
+      return {
+        ok: true,
+        data: {
+          workflow: structuredClone(state.detail.workflow),
+          replayed: true,
+          access,
+        },
+      };
+    const corrections = state.detail.workflow.pages.flatMap(
+      (
+        entry: NotificationWorkflow['pages'][number],
+      ): NonNullable<NotificationApproveRequest['correctionRefs']> =>
+        entry.correction_ref
+          ? [
+              {
+                ...notificationLocation(entry),
+                correction_ref: entry.correction_ref,
+              },
+            ]
+          : [],
+    );
+    if (
+      corrections.length &&
+      JSON.stringify(corrections) !== JSON.stringify(request.correctionRefs)
+    )
+      throw new Error('수정 문자 승인 판본이 다릅니다.');
     if (
       state.detail.workflow.pages.some(
         (page: NotificationWorkflow['pages'][number]): boolean =>
-          page.state !== 'usable',
+          page.state !== 'usable' &&
+          !state.detail.workflow.pages.some(
+            (entry: NotificationWorkflow['pages'][number]): boolean =>
+              !!entry.whole_document && entry.state === 'usable',
+          ),
       )
     )
       throw new Error('Unconfirmed page approval');
     mutation(request);
     state.detail.workflow.state = 'approved';
+    if (request.targetDocument)
+      state.detail.workflow.target_document = request.targetDocument;
     state.detail.workflow.approval = {
       request_id: request.requestId,
       approved_at: now,
@@ -339,6 +573,7 @@ const bridge: NotificationsBridge = {
       device_id: deviceId,
       device_name: 'UI 검증 PC',
     };
+    rememberMutation(request);
     receipt('approve');
     return {
       ok: true,
@@ -369,6 +604,15 @@ const bridge: NotificationsBridge = {
   ): Promise<Awaited<ReturnType<NotificationsBridge['continue']>>> => {
     enter('continue', request);
     if (state.deny) return denied;
+    if (replayedMutation(request))
+      return {
+        ok: true,
+        data: {
+          workflow: structuredClone(state.detail.workflow),
+          jobId: '9'.repeat(32),
+          started: true,
+        },
+      };
     if (
       !['approved', 'claimed', 'failed', 'stopped'].includes(
         state.detail.workflow.state,
@@ -385,6 +629,7 @@ const bridge: NotificationsBridge = {
       claimed_at: now,
       job_id: '9'.repeat(32),
     };
+    rememberMutation(request);
     receipt('continue');
     return {
       ok: true,
@@ -419,11 +664,120 @@ const bridge: NotificationsBridge = {
   },
 };
 
+/** 합성 초안의 재시작·CAS만 재현하며 제품 보호 저장소 검증은 별도 실제 디스크 검사에서 수행합니다. */
+function draftKey(request: RegistrationDraftGetRequest): string {
+  return JSON.stringify([
+    request.expectedScope,
+    request.workflowId,
+    request.sourceRef,
+    request.conversionRef,
+  ]);
+}
+const draftBridge: RegistrationDraftsBridge = {
+  get: async (
+    request: RegistrationDraftGetRequest,
+  ): Promise<RegistrationDraftResult> =>
+    state.draftReadFailure
+      ? {
+          ok: false,
+          error: {
+            code: 'recovery_busy',
+            message: '초안을 복원하지 못했습니다. 잠시 후 다시 확인해 주세요.',
+          },
+        }
+      : {
+          ok: true,
+          data: structuredClone(
+            state.drafts?.[draftKey(request)]?.data ?? {
+              draft: null,
+              revision: null,
+              savedAt: null,
+              cleared: null,
+              cleanupWarningCount: 0,
+            },
+          ),
+        },
+  save: async (
+    request: RegistrationDraftSaveRequest,
+  ): Promise<RegistrationDraftResult> => {
+    state.calls.draftSave = (state.calls.draftSave ?? 0) + 1;
+    if (state.draftFailure) {
+      persist();
+      return {
+        ok: false,
+        error: {
+          code: 'recovery_write_failed',
+          message: '합성 보호 저장 실패',
+        },
+      };
+    }
+    const key = draftKey(request);
+    const prior = state.drafts?.[key];
+    if (prior?.requestId === request.requestId) {
+      if (prior.request !== JSON.stringify(request))
+        throw new Error('초안 재시도 본문 변경');
+      return { ok: true, data: structuredClone(prior.data) };
+    }
+    if (
+      (prior?.data.revision ?? null) !== request.expectedRevision ||
+      prior?.data.cleared === 'registered'
+    )
+      return {
+        ok: false,
+        error: { code: 'recovery_conflict', message: '합성 초안 판본 충돌' },
+      };
+    state.draftRevision = (state.draftRevision ?? 0) + 1;
+    const data = {
+      draft: structuredClone(request.draft),
+      revision: state.draftRevision.toString(16).padStart(64, '0'),
+      savedAt: new Date().toISOString(),
+      cleared: null,
+      cleanupWarningCount: 0,
+    };
+    (state.drafts ??= {})[key] = {
+      data,
+      requestId: request.requestId,
+      request: JSON.stringify(request),
+    };
+    persist();
+    return { ok: true, data };
+  },
+  clear: async (
+    request: RegistrationDraftClearRequest,
+  ): Promise<RegistrationDraftResult> => {
+    const key = draftKey(request);
+    const prior = state.drafts?.[key];
+    if ((prior?.data.revision ?? null) !== request.expectedRevision)
+      return {
+        ok: false,
+        error: { code: 'recovery_conflict', message: '합성 초안 판본 충돌' },
+      };
+    state.draftRevision = (state.draftRevision ?? 0) + 1;
+    const data = {
+      draft: null,
+      revision: state.draftRevision.toString(16).padStart(64, '0'),
+      savedAt: new Date().toISOString(),
+      cleared: request.reason,
+      cleanupWarningCount: 0,
+    };
+    (state.drafts ??= {})[key] = {
+      data,
+      requestId: request.requestId,
+      request: JSON.stringify(request),
+    };
+    persist();
+    return { ok: true, data };
+  },
+};
+
 /** 실제 화면에만 합성 bridge를 연결하고 운영 네트워크는 사용하지 않습니다. */
 export function installNotifications(): void {
   installFixtureBridge();
   if (!window.wiki) throw new Error('Missing fixture bridge');
   Object.defineProperty(window.wiki, 'notifications', { value: bridge });
+  Object.defineProperty(window.wiki, 'registrationDrafts', {
+    value: draftBridge,
+  });
   Reflect.set(window, '__notifications', {
     snapshot: (): FixtureState => structuredClone(state),
     reset: (): void => {
@@ -490,6 +844,79 @@ export function installNotifications(): void {
     missingText: (): void => {
       if (state.detail.conversion)
         delete state.detail.conversion.components.page_2;
+      persist();
+    },
+    requiredInput: (): void => {
+      const first = state.detail.workflow.pages[0];
+      if (first) first.input_required = true;
+      persist();
+    },
+    draftFailure: (value: boolean): void => {
+      state.draftFailure = value;
+      persist();
+    },
+    draftReadFailure: (value: boolean): void => {
+      state.draftReadFailure = value;
+      persist();
+    },
+    generalUnit: (): void => {
+      state.detail.workflow.pages = [
+        { unit_id: 'paragraph-one', state: 'pending' },
+      ];
+      if (state.detail.conversion) {
+        state.detail.conversion.manifest.units = [
+          {
+            unit_id: 'paragraph-one',
+            location: { kind: 'paragraphs', start: 1, end: 1 },
+          },
+        ];
+        state.detail.conversion.components = {
+          'paragraph-one': '원래 문단 내용',
+        };
+      }
+      persist();
+    },
+    wholeDocument: (pageCount?: number): void => {
+      state.detail.sourcePageCount = pageCount ?? null;
+      state.detail.workflow.pages = [
+        { whole_document: true, state: 'pending' },
+      ];
+      if (state.detail.conversion) {
+        state.detail.conversion.manifest.units = [];
+        state.detail.conversion.components = {};
+      }
+      persist();
+    },
+    ocrMode: (value: FixtureState['ocrMode']): void => {
+      state.ocrMode = value;
+      persist();
+    },
+    finishRetry: (): void => {
+      completeRetry?.();
+      completeRetry = null;
+    },
+    changeAfterDecision: (): void => {
+      state.changeAfterDecision = true;
+      persist();
+    },
+    clearTarget: (): void => {
+      state.detail.workflow.target_document = null;
+      persist();
+    },
+    otherEdit: (): void => {
+      state.revision += 1;
+      state.detail.workflow.revision = state.revision
+        .toString(16)
+        .padStart(64, '0');
+      persist();
+    },
+    badCorrection: (): void => {
+      const page = state.detail.workflow.pages[0];
+      if (page)
+        page.correction_ref = {
+          correction_id: 'd'.repeat(32),
+          correction_revision: 'd'.repeat(64),
+        };
       persist();
     },
     obsolete: (reason: 'source_changed' | 'report_changed'): void => {

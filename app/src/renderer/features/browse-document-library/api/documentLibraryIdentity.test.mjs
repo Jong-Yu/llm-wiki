@@ -30,6 +30,7 @@ const output = Array.isArray(result) ? result[0].output : result.output;
 const chunk = output.find((entry) => entry.type === 'chunk' && entry.isEntry);
 assert.ok(chunk);
 const {
+  queryDocumentLibrary,
   cachedLibraryDocument,
   readLibraryDocumentInfo,
   librarySourceReference,
@@ -163,5 +164,129 @@ await test('검색 뒤 문서 또는 접근 판본이 바뀌면 잘못된 제목
     readLibraryDocumentInfo(item, scope, current),
     (error) => error.failure.code === 'scope_changed',
   );
+  delete globalThis.window;
+});
+
+await test('묶인 목록과 검색은 서버 계보를 유지하고 현재 Wiki의 지식 상태를 읽는다', async () => {
+  const linked = { ...item, metadata: current.metadata };
+  const source = {
+    kind: 'source',
+    sourceId: 'c'.repeat(32),
+    sourceVersion: 'd'.repeat(32),
+    sourceSha256: 'a'.repeat(64),
+    title: '원본 문서',
+    sizeBytes: 120,
+    format: 'pdf',
+    registrationRevision: 'b'.repeat(64),
+    linkedDocumentCount: 1,
+    linkedDocuments: [linked],
+    analysisStatus: 'not_started',
+  };
+  const calls = [];
+  globalThis.window = {
+    wiki: {
+      connection: { getState: async () => connected },
+      documents: {
+        list: async (request) => {
+          calls.push(request);
+          return {
+            ok: true,
+            data: {
+              connectionId: scope.connectionId,
+              access,
+              scope: { tenant: access.tenant, kind: 'wiki_documents' },
+              items: [source],
+              nextCursor: 'next',
+              truncated: false,
+              skipped: [],
+              requiresRefresh: false,
+            },
+          };
+        },
+      },
+      knowledge: {
+        read: async (request) => ({
+          ok: true,
+          data: {
+            connectionId: scope.connectionId,
+            access,
+            document: request.document,
+            sourceRevision: item.revision,
+            machineGraph: { status: 'ready' },
+            effectiveGraph: { relations: [] },
+          },
+        }),
+      },
+      workspace: {
+        execute: async (request) => {
+          calls.push(request);
+          return {
+            ok: true,
+            data: {
+              operation: 'search',
+              connectionId: scope.connectionId,
+              access,
+              data: {
+                matches: [],
+                truncated: false,
+                skipped: [],
+                scanned: 1,
+                sources: {
+                  matches: [
+                    {
+                      source_id: source.sourceId,
+                      source_version: source.sourceVersion,
+                      source_sha256: source.sourceSha256,
+                      title: source.title,
+                      size_bytes: 120,
+                      format: 'pdf',
+                      registration_revision: source.registrationRevision,
+                      documents: [
+                        {
+                          document: item.document,
+                          revision: item.revision,
+                          metadata: current.metadata,
+                          source_status: 'linked',
+                          snippet: '찾은 내용',
+                        },
+                      ],
+                    },
+                  ],
+                  truncated: false,
+                },
+              },
+            },
+          };
+        },
+      },
+    },
+  };
+  const listed = await queryDocumentLibrary({
+    query: '',
+    cursor: null,
+    previousCursors: [],
+  });
+  assert.equal(listed.status, 'ready');
+  assert.equal(calls[0].groupSources, true);
+  assert.equal(listed.result.rows.length, 1);
+  assert.equal(listed.result.rows[0].extraction, 'ready');
+  assert.equal(
+    listed.result.rows[0].item.linkedDocuments[0].document,
+    item.document,
+  );
+  assert.equal(listed.result.nextCursor, 'next');
+  const searched = await queryDocumentLibrary({
+    query: '찾은 내용',
+    cursor: null,
+    previousCursors: [],
+  });
+  assert.equal(calls[1].input.group_sources, true);
+  assert.equal(searched.status, 'ready');
+  assert.equal(searched.result.rows.length, 1);
+  assert.deepEqual(
+    searched.result.rows[0].item.linkedDocuments[0].metadata.source,
+    current.metadata.source,
+  );
+  assert.equal(searched.result.rows[0].extraction, 'ready');
   delete globalThis.window;
 });

@@ -22,7 +22,7 @@ from .values import _revision
 
 
 DRAFT_VALIDATION_VERSION = 2
-DIAGNOSTIC_WORK_POLICY = "accepted_entities_and_fixed_source_context_v1"
+DIAGNOSTIC_WORK_POLICY = "bounded_evidence_and_anchor_scan_paths_v2"
 MAX_SUBMISSION_BYTES = 1024 * 1024
 MAX_INPUT_NODES = 20000
 MAX_INPUT_DEPTH = 32
@@ -151,10 +151,20 @@ class _CoreBudget:
     def charge(self, source, collections, *, index_source=True):
         count = sum(len(values) for values in collections.values())
         self.items += count
-        # Each admitted item has bounded identifiers, anchors, qualifiers and
-        # provenance. This conservative scan allowance also covers line indexing.
+        # Count the source-dependent paths actually used by the validators.
+        # Plain qualifiers/context scan their bounded quote, not the whole source.
+        # An anchor additionally hashes/indexes/scans the source and enumerates
+        # quote occurrences. Keep a conservative allowance for those paths.
         if source is not None:
-            self.source_work += len(source) * (int(index_source) + count * 16)
+            scans = 3 * int(index_source)
+            for values in collections.values():
+                for item in values:
+                    if isinstance(item, dict):
+                        scans += int(item.get("evidence") is not None)
+                        identities = item.get("identifiers", [])
+                        scans += len(identities) if isinstance(identities, list) else 0
+                        scans += 10 * sum(isinstance(item.get(field), dict) for field in ("subject", "object"))
+            self.source_work += len(source) * scans
         if self.items > MAX_CORE_ITEM_VISITS or self.source_work > MAX_SOURCE_SCAN_WORK:
             raise _BudgetExceeded("Core item/source-scan work budget exceeded")
 

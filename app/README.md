@@ -67,6 +67,8 @@ Wiki 상세는 본문·원본·이력·AI 작업 탭을 주소에 반영합니�
 
 등록 원본은 별도 상세 페이지에서 판본별 미리보기·내려받기와 파생 Wiki·작업 링크를 제공합니다. 실제 파일 API에서 선택한 판본의 크기·SHA-256을 확인합니다. 지원 형식은 MD/TXT/PDF/XLSX/DOCX/PPTX/PPT와 PNG/JPG/JPEG/GIF/WebP/BMP/TIF/TIFF이며 최대20MiB입니다. Markdown은 서식으로, 텍스트와1MiB 초과 Markdown은 원문 텍스트로 표시합니다. 바이너리 원본은 원본 파일과 변환 보고를 분리해 열람합니다. 없는 과거 판본을 최신 판본으로 대신 열지 않습니다. 원본 조회는 분석을 시작하지 않습니다.
 
+등록 내용 확인 화면은 PDF·이미지와 DOCX/XLSX/PPTX 원본을 편집 내용 옆에 표시합니다. Office 미리보기에는 PC에 설치된 LibreOffice가 필요합니다. 표시용 사본의 외부 연결·실행 개체를 제거하므로 원본 앱과 글꼴·배치가 다를 수 있고, XLSX는 인쇄 페이지 기준입니다. 구형 PPT는 필요한 격리를 지원하지 않는 환경에서 원본 열기 또는 PPTX로 저장한 파일을 사용합니다. 렌더는 PC에서 수행하며 원본 파일은 변경하지 않습니다.
+
 문서 목록 각 행의 **삭제** 아이콘은 확인 후 해당 원본 또는 Wiki만 휴지통으로 옮깁니다. 상단 **휴지통 → 복원**으로 되돌릴 수 있습니다. 원본 삭제는 파생 Wiki를 함께 삭제하지 않습니다. Wiki 삭제는 새 검색·질문 근거에서 제외하지만 기존 이력과 과거 답변은 보존합니다. 다른 사용자의 수정과 충돌하면 목록을 새로 고쳐 대상을 다시 선택합니다.
 
 PPTX는 슬라이드 텍스트·표 셀·발표자 노트를 개인 PC에서 읽으며 그림·차트 등 미독 구간을 표시합니다. 구형 PPT의 본문 변환은 PC에 설치된 LibreOffice가 필요하며, 없으면 PowerPoint에서 PPTX로 저장해 등록할 수 있습니다. 0.4.0의 변환 제한은 전체 30분과 중간 결과가 바뀌지 않는 2분을 각각 적용합니다. 제한/실패가 발생해도 이미 보존한 부분 결과는 유지하며 전체 완료로 표시하지 않습니다. 이 변경의 설치·배포 여부는 도메인 HISTORY를 따릅니다.
@@ -101,9 +103,13 @@ Electron main이 개인 실행 환경에 지정한 Python의 기존 개인 AI �
 npm run check
 ```
 
-타입 검사, import 경계·코드 검사, 포맷 검사, 디자인 토큰 정합성을 확인합니다. `npm run build`도 같은 검사를 먼저 수행합니다. 이전 테스트는 정리 상태를 유지합니다. 이번 로그인·등록 계약 검증은 제품 빌드 후 `node tests/poc-ui/run.mjs`로 실행합니다. 프로젝트 `.venv`와 실제 OS 보호 저장이 필요하며 새 임시 서버·Electron 사용자 폴더만 사용하고 종료 후 정리합니다. 실제 AI 모델은 호출하지 않습니다.
+타입 검사, import 경계·코드 검사, 포맷 검사, 디자인 토큰 정합성을 확인합니다. 타입 검사는 현역 테스트의 TS/TSX도 포함하며 `tests/*-proposal/`의 보관 시안은 제외합니다. `npm run build`도 같은 검사를 먼저 수행합니다. 테스트 서버의 준비 신호·시작 실패·종료 처리는 `node --test tests/testRuntime.test.mjs`로 확인합니다.
 
-온톨로지 관계 생성·검토는 `node tests/ontology-review/run.mjs`, Clean Up의 미리보기·선택 적용·변경 이력·되돌림은 `node tests/ontology-cleanup/run.mjs`로 확인합니다. 제품 빌드 후 실행하며 새 임시 서버의 합성 자료와 시험 계정만 사용합니다. 경로 검사 후 해당 임시 정책에 한해 읽기 전용 권한도 검증합니다. 운영 자료·설정과 AI 모델을 사용하지 않습니다.
+IPC 호출자·인자 수·요청/응답 검사와 업무별 오류 변환은 `node --test tests/ipc/verify.mjs`로 확인합니다.
+
+로그인·등록 계약 검증은 제품 빌드 후 `node tests/poc-ui/run.mjs`로 실행합니다. 프로젝트 `.venv`와 실제 OS 보호 저장이 필요하며 새 임시 서버·Electron 사용자 폴더만 사용하고 종료 후 정리합니다. 실제 AI 모델은 호출하지 않습니다. 창 포커스를 검증하는 Electron 검사는 하나씩 실행합니다.
+
+온톨로지 관계 생성·검토는 `node tests/ontology-review/run.mjs`, Clean Up의 미리보기·선택 적용·변경 이력·되돌림은 `node tests/ontology-cleanup/run.mjs`로 확인합니다. 실행기가 현재 제품 renderer를 임시 빌드하며 새 임시 서버의 합성 자료와 시험 계정만 사용합니다. 경로 검사 후 해당 임시 정책에 한해 읽기 전용 권한도 검증합니다. 운영 자료·설정과 AI 모델을 사용하지 않습니다.
 
 화면 이동·초안·원본 판본·로그아웃은 제품 빌드 후 `node tests/navigation/run.mjs`, 문서 편집·비교·이력은 `node tests/document-comparison/run.mjs`로 실제 HTTP·Electron 경로를 검증합니다. 채팅의 주소·입력·근거·스크롤은 `node tests/chat-navigation/run.mjs`, 세션 목록의 상태·페이지·권한은 `node tests/ai-sessions/run.mjs`와 `node tests/ai-sessions/run-ui.mjs`, 분석 작업의 명시 실행·인라인 취소·권한 경계는 `node tests/job-navigation/run.mjs`로 확인합니다. 뒤의 채팅·세션·작업 검사는 실제 React 화면과 격리 fixture를 쓰며 실제 AI 모델을 호출하지 않습니다.
 
@@ -177,7 +183,7 @@ npm run package               # 현재 OS: macOS DMG/ZIP, Windows NSIS, Linux ta
 
 0.3.0은 [0.1.3-rc.2](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.3-rc.2-portable)의 실시간 AI 답변·추가 질문 카드·상황별 설명/추천·AI 호출 확인 복원과 변환/분석 재시도 보완을 이어받았습니다. 이번 작업 화면은 기존 서버 API를 사용하므로 rc.2에서 새 서버 계약을 추가하지 않습니다. 구버전·다른 기기의 분석은 **AI 실행 기록**에서 찾습니다.
 
-현재 Windows 포터블은 [0.5.0 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.5.0-portable)입니다. 64px 알림 목록·서버 공유 읽음/승인 기록·PDF 페이지 대조·승인 후 이어가기를 추가했고 0.4.1의 변환 재시도와 기존 기능을 유지합니다. 호환 서버도 반영했습니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. Python/OCR·한영 데이터가 포함되며 Codex/Claude CLI 설치·로그인 및 구형 PPT 변환용 LibreOffice는 별도입니다. 기존 설정·사용자 자료를 삭제할 필요가 없습니다. 앱·서버 회귀·ZIP/포함 소스·공개 다운로드를 검증했으며, 실제 Windows OS 알림과 두 PC의 승인·이어가기는 확인이 남았습니다. 설치형 업데이트 파일은 변경하지 않습니다.
+현재 Windows 포터블은 [0.6.0 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.0-portable)입니다. 문서 목록에서 진행 상세를 열고 문자 변환·Wiki 저장·온톨로지 상태를 확인합니다. 원본과 등록 내용을 함께 보며 직접 입력·수정·빈 페이지 확인 후 `이 내용으로 등록 계속`으로 진행하고, 성공한 저장 단계와 종료 후 초안을 보존합니다. 이미지·DOCX/XLSX/PPTX 원본 대조와 큰 등록 본문 참조 저장도 포함합니다. 큰 문서의 자동 분할 분석은 비활성이므로 분석 입력 한도를 넘은 문서는 등록 미완료로 남습니다. ZIP 전체를 새 폴더에 풀고 `LLM Wiki.exe`를 실행합니다. Python/OCR·한영 데이터가 포함되며 Codex/Claude CLI 설치·로그인과 Office 미리보기용 LibreOffice는 별도입니다. 기존 설정·사용자 자료를 삭제할 필요가 없습니다. 실제 Windows·두 PC 사용과 Office 배치는 확인이 남아 있으며 설치형 업데이트 파일은 변경하지 않습니다.
 
 Windows 변환 중단 진단과 분석 재시도·진행 표시 보완은 [0.1.3-rc.1 포터블 사전 릴리스](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.1.3-rc.1-portable)에서 확인할 수 있습니다. 기존 0.1.2에 이번 수정만 포함한 후보판이며, 실제 Windows의 동일 문서 전체 처리와 원인 확정은 아직 남아 있습니다. 전체 변환 120초 제한·부분 입력의 분석 차단은 유지하며, 정식 최신판과 자동 업데이트 대상은 바꾸지 않습니다. ZIP 전체를 새 폴더에 풀어 사용하고 기존 자료·설정을 삭제하지 않습니다.
 

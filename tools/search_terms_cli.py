@@ -6,14 +6,13 @@
 
 import argparse
 import asyncio
-import json
 import re
 from pathlib import Path
 
 from core.client.ai import create_adapter
 from core.client.transport import client_error_code
 from core.runtime.client_platform import platform_error_code
-from tools.cli_io import add_ai_arguments
+from tools.cli_io import add_ai_arguments, emit_json
 
 PROTOCOL = "search-terms-cli-v1"
 MAX_QUESTION_CHARACTERS = 2000
@@ -101,7 +100,7 @@ def main(argv=None):
             value = {"ok": True, "terms": asyncio.run(execute(args, question))}
         except Exception as error:
             value = {"ok": False, "error": _failure(error)}
-    print(json.dumps({"protocol": PROTOCOL, **value}, ensure_ascii=False, allow_nan=False), flush=True)
+    emit_json({"protocol": PROTOCOL, **value})
     return 0 if value["ok"] else 1
 
 

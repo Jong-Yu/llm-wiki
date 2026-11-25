@@ -11,9 +11,10 @@ from pydantic import Field, JsonValue, StrictInt, StrictStr
 
 from core.modules.knowledge.impact import ImpactStore
 from core.mcp.results import _invoke
-from core.mcp.schemas import (
-    AttributeInput, EntityInput, ImpactBaselineInput, RelationCandidateInput,
-    RelationInput, RevisionInput, SourceRevisionInput,
+from core.mcp.schemas import ImpactBaselineInput, RevisionInput
+from core.modules.ontology.submission import (
+    AttributeInput, EntityInput, RelationCandidateInput, RelationInput, SourceRevisionInput,
+    build_submission_schema,
 )
 from core.modules.ontology.constants import MAX_CONTEXT_DOCUMENTS
 from core.modules.ontology.store import OntologyStore
@@ -44,7 +45,6 @@ def _register_ontology_tools(server: MCPServer, get_store: Callable[[], WikiStor
         must independently recheck current source/review revisions at save time.
         The selected profile never filters the submitted graph.
         """
-        from core.runtime.extraction_schema import build_submission_schema
         store = get_store()
         return _invoke(store, "ontology_validate_draft", lambda: OntologyStore(store).validate_draft(
             document, expected_revision, submission, schema=build_submission_schema(), max_errors=max_errors,

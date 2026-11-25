@@ -1,28 +1,21 @@
 """MCP에 공개하는 입력 모델·타입·설명. 업무 검증을 대신하지 않는다."""
 
-# 이 파일은 '받을 JSON의 모양'을 선언한다. 실제 인용·버전·저장 검사는 각 업무 모듈에서 한다.
-# Annotated는 자료형에 길이/형식 조건을 붙이고, Literal은 허용한 값만 받게 한다.
-# StrictStr/StrictInt는 문자열 "1"을 숫자 1로 자동 변환하는 식의 입력 보정을 허용하지 않는다.
-from typing import Annotated, Literal
+# 공통 온톨로지 입력은 업무 모듈의 같은 객체를 공개하고 MCP 전용 입력·안내만 여기서 정의한다.
+# 실제 인용·버전·저장 검사는 각 업무 모듈에서 수행한다.
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
+
+from core.modules.ontology.submission import (
+    REVISION_PATTERN, SourceRevisionInput, EntityId, EvidenceInput, PredicateInput, ViewpointInput,
+    ContextInput, IdentifierInput, ProvenanceInput, EntityInput, QualifiersInput,
+    SourceAnchorInput, MappingInput, RelationInput, RelationCandidateInput, AttributeInput,
+)
 
 
-REVISION_PATTERN = r"^[0-9a-f]{64}$"
 # revision은 내용에서 계산한 지문이다. | None은 값이 없을 수 있다는 뜻이며
 # None을 허용하지 않는 SourceRevisionInput은 반드시 실제 원문 버전을 받아야 한다.
 RevisionInput = Annotated[StrictStr, Field(pattern=REVISION_PATTERN)] | None
-SourceRevisionInput = Annotated[StrictStr, Field(pattern=REVISION_PATTERN)]
-EntityId = Annotated[StrictStr, Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
-EvidenceInput = Annotated[StrictStr, Field(min_length=1, max_length=1000)]
-PredicateInput = Literal[
-    "uses", "depends_on", "part_of", "implements", "related_to", "authored_by",
-    "subclass_of", "instance_of", "composed_of", "located_in", "has_input",
-    "has_output", "participates_in", "precedes", "causes", "enables", "prevents",
-    "predicts", "supports_prediction", "measures", "observes",
-    "view_of", "same_as", "different_from", "responsible_for", "approves",
-]
-ViewpointInput = Literal["business", "developer", "architecture"]
 CORRESPONDENCE_TOOLS = frozenset({
     "ontology_correspondence_query", "ontology_correspondence_propose",
     "ontology_correspondence_review", "ontology_correspondence_review_undo",
@@ -98,16 +91,6 @@ _CORRESPONDENCE_CHANGE_GUIDE = (
 )
 
 
-class ContextInput(BaseModel):
-    # domain은 업무 영역, viewpoints는 업무/개발/구조 관점이다. tenant 접근 권한과는 별개다.
-    # extra='forbid'는 알 수 없는 필드를 거부하고 strict=True는 자료형 자동 변환을 막는다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    domain: EvidenceInput | None = None
-    # default_factory=list는 입력마다 새로운 빈 목록을 만들어 서로 섞이지 않게 한다.
-    viewpoints: Annotated[list[ViewpointInput], Field(max_length=3)] = Field(default_factory=list)
-
-
 class ImpactBaselineInput(BaseModel):
     # 변경 전 관측한 네 버전이다. 영향 조회의 비교 기준이지 저장 허가나 현재 버전으로 쓰지 않는다.
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -116,117 +99,3 @@ class ImpactBaselineInput(BaseModel):
     graph_revision: RevisionInput
     review_revision: RevisionInput
     history_revision: SourceRevisionInput
-
-
-class IdentifierInput(BaseModel):
-    # namespace는 식별자 발급 범위, value는 실제 값, evidence는 이를 뒷받침하는 원문 인용이다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    namespace: Annotated[StrictStr, Field(min_length=1, max_length=120)]
-    value: Annotated[StrictStr, Field(min_length=1, max_length=120)]
-    evidence: EvidenceInput
-
-
-class ProvenanceInput(BaseModel):
-    # 어떤 출처/발언 주체에 귀속되는 주장인지 보존한다. 전문가 정책의 승인 기록과 구분한다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    source_entity: EntityId | None = None
-    attributed_to: EntityId | None = None
-    basis: EvidenceInput | None = None
-
-
-class EntityInput(BaseModel):
-    # 원문에서 추출한 대상 하나다. id는 같은 문서의 관계/속성이 이 대상을 가리킬 때 사용한다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: EntityId
-    type: Literal[
-        "person", "organization", "system", "concept", "document",
-        "process", "physical_object", "substance", "place",
-    ]
-    label: Annotated[StrictStr, Field(min_length=1, max_length=120)]
-    evidence: EvidenceInput
-    context: ContextInput = Field(default_factory=ContextInput)
-    identifiers: Annotated[list[IdentifierInput], Field(max_length=8)] = Field(default_factory=list)
-
-
-class QualifiersInput(BaseModel):
-    # 주장에 붙는 부정/가능성/조건/범위/시점이다. 기존 직접 저장에는 기본값이 있으며,
-    # 새 분석 작업 경로는 기본값 적용 전에 다섯 키의 명시 여부를 별도로 검사한다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    polarity: Literal["positive", "negative"] = "positive"
-    modality: Literal["asserted", "possible", "capability", "planned", "hypothetical"] = "asserted"
-    condition: EvidenceInput | None = None
-    scope: EvidenceInput | None = None
-    time: EvidenceInput | None = None
-
-
-class SourceAnchorInput(BaseModel):
-    """Only relation endpoints may opt into a source-bound v4 anchor."""
-    # 개체 ID 대신 정확한 원문 구절/줄 위치를 관계 끝점으로 지정하는 v4 입력이다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    kind: Literal["source_anchor"]
-    document: StrictStr
-    source_revision: SourceRevisionInput
-    quote: EvidenceInput
-    start_line: Annotated[StrictInt, Field(ge=1)]
-    end_line: Annotated[StrictInt, Field(ge=1)]
-    occurrence: Annotated[StrictInt, Field(ge=0)]
-
-
-class MappingInput(BaseModel):
-    # 대응 관계의 적용 범위와 양쪽의 다대다 조건을 명시한다. 일반 관계의 임의 부가 필드는 아니다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    within: EntityId
-    subject_cardinality: Literal["many"]
-    object_cardinality: Literal["many"]
-
-
-class RelationInput(BaseModel):
-    # subject → predicate → object 형태의 관계 하나다. evidence는 그 관계의 실제 원문 근거다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    subject: EntityId | SourceAnchorInput
-    predicate: PredicateInput | Literal["maps_to", "targets", "follows_reference", "requires", "includes_step", "delivered_to", "recommends", "has_source_metadata", "has_source_history"]
-    object: EntityId | SourceAnchorInput
-    evidence: EvidenceInput
-    mapping: MappingInput | None = None
-    qualifiers: QualifiersInput = Field(default_factory=QualifiersInput)
-    context: ContextInput = Field(default_factory=ContextInput)
-    provenance: ProvenanceInput = Field(default_factory=ProvenanceInput)
-
-
-class RelationCandidateInput(BaseModel):
-    # 아직 확정하지 않은 관계 제안이다. reason/question을 보존하고 근거 관계나 승인으로 승격하지 않는다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: EntityId
-    subject: EntityId
-    predicate: PredicateInput
-    object: EntityId
-    evidence: EvidenceInput | None = None
-    qualifiers: QualifiersInput = Field(default_factory=QualifiersInput)
-    reason: Annotated[StrictStr, Field(min_length=1, max_length=1000)]
-    question: Annotated[StrictStr, Field(min_length=1, max_length=500)]
-    context: ContextInput = Field(default_factory=ContextInput)
-    provenance: ProvenanceInput = Field(default_factory=ProvenanceInput)
-
-
-class AttributeInput(BaseModel):
-    # 대상의 속성값 하나다. 값/단위를 원문의 문자열로 보존해 임의 계산이나 환산을 피한다.
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: EntityId
-    subject: EntityId
-    property: Annotated[StrictStr, Field(min_length=1, max_length=120)]
-    datatype: Literal["text", "number"]
-    value: Annotated[StrictStr, Field(min_length=1, max_length=500)]
-    unit: Annotated[StrictStr, Field(min_length=1, max_length=120)] | None = None
-    evidence: EvidenceInput
-    qualifiers: QualifiersInput = Field(default_factory=QualifiersInput)
-    context: ContextInput = Field(default_factory=ContextInput)
-    provenance: ProvenanceInput = Field(default_factory=ProvenanceInput)

@@ -19,6 +19,8 @@ from core.modules.analysis_inputs.store import InputStore
 from core.modules.analysis_inputs import bundles
 from core.modules.analysis_results.store import ResultStore
 from core.modules.analysis_results.contracts import ResultError
+from core.modules.analysis_proposals.executions import ProposalExecutionStore
+from core.modules.reviews.store import ReviewStore
 from core.modules.extraction_rules.publish import publish
 from core.modules.extraction_rules.store import RulesetRegistry
 from core.runtime.extraction_schema import build_submission_schema
@@ -124,6 +126,36 @@ class RegistrationTest(unittest.TestCase):
         graph = self.results.generate_ontology(self.job_id, **graph_args)
         self.assertEqual(graph['receipt']['source_revision'], receipt['receipt']['source_revision'])
         self.assertEqual(self.query()['result_summary']['status'], 'complete')
+
+    def test_proposal_execution_creates_plan_and_replays_same_job(self):
+        self.new(); self.claim()
+        self.save_markdown()
+        document = self.store.read('pump.md')
+        review = ReviewStore(self.store).query('pump.md')
+        executions = ProposalExecutionStore(self.store, self.actor, rulesets=self.rules)
+        proposal = executions.proposals.prepare(uuid4().hex, 'pump.md', document.revision,
+            review['state_revision'], [], before_commit=self.auth)
+        request = dict(proposal_id=proposal['proposal_id'], request_id=uuid4().hex,
+            expected_state_revision=proposal['state_revision'], candidate_revision=None,
+            reason='Verify plan handoff', authorize=self.auth)
+
+        result = executions.start(**request)
+        self.assertEqual(result['state'], 'ready')
+        self.assertFalse(result['replayed'])
+        self.assertIsNotNone(result['plan_ref']['plan_revision'])
+        self.assertEqual(len(result['handoff']['jobs']), 1)
+        self.assertEqual(result['handoff']['jobs'][0]['job_id'], result['job_id'])
+        self.assertEqual([target['document'] for target in result['job']['targets']], ['pump.md'])
+        self.assertEqual(result['job']['outputs'], ['ontology'])
+        self.assertEqual(result['job']['state'], 'awaiting_cli')
+        self.assertFalse(result['execution_started'])
+        self.assertEqual(self.store.read('pump.md'), document)
+
+        replay = executions.start(**request)
+        self.assertTrue(replay['replayed'])
+        self.assertEqual(replay['plan_ref'], result['plan_ref'])
+        self.assertEqual(replay['job_id'], result['job_id'])
+        self.assertEqual(replay['state_revision'], result['state_revision'])
 
     def test_replay_cas_cancel_ownership_and_access_revision(self):
         first = self.new()
@@ -246,7 +278,9 @@ class RegistrationTest(unittest.TestCase):
         body = CreateConversion(request_id=uuid4().hex, source_ref=source, method='pdf_text', complete=False,
             unread_ranges=['page 2 unread'], warnings=['layout not verified'], units=[
                 dict(unit_id='page1', location=dict(kind='pages', start=1, end=1), content=self.text)])
-        converted = PlanStore(self.store, self.actor).conversion(body, self.auth)
+        # 이미 저장된 구 보고의 보존 등록 계약을 검증한다. 새 보고는 내용입력 workflow를 요구한다.
+        with patch('core.modules.notifications.store.review_targets', return_value=[]):
+            converted = PlanStore(self.store, self.actor).conversion(body.model_dump(exclude={"profile"}), self.auth)
         self.request.update(source_ref=source, conversion_ref=dict(conversion_id=converted['manifest']['id'],
                                                                   conversion_revision=converted['revision']))
         self.new(); self.claim(); self.save_markdown()

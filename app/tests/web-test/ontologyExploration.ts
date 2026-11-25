@@ -125,6 +125,7 @@ export async function verifyOntologyTransportBoundaries(): Promise<number> {
   let checks = 0;
   const originalFetch = globalThis.fetch;
   let mode = 'valid';
+  let permissions = ['read'];
   let requests = 0;
   let release: (() => void) | undefined;
   let started: (() => void) | undefined;
@@ -145,15 +146,24 @@ export async function verifyOntologyTransportBoundaries(): Promise<number> {
     if (
       url.pathname.endsWith('/ontology/search') ||
       url.pathname.endsWith('/ontology/glossary') ||
-      url.pathname.endsWith('/ontology/neighbors')
+      url.pathname.endsWith('/ontology/neighbors') ||
+      url.pathname.endsWith('/handoffs')
     ) {
       requests++;
       received.push({ path: url.pathname, body });
-      if (mode === 'late') {
+      if (mode.startsWith('late')) {
         await new Promise<void>((resolve): void => {
           release = resolve;
           started?.();
         });
+        if (mode === 'late-error')
+          return Response.json(
+            { error: { code: 'forbidden' } },
+            { status: 403 },
+          );
+        if (mode === 'late-invalid') return new Response('not JSON');
+        if (mode === 'late-rejected')
+          throw new Error('fixture transport failed');
       }
       return Response.json({
         data: {
@@ -205,7 +215,7 @@ export async function verifyOntologyTransportBoundaries(): Promise<number> {
         access_revision: access.access_revision,
         memberships: {
           [access.tenant]: {
-            permissions: ['read'],
+            permissions,
             default_profile: 'default',
             profiles: { default: { domain: null, viewpoint: null } },
           },
@@ -411,6 +421,57 @@ export async function verifyOntologyTransportBoundaries(): Promise<number> {
     const late = await pending;
     assert(!late.ok && late.error.code === 'scope_changed');
     checks++;
+    // 전송 후 연결이 바뀐 쓰기는 원래 요청 ID로 확인하며 재전송하지 않습니다.
+    permissions = ['read', 'source_write'];
+    for (const mutation of [false, true]) {
+      for (const outcome of ['valid', 'error', 'invalid', 'rejected']) {
+        const changed = new ConnectionService();
+        const login = await changed.authenticate({
+          serverUrl: 'http://127.0.0.1:41999/',
+          name: '격리 지연 응답 검증',
+          mode: 'login',
+        });
+        assert(login.ok && login.data.status === 'connected');
+        const lateRequest = parseWorkspaceRequest({
+          ...request,
+          connectionId: login.data.connectionId,
+          ...(mutation
+            ? {
+                operation: 'handoffAnalysisPlan',
+                input: {
+                  plan_id: '1'.repeat(32),
+                  request_id: '2'.repeat(32),
+                  expected_plan_revision: revision,
+                },
+              }
+            : {}),
+        });
+        mode = `late-${outcome}`;
+        const dispatched = new Promise<void>((resolve): void => {
+          started = resolve;
+        });
+        const before = requests;
+        const result = new WorkspaceApiService(changed).execute(lateRequest);
+        await dispatched;
+        changed.disconnect();
+        release?.();
+        const failure = await result;
+        assert(!failure.ok);
+        assert.equal(
+          failure.error.code,
+          mutation ? 'outcome_unknown' : 'scope_changed',
+        );
+        if (mutation) {
+          assert.equal(failure.error.retry, 'reconcile');
+          assert.deepEqual(failure.error.recovery, {
+            operation: 'analysisPlanReceipt',
+            input: { plan_id: '1'.repeat(32), request_id: '2'.repeat(32) },
+          });
+        }
+        assert.equal(requests, before + 1);
+        checks++;
+      }
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }

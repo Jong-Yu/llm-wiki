@@ -2,27 +2,22 @@
 # cursor는 다음 목록 페이지를 이어 읽는 표식이고 revision은 읽은 내용의 버전 지문이다.
 
 from typing import Literal
-from pydantic import Field, JsonValue, field_validator
-from core.api.schemas import Access, Model
+from pydantic import Field, JsonValue
+from core.api.schemas import Access, Model, PaginationQuery
 
 
-class ListQuery(Model):
-    # HTTP query의 숫자는 문자열이므로 제한된 정수 파싱만 허용한다.
-    limit: int = Field(20, ge=1, le=50, strict=False)
-    cursor: str | None = Field(None, min_length=1, max_length=16384)
+class ListQuery(PaginationQuery):
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
-
-    @field_validator("limit", mode="before")
-    @classmethod
-    def integer_query(cls, value):
-        if isinstance(value, str) and (not value.isascii() or not value.isdecimal()):
-            raise ValueError("limit must be an integer string")
-        return value
 
 
 class ContentQuery(Model):
     document: str = Field(min_length=1, max_length=4096)
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+
+
+class CatalogueQuery(ListQuery):
+    """원본 최신 판본의 실제 Wiki 결과 묶기는 새 문서 목록에서만 선택한다."""
+    group_sources: bool = Field(False, strict=False)
 
 
 class TrashQuery(Model):

@@ -17,6 +17,7 @@ export type SourceAnalysisKind =
 export type SourceAnalysis = {
   kind: Exclude<SourceAnalysisKind, 'none'>;
   jobId: string;
+  label?: string;
   progressPath?: string;
 };
 export type SourceAnalysisIndex = {
@@ -56,6 +57,29 @@ export function sourceAnalysisKind(job: AnalysisJob): SourceAnalysis['kind'] {
   return 'attention';
 }
 
+/** 서버가 알린 현재 단계와 저장 상태만 목록의 한 상태로 표시합니다. */
+function jobLabel(job: AnalysisJob): string {
+  const kind = sourceAnalysisKind(job);
+  if (kind === 'complete') return '등록 완료';
+  if (job.result_summary.status === 'pending_reconcile')
+    return '저장 확인 필요';
+  const stage = job.active_input_ref?.stage;
+  const name =
+    stage === 'extract_ontology'
+      ? '온톨로지'
+      : stage === 'read_source'
+        ? '내용'
+        : 'Wiki';
+  if (kind === 'running')
+    return name === '온톨로지'
+      ? '온톨로지 구성 중'
+      : name === '내용'
+        ? '내용 확인 중'
+        : 'Wiki 생성 중';
+  if (kind === 'pending') return 'Wiki 생성 대기';
+  return `${name} ${name === '내용' ? '확인 필요' : '중단'}`;
+}
+
 /** 작업 목록을 모두 읽어 원본 판본별 대표 작업을 정합니다. 조회는 새 실행을 만들지 않습니다. */
 export async function readSourceAnalysisIndex(
   connectionId: string,
@@ -82,6 +106,8 @@ export async function readSourceAnalysisIndex(
       const entry: SourceAnalysis = {
         kind: sourceAnalysisKind(job),
         jobId: job.job_id,
+        label: jobLabel(job),
+        progressPath: `/documents?${new URLSearchParams({ jobId: job.job_id })}`,
       };
       const current = best.get(key);
       if (!current || job.created_at > current.createdAt)
@@ -145,6 +171,23 @@ export async function readSourceAnalysisIndex(
             createdAt: task.createdAt,
             entry: {
               kind,
+              label:
+                current?.entry.jobId === task.registration.jobId
+                  ? current.entry.label
+                  : task.registration.state === 'unconfirmed'
+                    ? '저장 확인 필요'
+                    : conversion &&
+                        ['running', 'cancelling'].includes(conversion.state)
+                      ? '문자 변환 중'
+                      : conversion?.state === 'partial'
+                        ? '내용 확인 필요'
+                        : conversion && conversion.state !== 'complete'
+                          ? '문자 변환 중단'
+                          : kind === 'complete'
+                            ? '등록 완료'
+                            : kind === 'attention'
+                              ? '진행 확인 필요'
+                              : 'Wiki 생성 대기',
               jobId: task.registration.jobId ?? '',
               progressPath: documentTaskPath(task.taskId),
             },

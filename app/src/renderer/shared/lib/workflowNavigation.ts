@@ -1,6 +1,6 @@
 /** 문서 처리 작업의 주소는 재실행 명령과 분리된 안정 식별자만 포함합니다. */
 export function documentTaskPath(taskId: string): string {
-  return `/tasks?${new URLSearchParams({ taskId })}`;
+  return `/documents?${new URLSearchParams({ taskId })}`;
 }
 
 /** 작업과 결과 사이의 복귀는 허용된 앱 화면으로만 제한합니다. */

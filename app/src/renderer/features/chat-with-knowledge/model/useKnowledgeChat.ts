@@ -15,6 +15,7 @@ import {
 } from './attachments';
 import type { ChatAttachment } from './attachments';
 import { useSessionAvailability } from './useSessionAvailability';
+import { useAnswerArtifacts } from './useAnswerArtifacts';
 import { templateById } from './answerTemplates';
 import { templatesGateway } from '@renderer/platform/templates';
 import { freezeTemplate, registeredTemplateId } from './templateSnapshot';
@@ -26,7 +27,6 @@ import {
   selectChatModel,
   requestChat,
   runChat,
-  saveAnswerArtifact,
 } from '../api/knowledgeChat.api';
 import type { AnswerArtifact, ChatAccess } from '../api/knowledgeChat.api';
 import {
@@ -147,16 +147,16 @@ export function useKnowledgeChat(
   const locked = useRef(false);
   const alive = useRef(true);
   const readSerial = useRef(0);
-  // 답변 턴 ID별 내 폴더 저장 결과와 진행 중 요청입니다. 같은 답변은 한 번만 저장합니다.
-  const savedAnswers = useRef(new Map<string, AnswerArtifact>());
-  const savingAnswers = useRef(
-    new Map<string, Promise<AnswerArtifact | null>>(),
-  );
   const selected = state.threads.find(
     (item: ChatThread): boolean => item.id === state.activeId,
   );
   const thread = selected ?? state.threads[0];
   if (!thread) throw new Error('대화 복구 항목이 없습니다.');
+  const ensureAnswerArtifact = useAnswerArtifacts(
+    access,
+    conversation,
+    thread.title,
+  );
 
   /** 입력 직후의 값도 같은 요청에 고정하며 React 렌더 지연에 의존하지 않습니다. */
   function update(next: ChatRecovery): void {
@@ -957,47 +957,6 @@ export function useKnowledgeChat(
         );
     });
   }, [state, ready, recovery]);
-  /**
-   * 답변을 내 폴더의 결과물로 저장하고 결과를 돌려줍니다. 권한이 없거나 실패하면 null이며
-   * 오류는 던지지 않아 답변 표시와 내려받기를 막지 않습니다. 저장 확인이 필요한지는 호출자가 null로 구별합니다.
-   */
-  function ensureAnswerArtifact(
-    turn: ChatTurn,
-  ): Promise<AnswerArtifact | null> {
-    const done = savedAnswers.current.get(turn.id);
-    if (done) return Promise.resolve(done);
-    const running = savingAnswers.current.get(turn.id);
-    if (running) return running;
-    const conversationId = conversation?.record.id;
-    if (
-      !conversationId ||
-      turn.role !== 'assistant' ||
-      turn.status === 'failed' ||
-      !turn.content.trim() ||
-      !access.permissions.includes('result_write')
-    )
-      return Promise.resolve(null);
-    const number =
-      chatTurns(conversation)
-        .filter((item: ChatTurn): boolean => item.role === 'assistant')
-        .findIndex((item: ChatTurn): boolean => item.id === turn.id) + 1;
-    const title = `${thread.title}${number > 1 ? ` (${number})` : ''}`;
-    const request = saveAnswerArtifact(session, {
-      conversationId,
-      turnId: turn.id,
-      title,
-    })
-      .then((saved: AnswerArtifact): AnswerArtifact => {
-        savedAnswers.current.set(turn.id, saved);
-        return saved;
-      })
-      .catch((): null => null)
-      .finally((): void => {
-        savingAnswers.current.delete(turn.id);
-      });
-    savingAnswers.current.set(turn.id, request);
-    return request;
-  }
   // 결과물은 "내려받기"를 누를 때만 만듭니다. 대화 기록(답변 본문·근거)은 서버에 항상 저장되므로 답변마다 복사본을 쌓지 않습니다.
   const refreshFromEffect = useEffectEvent(refresh);
   useEffect((): (() => void) | undefined => {

@@ -4,7 +4,7 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import JsonValue
-from core.api.dependencies import authorized, access_value, envelope, credential
+from core.api.dependencies import authorized, access_value, envelope, credential, scope_key
 from core.api.operations import json_operation, body_schema
 from core.api.schemas import Envelope
 from core.modules.access.policy import AccessScope
@@ -12,6 +12,7 @@ from core.modules.documents.search import search_documents
 from core.modules.documents.listing import _error_code
 from core.modules.ontology.store import OntologyStore
 from core.modules.knowledge.concepts import ConceptStore
+from core.modules.knowledge.catalogue import search_catalogue
 from core.modules.knowledge.impact import ImpactStore
 from core.modules.knowledge.aggregation import review_queue, history_query, prepare_question
 from core.modules.reviews.store import ReviewStore
@@ -40,6 +41,9 @@ def knowledge(query: Annotated[KnowledgeQuery, Query()], scope: Annotated[Access
 @router.get("/documents/search", response_model=Envelope[dict[str, JsonValue]])
 def search(query: Annotated[SearchQuery, Query()], scope: Annotated[AccessScope, Depends(authorized)]):
     """허용 저장소에서 원문 문자열을 찾고 읽지 못한 항목·탐색 한도를 그대로 알린다."""
+    if query.group_sources:
+        value = search_catalogue(scope.store, query.query, query.limit, scope_key=scope_key(scope))
+        return envelope({**value, "access": access_value(scope)})
     value = search_documents(scope.store, query.query, query.limit, read_error_code=_error_code)
     # 목록에는 아직 위키로 변환되지 않은 등록 원본도 보이므로 제목 검색 결과를 따로 덧붙인다.
     sources = SourceStore(scope.store).search_titles(query.query, query.limit)

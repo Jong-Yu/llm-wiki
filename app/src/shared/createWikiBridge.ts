@@ -1,4 +1,30 @@
 import {
+  SOURCE_VISUAL_PREVIEW_CHANNELS,
+  sourceVisualPreviewRequestSchema,
+  sourceVisualPreviewReleaseSchema,
+  sourceVisualPreviewResultSchema,
+  sourceVisualPreviewReleaseResultSchema,
+} from '@contracts/sourceVisualPreviews.contract';
+import type {
+  SourceVisualPreviewRequest,
+  SourceVisualPreviewResult,
+  SourceVisualPreviewReleaseRequest,
+  SourceVisualPreviewReleaseResult,
+} from '@contracts/sourceVisualPreviews.contract';
+import {
+  REGISTRATION_DRAFT_CHANNELS,
+  registrationDraftGetSchema,
+  registrationDraftSaveSchema,
+  registrationDraftClearSchema,
+  registrationDraftResultSchema,
+} from '@contracts/registrationDrafts.contract';
+import type {
+  RegistrationDraftGetRequest,
+  RegistrationDraftSaveRequest,
+  RegistrationDraftClearRequest,
+  RegistrationDraftResult,
+} from '@contracts/registrationDrafts.contract';
+import {
   NOTIFICATION_CHANNELS,
   notificationApproveSchema,
   notificationContinueResultSchema,
@@ -14,6 +40,11 @@ import {
   notificationPageSchema,
   notificationReadSchema,
   notificationReadStateResultSchema,
+  notificationCorrectSchema,
+  notificationRetryPageSchema,
+  notificationRetryPageResultSchema,
+  notificationCancelRetrySchema,
+  notificationCancelRetryResultSchema,
 } from '@contracts/notifications.contract';
 import type {
   NotificationApproveRequest,
@@ -30,6 +61,11 @@ import type {
   NotificationPageResult,
   NotificationReadRequest,
   NotificationReadStateResult,
+  NotificationCorrectRequest,
+  NotificationRetryPageRequest,
+  NotificationRetryPageResult,
+  NotificationCancelRetryRequest,
+  NotificationCancelRetryResult,
 } from '@contracts/notifications.contract';
 import {
   DOCUMENT_TASK_CHANNELS,
@@ -552,7 +588,54 @@ export function createWikiBridge(
           await invoke(QUESTION_RUN_CHANNELS.webSearch, request),
         ),
     },
+    sourceVisualPreviews: {
+      read: async (
+        request: SourceVisualPreviewRequest,
+      ): Promise<SourceVisualPreviewResult> =>
+        sourceVisualPreviewResultSchema.parse(
+          await invoke(
+            SOURCE_VISUAL_PREVIEW_CHANNELS.read,
+            sourceVisualPreviewRequestSchema.parse(request),
+          ),
+        ),
+      release: async (
+        request: SourceVisualPreviewReleaseRequest,
+      ): Promise<SourceVisualPreviewReleaseResult> =>
+        sourceVisualPreviewReleaseResultSchema.parse(
+          await invoke(
+            SOURCE_VISUAL_PREVIEW_CHANNELS.release,
+            sourceVisualPreviewReleaseSchema.parse(request),
+          ),
+        ),
+    },
     notifications: {
+      correct: async (
+        request: NotificationCorrectRequest,
+      ): Promise<NotificationMutationResult> =>
+        notificationMutationResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.correct,
+            notificationCorrectSchema.parse(request),
+          ),
+        ),
+      retryPage: async (
+        request: NotificationRetryPageRequest,
+      ): Promise<NotificationRetryPageResult> =>
+        notificationRetryPageResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.retryPage,
+            notificationRetryPageSchema.parse(request),
+          ),
+        ),
+      cancelRetry: async (
+        request: NotificationCancelRetryRequest,
+      ): Promise<NotificationCancelRetryResult> =>
+        notificationCancelRetryResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.cancelRetry,
+            notificationCancelRetrySchema.parse(request),
+          ),
+        ),
       list: async (
         request: NotificationListRequest,
       ): Promise<NotificationListResult> =>
@@ -623,6 +706,35 @@ export function createWikiBridge(
           await invoke(
             NOTIFICATION_CHANNELS.page,
             notificationPageSchema.parse(request),
+          ),
+        ),
+    },
+    registrationDrafts: {
+      get: async (
+        request: RegistrationDraftGetRequest,
+      ): Promise<RegistrationDraftResult> =>
+        registrationDraftResultSchema.parse(
+          await invoke(
+            REGISTRATION_DRAFT_CHANNELS.get,
+            registrationDraftGetSchema.parse(request),
+          ),
+        ),
+      save: async (
+        request: RegistrationDraftSaveRequest,
+      ): Promise<RegistrationDraftResult> =>
+        registrationDraftResultSchema.parse(
+          await invoke(
+            REGISTRATION_DRAFT_CHANNELS.save,
+            registrationDraftSaveSchema.parse(request),
+          ),
+        ),
+      clear: async (
+        request: RegistrationDraftClearRequest,
+      ): Promise<RegistrationDraftResult> =>
+        registrationDraftResultSchema.parse(
+          await invoke(
+            REGISTRATION_DRAFT_CHANNELS.clear,
+            registrationDraftClearSchema.parse(request),
           ),
         ),
     },

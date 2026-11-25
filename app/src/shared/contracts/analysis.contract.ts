@@ -428,9 +428,18 @@ export const analysisReceiptSchema = z.object({
   cleanup_failures: z.array(z.unknown()),
   diagnostics: analysisDiagnosticsSchema.nullable().default(null),
 });
+export const analysisInputLimitCodeSchema = z.enum([
+  'input_limit',
+  'input_component_limit',
+  'analysis_prompt_limit',
+  'ai_input_limit',
+]);
+export const analysisInputLimitMessage =
+  '원본과 이미 저장된 변환 내용은 보관되어 있습니다. 현재 분석할 수 있는 입력 크기·구성 한도를 넘어 Wiki·온톨로지 작업을 완료하지 못했습니다. 큰 문서의 AI 분석 분할은 아직 지원하지 않아 같은 입력으로 다시 실행해도 진행되지 않습니다.';
 export const analysisLocalSchema = z.object({
   status: z.enum(['idle', 'running', 'completed', 'failed', 'stopped']),
   message: z.string().max(4096),
+  failureCode: analysisInputLimitCodeSchema.optional(),
 });
 export const analysisDetailSchema = z.object({
   job: analysisJobSchema,

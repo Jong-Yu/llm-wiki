@@ -14,17 +14,6 @@ export const chatQuestionSchema = z.object({
     .min(1, '질문을 입력해 주세요.')
     .max(16000, '질문은 16,000자 이내로 입력해 주세요.'),
 });
-/** 이전 버전에서 별도로 입력한 공개 검색어를 읽는 호환 검증입니다. */
-export const chatWebQuerySchema = z
-  .string()
-  .trim()
-  .min(1, '외부에서 찾아볼 검색어를 입력해 주세요.')
-  .max(200, '외부 검색어는 200자 이내로 입력해 주세요.');
-/** 웹 설정 폼은 공개 검색어만 검증하며 선택 상태는 대화 초안이 소유합니다. */
-export const chatWebSearchFormSchema = z.object({
-  webQuery: chatWebQuerySchema,
-});
-export type ChatWebSearchForm = z.infer<typeof chatWebSearchFormSchema>;
 export const chatTurnSchema = z.object({
   id,
   role: z.enum(['user', 'assistant']),

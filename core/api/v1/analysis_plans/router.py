@@ -7,7 +7,7 @@ from core.api.dependencies import authorized, credential, access_value, envelope
 from core.api.operations import json_operation, body_schema, reauthorize
 from core.api.schemas import Envelope
 from core.modules.analysis_plans.store import PlanStore
-from .schemas import Profile, CreateConversion, CreatePlan, ValidatePlan, HandoffPlan
+from .schemas import Profile, CreateConversion, CreateConversionPart, CompleteConversionParts, CreatePlan, ValidatePlan, HandoffPlan
 
 router = APIRouter(tags=["analysis-plans"])
 Identifier = Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")]
@@ -31,13 +31,39 @@ def guard(scope, request, token, permission="source_write"):
 async def conversion(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """개인 PC가 보고한 PDF/OCR/셀 단위 문자를 원본 hash와 연결해 보관한다."""
     return await json_operation(request, tenant, token, CreateConversion, "source_write",
-        lambda scope, value: service(scope, request).conversion(value, guard(scope, request, token)), created=True)
+        lambda scope, value: service(scope, request).conversion(
+            value.model_dump(exclude={"profile"}), guard(scope, request, token)), created=True)
 
 
 @router.get("/analysis-conversions/{conversion_id}", response_model=Response)
 def read_conversion(conversion_id: Identifier, request: Request, query: Annotated[Profile, Query()], scope=Depends(authorized)):
     """원래 단위 위치·실제 문자/hash를 읽으며 OCR 의미 승인을 추측하지 않는다."""
-    return envelope({**service(scope, request).read("conversions", conversion_id), "access": access_value(scope)})
+    return envelope({**service(scope, request).read("conversions", conversion_id, transport=True), "access": access_value(scope)})
+
+
+@router.post('/analysis-conversion-parts', status_code=201, response_model=Response,
+             responses={200: {'model': Response}}, openapi_extra=body_schema(CreateConversionPart))
+async def conversion_part(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    """부분 보고는 불변 보관만 하며 전체 완료나 새 알림을 게시하지 않는다."""
+    return await json_operation(request, tenant, token, CreateConversionPart, 'source_write',
+        lambda scope, value: service(scope, request).conversion(
+            value.model_dump(exclude={"profile"}), guard(scope, request, token), part=True), created=True)
+
+
+@router.get('/analysis-conversion-parts/{part_id}', response_model=Response)
+def read_conversion_part(part_id: Identifier, request: Request, query: Annotated[Profile, Query()], scope=Depends(authorized)):
+    """응답 유실 후 같은 부분 보고를 읽으며 다른 소유자의 부분을 섞지 않는다."""
+    return envelope({**service(scope, request).read('conversion_parts', part_id), 'access': access_value(scope)})
+
+
+@router.post('/analysis-conversions/complete-parts', status_code=201, response_model=Response,
+             responses={200: {'model': Response}}, openapi_extra=body_schema(CompleteConversionParts))
+async def complete_conversion_parts(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    """모든 부분을 대조한 전체 manifest만 한 변환 보고로 확정한다."""
+    from core.modules.analysis_plans.conversion_parts import complete
+    return await json_operation(request, tenant, token, CompleteConversionParts, 'source_write',
+        lambda scope, value: complete(service(scope, request),
+            value.model_dump(exclude={"profile"}), guard(scope, request, token)), created=True)
 
 
 @router.post("/analysis-plans", status_code=201, response_model=Response,
@@ -45,7 +71,8 @@ def read_conversion(conversion_id: Identifier, request: Request, query: Annotate
 async def create_plan(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     """문서별 목적·선택 구간·필수 맥락을 서버가 확인한 불변 계획으로 만든다."""
     return await json_operation(request, tenant, token, CreatePlan, "source_write",
-        lambda scope, value: service(scope, request).create(value, guard(scope, request, token)), created=True)
+        lambda scope, value: service(scope, request).create(
+            value.model_dump(exclude={"profile"}), guard(scope, request, token)), created=True)
 
 
 @router.get("/analysis-plans/{plan_id}", response_model=Response)

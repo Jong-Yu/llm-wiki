@@ -20,6 +20,7 @@ import type {
 export type SourceAnalysisView = {
   kind: SourceAnalysisKind | 'unknown';
   jobId: string | null;
+  label?: string;
   progressPath: string | null;
 };
 type SourceAnalysisModel = {
@@ -176,6 +177,13 @@ export function useSourceAnalysis(
       ? (starter.progressPath?.(item, scope) ?? null)
       : null;
     const progressPath = entry?.progressPath ?? localPath;
+    const local = scope ? starter.status?.(item, scope) : null;
+    if (
+      local &&
+      localPath &&
+      (!entry?.progressPath || entry.progressPath === localPath)
+    )
+      return { ...local, jobId: entry?.jobId ?? null, progressPath: localPath };
     if (
       starting.has(key) ||
       (!!scope &&
@@ -184,7 +192,12 @@ export function useSourceAnalysis(
     )
       return { kind: 'running', jobId: entry?.jobId ?? null, progressPath };
     if (entry)
-      return { kind: entry.kind, jobId: entry.jobId || null, progressPath };
+      return {
+        kind: entry.kind,
+        label: entry.label,
+        jobId: entry.jobId || null,
+        progressPath,
+      };
     return {
       kind: progressPath ? 'attention' : index?.complete ? 'none' : 'unknown',
       jobId: null,

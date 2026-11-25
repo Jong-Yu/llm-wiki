@@ -1,10 +1,10 @@
 """채팅 첨부용 파일 읽기. 파일 경로는 앱이 고른 개인 작업 폴더의 사본이며 결과는 stdout JSON 한 줄이다."""
 
 import argparse
-import json
 from pathlib import Path
 
 from core.client.attachment_text import AttachmentError, read_attachment
+from tools.cli_io import emit_json
 
 PROTOCOL = "attach-file-cli-v1"
 
@@ -25,7 +25,7 @@ def main(argv=None):
         value = {"ok": False, "error": {"code": error.code}}
     except Exception:
         value = {"ok": False, "error": {"code": "file_unreadable"}}
-    print(json.dumps({"protocol": PROTOCOL, **value}, ensure_ascii=False, allow_nan=False), flush=True)
+    emit_json({"protocol": PROTOCOL, **value})
     return 0 if value["ok"] else 1
 
 

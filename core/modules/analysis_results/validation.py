@@ -15,6 +15,14 @@ from .contracts import ResultError
 from . import rule_checks
 
 
+def content_reference(value):
+    """고정 등록 본문 구성의 지문만 허용하며 외부 경로·새 내용을 받지 않는다."""
+    if (type(value) is not dict or set(value) != {"component", "sha256"}
+            or value["component"] != "data/registration.md"
+            or type(value["sha256"]) is not str or re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is None):
+        raise ResultError("invalid_submission")
+
+
 def execution_report(value):
     """클라이언트가 신고한 실행 정보의 모양만 확인한다. 실제 모델 실행을 인증하지 않는다."""
     if value is None:

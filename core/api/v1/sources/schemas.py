@@ -4,9 +4,9 @@
 """원본 수신 입력과 등록 결과를 손실 없이 표현하는 전송 모델."""
 
 from typing import Literal
-from pydantic import Field, JsonValue, field_validator
+from pydantic import Field, JsonValue
 
-from core.api.schemas import Access, Model
+from core.api.schemas import Access, Model, PaginationQuery
 
 
 class EmptyQuery(Model):
@@ -24,16 +24,8 @@ class TrashSource(Model):
     profile: str | None = Field(None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
 
 
-class SourceListQuery(Model):
-    limit: int = Field(20, ge=1, le=50, strict=False)
-    cursor: str | None = Field(None, min_length=1, max_length=16384)
-
-    @field_validator("limit", mode="before")
-    @classmethod
-    def integer_query(cls, value):
-        if isinstance(value, str) and (not value.isascii() or not value.isdecimal()):
-            raise ValueError("limit must be an integer string")
-        return value
+class SourceListQuery(PaginationQuery):
+    pass
 
 
 class TextRegistration(Model):

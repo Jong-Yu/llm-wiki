@@ -103,3 +103,30 @@ class SourcePreviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["error"]["code"], "source_preview_timeout")
         self.assertTrue(render._capacity.acquire(blocking=False))
         render._capacity.release()
+
+    async def test_count_reads_all_original_pages_without_a_conversion(self):
+        response = await self.http.get(self.endpoint.rstrip('/'), params=self.query)
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()['data']
+        self.assertEqual(data['page_count'], 2)
+        self.assertEqual(data['source_version'], self.source['source_version'])
+        self.assertEqual(data['source_sha256'], self.query['source_sha256'])
+        self.assertEqual(data['registration_revision'], self.query['registration_revision'])
+        self.assertEqual(data['access']['user_id'], self.user['user_id'])
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+
+    async def test_count_rechecks_source_basis_and_read_permission(self):
+        endpoint = self.endpoint.rstrip('/')
+        for field in ('source_sha256', 'registration_revision'):
+            response = await self.http.get(endpoint, params={**self.query, field: '0' * 64})
+            self.assertEqual(response.status_code, 409)
+        with patch('core.api.v1.source_previews.router.reauthorize', side_effect=AccessDenied()), \
+             patch('core.api.v1.source_previews.router.count_pages', return_value=999):
+            response = await self.http.get(endpoint, params=self.query)
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn('page_count', response.text)
+        with patch.object(render.subprocess, 'run', side_effect=subprocess.TimeoutExpired('preview', 20)):
+            response = await self.http.get(endpoint, params=self.query)
+        self.assertEqual(response.status_code, 503)
+        self.assertTrue(render._capacity.acquire(blocking=False))
+        render._capacity.release()

@@ -134,14 +134,16 @@ def create(self, *, tenant, user_id, request_id, source_id, source_version, sour
                    **({"registration": registration} if registration is not None else {}))]}
         conversion = None
         if registration is not None:
-            from .registration import materialize
+            from .registration import materialize, freeze_approval
             if registration['conversion_ref']:
                 from core.modules.notifications.store import NotificationStore
                 notifications = NotificationStore(self.store, actor, rulesets=self.rulesets)
                 reference = registration['conversion_ref']
                 report = notifications._conversion(reference)
-                notifications.require_approval_locked(report['manifest'], reference,
+                approved = notifications.require_approval_locked(report['manifest'], reference,
                     request_id=request_id, target=targets[0])
+                # 요청 지문은 외부 입력 그대로 유지하고 이후 복원용 사건만 서버 승인으로 확정한다.
+                job['events'][0]['details']['registration'] = freeze_approval(registration, approved)
             _, conversion = materialize(self, job, actor)
         record = {"operation": "analysis_job_create", "tenant": tenant, "user_id": user_id,
                   "request_id": request_id, "payload_hash": digest, "job_id": job_id,

@@ -4,17 +4,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import Field
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from core.api.concurrency import run_owned_thread
-from core.api.dependencies import authorized, credential
+from core.api.dependencies import authorized, credential, access_value, envelope
 from core.api.errors import error_response
 from core.api.operations import reauthorize
 from core.api.v1.sources.schemas import SourceReadQuery
 from core.modules.access.policy import AccessScope
 from core.modules.sources.contracts import SourceConflictError
 from core.modules.sources.store import SourceStore
-from .render import PreviewError, render_page
+from .render import PreviewError, render_page, count_pages
 
 router = APIRouter(tags=["sources"])
 Identifier = Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
@@ -36,7 +36,7 @@ def _check_basis(sources, source_id, source_version, query):
 @router.get("/sources/{source_id}/versions/{source_version}/pages/{page}", response_class=Response,
             responses={200: {"content": {"image/png": {"schema": {"type": "string", "format": "binary"}}}}})
 async def page_preview(request: Request, tenant: str, source_id: Identifier, source_version: Identifier,
-                       page: Annotated[int, Path(ge=1, le=100000)],
+                       page: Annotated[int, Path(ge=1, le=1000000)],
                        query: Annotated[PreviewQuery, Query()],
                        token: Annotated[str, Depends(credential)],
                        scope: Annotated[AccessScope, Depends(authorized)]):
@@ -65,3 +65,32 @@ async def page_preview(request: Request, tenant: str, source_id: Identifier, sou
         "X-Source-Sha256": query.source_sha256, "X-Source-Version": source_version,
         "X-Registration-Revision": query.registration_revision, "X-Source-Page": str(page),
     })
+
+
+@router.get('/sources/{source_id}/versions/{source_version}/pages')
+async def source_page_count(request: Request, tenant: str, source_id: Identifier, source_version: Identifier,
+                            query: Annotated[PreviewQuery, Query()], token: Annotated[str, Depends(credential)],
+                            scope: Annotated[AccessScope, Depends(authorized)]):
+    """변환 결과 수가 아닌 현재 허용된 고정 원본의 전체 페이지 수를 반환한다."""
+    def operation():
+        sources = SourceStore(scope.store)
+        _check_basis(sources, source_id, source_version, query)
+        stream, manifest = sources.open_original(source_id, source_version)
+        with stream:
+            if manifest['source_sha256'] != query.source_sha256:
+                raise SourceConflictError('source_changed')
+            if manifest['format'] != 'pdf':
+                raise PreviewError('source_preview_unsupported', 415)
+            count = count_pages(stream)
+        reauthorize(request, tenant, token, 'read', query.profile, expected=scope)
+        _check_basis(sources, source_id, source_version, query)
+        return count
+
+    try:
+        count = await run_owned_thread(operation)
+    except PreviewError as error:
+        return error_response(error.status, error.code, 'The original page count is unavailable.',
+            retry='read_again' if error.status == 503 else 'none')
+    return JSONResponse(envelope(dict(source_id=source_id, source_version=source_version,
+        source_sha256=query.source_sha256, registration_revision=query.registration_revision,
+        page_count=count, access=access_value(scope))), headers={'Cache-Control': 'no-store'})

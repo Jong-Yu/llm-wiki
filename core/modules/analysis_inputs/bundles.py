@@ -139,7 +139,7 @@ def prepare(self, job_id, *, tenant, user_id, run_id, expected_job_revision, sta
         extraction_ref = None
         complete = not skipped
         if registration(job) is not None:
-            complete = complete and conversion["complete"]
+            complete = complete and (conversion["complete"] or conversion.get('user_input_resolution', {}).get('complete', False))
         if extraction is not None:
             extraction_ref = {key: extraction["manifest"][key] for key in ("extraction_id", "extraction_revision", "content_sha256")}
             components["data/extraction.json"] = extraction["manifest_text"]
@@ -185,6 +185,13 @@ def prepare(self, job_id, *, tenant, user_id, run_id, expected_job_revision, sta
                     key: job[key] for key in ("job_id", "source_ref", "actor")
                 } | {"events": [job["events"][0]]}}
             manifest["component_references"] = references
+            # 큰 보존 본문은 서버가 확인한 불변 참조를 유지하고 페이지로 전달한다.
+            # 일반 분석 묶음·HTTP/MCP 요청·개별 AI 프롬프트 한도는 늘리지 않는다.
+            assembled_bytes = len(capture.encoded(manifest).encode("utf-8")) + sum(
+                len(component.encode("utf-8")) for component in components.values())
+            if assembled_bytes > limits.MAX_BUNDLE_BYTES:
+                manifest.update(input_mode=limits.REGISTRATION_REFERENCE_MODE,
+                                input_budget_bytes=limits.MAX_REGISTRATION_BUNDLE_BYTES)
         revision = files.digest(capture.encoded(manifest).encode("utf-8"))
         basis_details = {"analysis_basis_revision": basis_revision}
         if previous_basis is None or rebase:
@@ -212,6 +219,9 @@ def load_locked(self, job, bundle_id, bundle_revision):
             ("run_id", job["run_id"]), ("tenant", job["tenant"]), ("user_id", job["user_id"]), ("bundle_id", bundle_id))):
             raise ValueError()
         limits.stage_permission(manifest["stage"])
+        if manifest.get("input_mode") is not None:
+            if registration(job) is None or components.get("data/registration.json") != capture.encoded(registration(job)):
+                raise ValueError()
         if not linked(job, "input_prepared", bundle_id=bundle_id, bundle_revision=bundle_revision):
             raise limits.InputConflictError("input_pending_reconcile", bundle_id=bundle_id)
         if capture.dependency_revision(manifest["dependency"]) != manifest["dependency_revision"]:

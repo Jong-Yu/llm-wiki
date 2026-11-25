@@ -10,8 +10,11 @@ import type {
   CleanupPreview,
   CleanupReceipt,
 } from '@contracts/ontologyCleanup.contract';
-import { cleanupScope, executeCleanup } from '../api/ontologyCleanup.api';
-import { invalidatesScope } from '../api/ontologyMap.api';
+import { executeCleanup } from '../api/ontologyCleanup.api';
+import {
+  invalidatesScope,
+  workspaceScopeForOntology,
+} from '../api/ontologyMap.api';
 import type { OntologyFailure, OntologyScope } from './ontologyMap.types';
 
 type PendingRequest = { requestId: string; action: 'apply' | 'undo' };
@@ -158,7 +161,7 @@ export function useOntologyCleanup(
       scope,
       {
         connectionId: scope.connectionId,
-        expectedScope: cleanupScope(scope),
+        expectedScope: workspaceScopeForOntology(scope),
         operation: 'cleanupPreview',
         input: {
           document: state.document,
@@ -205,7 +208,7 @@ export function useOntologyCleanup(
       scope,
       {
         connectionId: scope.connectionId,
-        expectedScope: cleanupScope(scope),
+        expectedScope: workspaceScopeForOntology(scope),
         operation: 'cleanupHistory',
         input: {
           document: state.document,
@@ -260,7 +263,7 @@ export function useOntologyCleanup(
       scope,
       {
         connectionId: scope.connectionId,
-        expectedScope: cleanupScope(scope),
+        expectedScope: workspaceScopeForOntology(scope),
         operation: 'cleanupApply',
         input: {
           document: state.document,
@@ -298,7 +301,7 @@ export function useOntologyCleanup(
       scope,
       {
         connectionId: scope.connectionId,
-        expectedScope: cleanupScope(scope),
+        expectedScope: workspaceScopeForOntology(scope),
         operation: 'cleanupUndo',
         input: {
           document: state.document,
@@ -323,7 +326,7 @@ export function useOntologyCleanup(
       scope,
       {
         connectionId: scope.connectionId,
-        expectedScope: cleanupScope(scope),
+        expectedScope: workspaceScopeForOntology(scope),
         operation: 'cleanupRequest',
         input: {
           document: state.document,

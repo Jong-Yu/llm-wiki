@@ -79,6 +79,65 @@ class JobOperationsTests(ServerFixture):
         self.assertEqual(self.call("analysis_job_list", cursor=page["next_cursor"])["error"]["code"], "invalid_cursor")
         self.assertEqual(self.client.get(self.prefix, headers=self.headers(), params={"cursor": page["next_cursor"]}).status_code, 422)
 
+    def test_http_pagination_preserves_numeric_strings_and_document_only_profile(self):
+        first = self.store.save("example.md", "First", expected_revision=None)
+        self.store.save("example.md", "Second", expected_revision=first.revision)
+        self.store.save("other.md", "Other", expected_revision=None)
+        self.new_job()
+        base = f"/api/v1/tenants/{self.tenant}"
+        routes = (("/documents", {}), ("/documents/versions", {"document": "example.md"}),
+                  ("/sources", {}), ("/analysis-jobs", {}))
+        invalid = [{"limit": value} for value in ("", "0", "51", "-1", "+1", "1.0", "1e1", " 1", "1 ", "１２", "١", "true")]
+        invalid += [{"cursor": ""}, {"cursor": "x" * 16385}, {"unknown_field": "value"}]
+        before = self.snapshot()
+        for path, required in routes:
+            pages = {}
+            for limit in (None, "20", "1", "01", "50"):
+                with self.subTest(path=path, limit=limit):
+                    params = {**required, **({"limit": limit} if limit is not None else {})}
+                    response = self.client.get(base + path, headers=self.headers(), params=params)
+                    self.assertEqual(response.status_code, 200, response.text)
+                    pages[limit] = response.json()["data"]
+            self.assertEqual(pages[None], pages["20"])
+            self.assertEqual(pages["1"], pages["01"])
+            response = self.client.get(base + path, headers=self.headers(), params={**required, "profile": "default"})
+            if path.startswith("/documents"):
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["data"], pages[None])
+            else:
+                self.assertEqual(response.status_code, 422, response.text)
+            for params in invalid:
+                with self.subTest(path=path, fields=list(params)):
+                    response = self.client.get(base + path, headers=self.headers(), params={**required, **params})
+                    self.assertEqual(response.status_code, 422, response.text)
+                    self.assertEqual(response.json()["error"], {"code": "invalid_argument",
+                        "message": "Query fields or types do not match the API contract.", "retry": "none", "details": {}})
+                    self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(before, self.snapshot())
+
+    def test_job_input_failures_preserve_http_status_envelope_and_original_data(self):
+        cases = (
+            ("text/plain", b"{}", 415, "unsupported_media_type", "Use one application/json Content-Type header."),
+            ("application/json", b"{}", 422, "invalid_argument", "Job JSON fields do not match the contract."),
+            ("application/json", b'{"request_id":"a","request_id":"b"}', 422,
+             "invalid_argument", "Job JSON fields do not match the contract."),
+            ("application/json", b" " * (256 * 1024 + 1), 413,
+             "request_too_large", "The job request exceeds the 256 KiB limit."),
+        )
+        before = self.snapshot()
+        for media, content, status, code, message in cases:
+            with self.subTest(status=status, size=len(content)):
+                response = self.client.post(self.prefix,
+                    headers={**self.headers(), "Content-Type": media}, content=content)
+                self.assertEqual(response.status_code, status, response.text)
+                value = response.json()
+                self.assertEqual(set(value), {"error", "meta"})
+                self.assertEqual(value["error"], {"code": code, "message": message, "retry": "none", "details": {}})
+                self.assertEqual(set(value["meta"]), {"trace_id"})
+                self.assertRegex(value["meta"]["trace_id"], r"^[0-9a-f]{32}$")
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(before, self.snapshot())
+
     def test_listing_projects_only_the_page_but_detects_off_page_changes(self):
         """반환하지 않는 작업의 고정 입력·규약 검사로 다른 조회를 지연시키지 않는다."""
         from core.modules.analysis_inputs import readiness

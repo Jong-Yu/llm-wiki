@@ -28,12 +28,14 @@ import styles from './ImportDocumentContent.module.scss';
 type ImportDocumentFormProps = {
   session: ImportRegistrationSession;
   scope: ImportScope;
+  returnTo?: string;
 };
 
 /** 제목·파일·본문 초안을 보존하고 등록 실패와 미확정 결과를 따로 표시합니다. */
 export function ImportDocumentForm({
   session,
   scope,
+  returnTo = '/documents',
 }: ImportDocumentFormProps): JSX.Element {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const form = useForm<ImportDocumentValues>({
@@ -43,7 +45,12 @@ export function ImportDocumentForm({
   const kind = useWatch({ control: form.control, name: 'kind' });
   const content = useWatch({ control: form.control, name: 'content' });
   const title = useWatch({ control: form.control, name: 'title' });
-  const locked = state.busy || state.requestId !== null || !scope.canRegister;
+  const replacement = session.replacement;
+  const locked =
+    state.busy ||
+    state.requestId !== null ||
+    !scope.canRegister ||
+    !scope.canPrepare;
   const errors = form.formState.errors;
   const fileButton = useRef<HTMLButtonElement>(null);
   /** 같은 이름의 문서가 있을 때 사용자의 선택을 기다리는 등록 값입니다. */
@@ -75,20 +82,18 @@ export function ImportDocumentForm({
   }
   /** 제목과 저장 이름을 파일명(붙여넣기는 제목)에서 정하고, 같은 이름이 있으면 사용자에게 알립니다. */
   async function submit(values: ImportDocumentValues): Promise<void> {
-    const documentTitle =
-      values.kind === 'file' && state.file
+    const documentTitle = replacement
+      ? replacement.title
+      : values.kind === 'file' && state.file
         ? titleFromFilename(state.file.filename)
         : values.title.trim();
     const base = baseNameFromTitle(documentTitle);
     const resolved: ImportDocumentValues = {
       ...values,
       title: documentTitle,
-      targetDocument: scope.canPrepare ? targetWithNumber(base, 1) : '',
+      targetDocument: targetWithNumber(base, 1),
     };
-    if (!scope.canPrepare) {
-      await register(resolved);
-      return;
-    }
+    if (!scope.canPrepare || !scope.canRegister) return;
     setChecking(true);
     const existence = await checkTargetExistence(
       scope,
@@ -112,6 +117,13 @@ export function ImportDocumentForm({
       return;
     }
     setChecking(false);
+    if (existence === 'unknown') {
+      form.setError('root', {
+        message:
+          '저장할 이름을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+      });
+      return;
+    }
     await register(resolved);
   }
   /** 확정한 값으로 원본을 등록하고 이어서 변환·추출을 자동으로 시작합니다. */
@@ -159,9 +171,10 @@ export function ImportDocumentForm({
           }
         />
       )}
-      {!scope.canRegister && (
+      {(!scope.canRegister || !scope.canPrepare) && (
         <div className={styles.notice} role="status">
-          이 작업 공간에는 원본 등록 권한이 없습니다. 입력을 제출할 수 없습니다.
+          이 작업 공간에서 문서를 등록하려면 원본·위키·관계 작성 권한이
+          필요합니다.
         </div>
       )}
       {state.notice && (
@@ -195,6 +208,18 @@ export function ImportDocumentForm({
             >
               등록 결과 확인
             </Button>
+          ) : state.errorStage === 'file' ? (
+            <Button
+              variant="surface"
+              type="button"
+              className={styles.button}
+              disabled={locked}
+              onClick={(): void => {
+                void chooseFile();
+              }}
+            >
+              파일 다시 선택
+            </Button>
           ) : (
             <Button
               variant="surface"
@@ -210,23 +235,27 @@ export function ImportDocumentForm({
       )}
       <fieldset className={styles.fields} disabled={locked}>
         <legend className={styles.srOnly}>문서 등록 입력</legend>
-        <WorkspaceSection title="원본 입력">
-          <div className={styles.tabs} role="group" aria-label="등록 방식">
-            <button
-              type="button"
-              aria-pressed={kind === 'file'}
-              onClick={(): void => selectKind('file')}
-            >
-              파일 업로드
-            </button>
-            <button
-              type="button"
-              aria-pressed={kind === 'text'}
-              onClick={(): void => selectKind('text')}
-            >
-              텍스트 붙여넣기
-            </button>
-          </div>
+        <WorkspaceSection
+          title={replacement ? `파일 교체 · ${replacement.title}` : '원본 입력'}
+        >
+          {!replacement && (
+            <div className={styles.tabs} role="group" aria-label="등록 방식">
+              <button
+                type="button"
+                aria-pressed={kind === 'file'}
+                onClick={(): void => selectKind('file')}
+              >
+                파일 업로드
+              </button>
+              <button
+                type="button"
+                aria-pressed={kind === 'text'}
+                onClick={(): void => selectKind('text')}
+              >
+                텍스트 붙여넣기
+              </button>
+            </div>
+          )}
           {kind === 'file' ? (
             <div className={styles.dropZone}>
               <Icon name="file-text" size={20} className={styles.uploadIcon} />
@@ -236,8 +265,10 @@ export function ImportDocumentForm({
                   <p>{(state.file.sizeBytes / 1024).toFixed(1)} KB</p>
                 )}
                 <small>
-                  문서 제목과 저장 이름은 파일명으로 정합니다 · MD, TXT, PDF,
-                  XLSX, DOCX, PPTX, PPT, 이미지 · 최대 20 MiB
+                  {replacement
+                    ? '정상 파일 또는 암호를 해제한 파일을 선택하세요'
+                    : '문서 제목과 저장 이름은 파일명으로 정합니다'}{' '}
+                  · MD, TXT, PDF, XLSX, DOCX, PPTX, PPT, 이미지 · 최대 20 MiB
                 </small>
               </div>
               <Button
@@ -356,7 +387,16 @@ export function ImportDocumentForm({
         </p>
       )}
       <div className={styles.actions}>
-        <span className={styles.caption}>원본은 그대로 보관됩니다.</span>
+        <span className={styles.caption}>
+          {replacement
+            ? '이전 파일과 처리 기록은 보관됩니다. 새 파일로 등록을 이어갑니다.'
+            : '원본은 그대로 보관됩니다.'}
+        </span>
+        {replacement && (
+          <Link className={styles.button} to={returnTo}>
+            진행 상태로 돌아가기
+          </Link>
+        )}
         <Button
           variant="primary"
           type="submit"
@@ -370,9 +410,9 @@ export function ImportDocumentForm({
         >
           {state.busy || checking
             ? '등록 중…'
-            : scope.canPrepare
-              ? '등록하고 관계 추출'
-              : '원본 보관'}
+            : replacement
+              ? '교체하고 등록 계속'
+              : '문서 등록'}
         </Button>
       </div>
     </form>

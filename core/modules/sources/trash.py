@@ -2,8 +2,9 @@
 
 from datetime import datetime, timezone
 
+from core.common.cleanup import cleanup_details
 from core.common.read_changes import before_change
-from core.modules.documents.trash import write_record, cleanup_details
+from core.modules.documents.trash import write_record
 from . import files, queries, validation
 from .contracts import SourceConflictError, SourceCorruptError, identifier, HEX, MAX_SOURCES
 
@@ -72,9 +73,9 @@ def set_state(self, source_id, expected_registration_revision, *, restore=False,
             write_record(self.store, path(self, source_id), record, failures)
     except Exception as error:
         if failures:
-            error.cleanup_failures = cleanup_details(self.store, failures)
+            error.cleanup_failures = cleanup_details(self.store.data_dir, failures)
         raise
-    return {**_project(catalog, record), "cleanup_failures": cleanup_details(self.store, failures)}
+    return {**_project(catalog, record), "cleanup_failures": cleanup_details(self.store.data_dir, failures)}
 
 
 def list_trash(self):

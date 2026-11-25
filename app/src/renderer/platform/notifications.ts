@@ -14,6 +14,11 @@ import type {
   NotificationPageResult,
   NotificationReadRequest,
   NotificationReadStateResult,
+  NotificationCorrectRequest,
+  NotificationRetryPageRequest,
+  NotificationRetryPageResult,
+  NotificationCancelRetryRequest,
+  NotificationCancelRetryResult,
 } from '@contracts/notifications.contract';
 
 /** 최신 앱의 제한된 알림 bridge만 사용합니다. */
@@ -27,6 +32,15 @@ export function hasNotificationsBridge(): boolean {
   return !!window.wiki?.notifications;
 }
 export const notificationsGateway: NotificationsBridge = {
+  correct: (
+    request: NotificationCorrectRequest,
+  ): Promise<NotificationMutationResult> => getBridge().correct(request),
+  retryPage: (
+    request: NotificationRetryPageRequest,
+  ): Promise<NotificationRetryPageResult> => getBridge().retryPage(request),
+  cancelRetry: (
+    request: NotificationCancelRetryRequest,
+  ): Promise<NotificationCancelRetryResult> => getBridge().cancelRetry(request),
   list: (request: NotificationListRequest): Promise<NotificationListResult> =>
     getBridge().list(request),
   read: (request: NotificationReadRequest): Promise<NotificationDetailResult> =>

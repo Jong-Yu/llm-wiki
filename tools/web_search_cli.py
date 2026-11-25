@@ -2,11 +2,10 @@
 
 import argparse
 import asyncio
-import json
 from pathlib import Path
 
 from core.client.web_research import research
-from tools.cli_io import add_ai_arguments
+from tools.cli_io import add_ai_arguments, emit_json
 
 PROTOCOL = "web-search-cli-v1"
 
@@ -33,7 +32,7 @@ def main(argv=None):
         value = {"ok": True, "web": web}
     except (OSError, ValueError):
         value = {"ok": False, "error": {"code": "invalid_question" if args.question_file else "invalid_query"}}
-    print(json.dumps({"protocol": PROTOCOL, **value}, ensure_ascii=False, allow_nan=False), flush=True)
+    emit_json({"protocol": PROTOCOL, **value})
     return 0 if value["ok"] else 1
 
 

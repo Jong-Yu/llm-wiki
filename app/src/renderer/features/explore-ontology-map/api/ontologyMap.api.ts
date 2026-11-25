@@ -21,6 +21,19 @@ import type {
   OntologySnapshot,
 } from '../model/ontologyMap.types';
 
+/** 사용자·공간·관점 기준만 보내며 연결 ID와 UI 권한 목록은 보내지 않습니다. */
+export function workspaceScopeForOntology(
+  scope: OntologyScope,
+): WorkspaceScope {
+  return {
+    userId: scope.userId,
+    tenant: scope.tenant,
+    profileId: scope.profileId,
+    policyRevision: scope.policyRevision,
+    ...(scope.accessRevision ? { accessRevision: scope.accessRevision } : {}),
+  };
+}
+
 /** 연결에서 실제 허용된 공간·관점만 추려 요청 기준으로 고정합니다. */
 function readScope(result: ConnectionResult): OntologyScope | null {
   if (
@@ -413,15 +426,7 @@ export async function saveOntologyDecision(
     const result = await workspaceGateway.execute({
       ...command,
       connectionId: scope.connectionId,
-      expectedScope: {
-        userId: scope.userId,
-        tenant: scope.tenant,
-        profileId: scope.profileId,
-        policyRevision: scope.policyRevision,
-        ...(scope.accessRevision
-          ? { accessRevision: scope.accessRevision }
-          : {}),
-      },
+      expectedScope: workspaceScopeForOntology(scope),
     });
     if (!sameScope(scope, readScope(await connectionGateway.getState())))
       return failure(

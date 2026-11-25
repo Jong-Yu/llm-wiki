@@ -18,7 +18,7 @@ from core.api.schemas import Envelope
 from core.api.concurrency import run_owned_thread
 from core.modules.access.policy import AccessScope
 from core.modules.analysis_jobs.store import JobStore
-from .ingress import JobInputError, input_error, read_json
+from .ingress import JobInputError, read_json
 from .schemas import Cancel, CreatedJob, CreateJob, CreateRegistration, EmptyQuery, Heartbeat, Job, JobPage, ListQuery
 
 
@@ -50,7 +50,7 @@ async def mutate(request, scope, token, model, operation, *, job_id=None):
             arguments["job_id"] = job_id
         result = await run_owned_thread(partial(getattr(store, operation), **arguments))
     except JobInputError as error:
-        return input_error(error)
+        return error_response(error.status, error.code, error.message)
     except ClientDisconnect:
         return error_response(400, "request_disconnected", "The job request was interrupted.")
     if operation in {"create", "create_registration"}:

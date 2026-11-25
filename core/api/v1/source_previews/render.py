@@ -41,6 +41,28 @@ def render_page(stream, page):
         _capacity.release()
 
 
+def count_pages(stream):
+    """동일한 고정 파일과 제한된 PDF 프로세스에서 전체 원본 페이지 수만 읽는다."""
+    if not _capacity.acquire(blocking=False):
+        raise PreviewError('source_preview_busy', 503)
+    try:
+        try:
+            result = subprocess.run([sys.executable, '-m', __name__, 'count'], stdin=stream,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=TIMEOUT_SECONDS, check=False)
+        except subprocess.TimeoutExpired:
+            raise PreviewError('source_preview_timeout', 503) from None
+        if result.returncode == 4:
+            raise PreviewError('source_preview_unavailable', 503)
+        if result.returncode != 0 or not result.stdout.isdigit() or len(result.stdout) > 7:
+            raise PreviewError('source_preview_failed')
+        count = int(result.stdout)
+        if not 0 <= count <= 1000000:
+            raise PreviewError('source_preview_failed')
+        return count
+    finally:
+        _capacity.release()
+
+
 def _worker(page):
     """렌더러만 자원 제한을 적용하며 원본·임시 복사·캐시 파일을 쓰지 않는다."""
     if sys.platform.startswith("linux"):
@@ -53,6 +75,9 @@ def _worker(page):
         return 4
     try:
         with pypdfium2.PdfDocument(sys.stdin.buffer) as document:
+            if page is None:
+                sys.stdout.buffer.write(str(len(document)).encode('ascii'))
+                return 0
             if not 1 <= page <= len(document):
                 return 3
             rendered = document[page - 1]
@@ -80,4 +105,4 @@ def _worker(page):
 
 
 if __name__ == "__main__":
-    raise SystemExit(_worker(int(sys.argv[1])))
+    raise SystemExit(_worker(None if sys.argv[1] == 'count' else int(sys.argv[1])))

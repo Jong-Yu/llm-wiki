@@ -92,6 +92,7 @@ export const sourceItemSchema = z.object({
   format: sourceFormatSchema,
   registrationRevision: textSchema,
   linkedDocumentCount: countSchema,
+  linkedDocuments: z.array(wikiItemSchema).optional(),
   analysisStatus: z.literal('not_started'),
 });
 const accessSchema = z.object({
@@ -116,6 +117,7 @@ export const documentListRequestSchema = z.strictObject({
   connectionId: textSchema,
   cursor: z.string().min(1).max(16384).nullable(),
   limit: z.number().int().min(1).max(50),
+  groupSources: z.boolean().optional(),
 });
 export const documentListPageSchema = z.object({
   connectionId: textSchema,
@@ -293,6 +295,41 @@ const contentEnvelopeSchema = z.strictObject({
 });
 type RawItem = z.infer<typeof rawWikiSchema> | z.infer<typeof rawSourceSchema>;
 
+/** 계보로 묶인 현재 Wiki만 공개 계약으로 읽고 기존 요약 참조와 구분합니다. */
+export function parseLinkedDocuments(
+  values: readonly unknown[],
+): Extract<DocumentListItem, { kind: 'wiki' }>[] {
+  return values.flatMap(
+    (value: unknown): Extract<DocumentListItem, { kind: 'wiki' }>[] => {
+      const entry = z
+        .object({ snippet: z.string().optional() })
+        .catchall(z.unknown())
+        .safeParse(value);
+      if (!entry.success) return [];
+      const { snippet: _snippet, ...wiki } = entry.data;
+      const parsed = rawWikiSchema.safeParse(wiki);
+      if (!parsed.success) {
+        if (Object.hasOwn(wiki, 'source_status'))
+          throw new Error('연결된 Wiki 문서 정보를 확인할 수 없습니다.');
+        return [];
+      }
+      const item = parsed.data;
+      return [
+        {
+          kind: 'wiki',
+          document: item.document,
+          revision: item.revision,
+          metadata: item.metadata,
+          bodyRevision: item.body_revision,
+          documentId: item.document_id,
+          authorship: item.authorship,
+          sourceStatus: item.source_status,
+        },
+      ];
+    },
+  );
+}
+
 /** caller가 서버 주소/tenant/profile을 지정하지 못하도록 목록 입력을 제한합니다. */
 export function parseDocumentListRequest(value: unknown): DocumentListRequest {
   const parsed = documentListRequestSchema.safeParse(value);
@@ -323,6 +360,7 @@ export function parseDocumentListResponse(
             format: item.format,
             registrationRevision: item.registration_revision,
             linkedDocumentCount: item.documents.length,
+            linkedDocuments: parseLinkedDocuments(item.documents),
             analysisStatus: item.analysis_status,
           }
         : {

@@ -14,8 +14,8 @@
     "../*.config.ts",
     "../../src/renderer/env.d.ts",
     "../../src/main/env.d.ts",
-    "../../tests/poc-ui/verify.ts",
-    "../../tests/ontology-cleanup/verify.ts",
-    "../../tests/ontology-review/verify.ts"
-  ]
+    "../../tests/**/*.ts",
+    "../../tests/**/*.tsx"
+  ],
+  "exclude": ["../../tests/*-proposal/**"]
 }

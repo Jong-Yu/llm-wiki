@@ -5,7 +5,6 @@
 """
 from copy import deepcopy
 import json
-from types import SimpleNamespace
 
 from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.modules.access.policy import AccessDenied
@@ -139,7 +138,7 @@ class ProposalExecutionStore:
             self._active(path, latest, intent)
             self.proposals._current(fixed)
             return actor
-        planned = self.plans.create(SimpleNamespace(model_dump=lambda **_: body), current_authorize)
+        planned = self.plans.create(body, current_authorize)
         self.plans.handoff(planned["manifest"]["id"], planned["revision"], request_id, current_authorize)
         return {**self.read(proposal_id, request_id), "replayed": previous is not None}
 

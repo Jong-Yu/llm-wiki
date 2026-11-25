@@ -1,0 +1,39 @@
+.notice {
+  display: grid;
+  grid-template-columns: var(--wiki-space-16) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--wiki-space-12);
+  box-sizing: border-box;
+  block-size: 48px;
+  margin: var(--wiki-space-24) var(--wiki-space-24) 0;
+  padding-inline: var(--wiki-space-16);
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-subtle);
+  color: var(--wiki-color-text-secondary);
+  font: var(--wiki-font-size-13) / var(--wiki-font-line-height-ui)
+    var(--wiki-font-family-ui);
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  a {
+    white-space: nowrap;
+    color: var(--wiki-color-action-primary);
+    text-underline-offset: 3px;
+  }
+
+  &[data-state='complete'] > svg {
+    color: var(--wiki-color-status-success);
+  }
+}
+
+.loading {
+  margin: 0;
+  padding: var(--wiki-space-24);
+  color: var(--wiki-color-text-secondary);
+}

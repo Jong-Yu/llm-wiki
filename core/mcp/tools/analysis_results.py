@@ -5,7 +5,7 @@
 # 함수 안의 영어 설명문은 AI에 공개되는 도구 계약이라 그대로 유지한다.
 
 from mcp.types import CallToolResult, ToolAnnotations
-from pydantic import Field, JsonValue, StrictBool, StrictStr
+from pydantic import Field, JsonValue, StrictBool, StrictStr, model_validator
 from typing import Annotated, Literal
 
 from core.mcp.request_context import _authorized_scope
@@ -42,9 +42,23 @@ class ResultSubmit(ResultQuery):
 
 
 class WikiSubmit(ResultSubmit):
-    content: StrictStr
+    content: StrictStr | None = None
+    content_ref: dict[str, JsonValue] | None = None
     # A | None은 A 형식 또는 None을 허용한다는 뜻이다. =None이 없으므로 필드 자체는 필수다.
     expected_revision: SourceRevisionInput | None
+
+    @model_validator(mode="after")
+    def one_content(self):
+        """기존 본문 또는 같은 묶음의 보존 본문 참조 중 하나만 접수한다."""
+        if (self.content is None) == (self.content_ref is None):
+            raise ValueError("Supply exactly one content or fixed registration content_ref.")
+        if self.content_ref is not None:
+            from core.modules.analysis_results.validation import content_reference
+            try:
+                content_reference(self.content_ref)
+            except ValueError as error:
+                raise ValueError("Use the exact registration component and SHA-256.") from error
+        return self
 
 
 class OntologySubmit(ResultSubmit):
@@ -91,7 +105,8 @@ def _register_result_tools(server, get_store):
     def analysis_job_wiki_write(job_id: Identifier, run_id: Identifier,
             expected_job_revision: SourceRevisionInput, bundle_id: Identifier,
             bundle_revision: SourceRevisionInput, request_id: Identifier, document: Document,
-            content: StrictStr, expected_revision: SourceRevisionInput | None,
+            expected_revision: SourceRevisionInput | None, content: StrictStr | None = None,
+            content_ref: dict[str, JsonValue] | None = None,
             execution: dict[str, JsonValue] | None = None,
             diagnostics: dict[str, JsonValue] | None = None, save: StrictBool = True,
             response_mode: Literal["full", "compact"] = "full") -> CallToolResult:
@@ -100,6 +115,10 @@ def _register_result_tools(server, get_store):
         response_mode=compact omits successful checker explanations while retaining
         receipts, diagnostics, warnings and all failed/not-run checks. For details
         query analysis_job_result_query with response_mode=full and this request_id.
+        Supply either content or content_ref, never both. For preservation registration,
+        content_ref={component:"data/registration.md",sha256:<fixed component hash>}
+        saves that exact full component server-side without retransmitting the body.
+        The same bundle_id/revision, request identity, CAS and history rules apply.
         Use the source revision captured in the bundle; null creates only an absent
         document. The server rechecks permission, source/context, live run and rules
         inside the save boundary and preserves full previous versions. A successful
@@ -113,7 +132,7 @@ def _register_result_tools(server, get_store):
             job_id, tenant=scope.tenant, user_id=scope.user_id, run_id=run_id,
             expected_job_revision=expected_job_revision, bundle_id=bundle_id,
             bundle_revision=bundle_revision, request_id=request_id, document=document,
-            content=content, expected_revision=expected_revision, execution=execution,
+            content=content, content_ref=content_ref, expected_revision=expected_revision, execution=execution,
             diagnostics=diagnostics, save=save, authorize=_authorize), response_mode)
 
     # 실제 위키에 묶인 원시 그래프를 제출한다. 기본값 적용 전 검사와 전체 저장은 ResultStore가 처리한다.

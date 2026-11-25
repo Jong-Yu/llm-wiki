@@ -176,7 +176,7 @@ class PresentationConversionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reference['source_sha256'], sha256(raw).hexdigest())
         result = self.convert()
         body = CreateConversion.model_validate(report_body(result, reference, uuid4().hex, None))
-        saved = PlanStore(store, actor).conversion(body, lambda: None)
+        saved = PlanStore(store, actor).conversion(body.model_dump(exclude={"profile"}), lambda: None)
         self.assertEqual(saved['manifest']['method'], 'pptx_text')
         self.assertEqual(saved['manifest']['units'][0]['location']['kind'], 'slides')
         selected = PlanStore(store, actor)._select(result['units'], [{'kind': 'slides', 'start': 1, 'end': 2}])
@@ -186,7 +186,7 @@ class PresentationConversionTest(unittest.IsolatedAsyncioTestCase):
             PlanStore(store, actor)._select(result['units'], [{'kind': 'slides', 'start': 1, 'end': 3}])
         wrong = body.model_copy(update={'method': 'docx_text'})
         with self.assertRaises(ValueError):
-            PlanStore(store, actor).conversion(wrong, lambda: None)
+            PlanStore(store, actor).conversion(wrong.model_dump(exclude={"profile"}), lambda: None)
         with self.assertRaises(ValidationError):
             Location(kind='slides', start=2, end=1)
 

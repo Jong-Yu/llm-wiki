@@ -1,30 +1,26 @@
 import type { JSX, ReactNode } from 'react';
 import { Link } from 'react-router';
 import { formatTimestamp } from '@renderer/shared/lib/formatTimestamp';
-import { HeaderActions } from '@renderer/shared/lib/headerActions';
-import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
 import { Button } from '@renderer/shared/ui/Button';
 import { Icon } from '@renderer/shared/ui/Icon';
-import type { IconName } from '@renderer/shared/ui/Icon';
-import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
-import { WorkspaceSection } from '@renderer/shared/ui/WorkspaceSection';
 import buttonStyles from '@renderer/shared/ui/Button.module.scss';
-import { documentTaskNeedsAttention } from '../model/documentTask.types';
 import type {
   DocumentTaskAction,
-  DocumentTaskAttemptView,
-  DocumentTaskResult,
   DocumentTaskStep,
   DocumentTaskStepState,
   DocumentTaskView,
 } from '../model/documentTask.types';
 import styles from './DocumentTasks.module.scss';
 
-type DocumentTaskDetailProps = {
+export type DocumentTaskDetailProps = {
   task: DocumentTaskView;
   busy?: boolean;
   error?: string | null;
   onAction: (action: DocumentTaskAction) => void;
+  onBack?: () => void;
+  backPath?: string;
+  historyPath?: string;
+  currentViewPath?: string;
   executionContent?: ReactNode;
   textReviewPath?: string;
 };
@@ -32,315 +28,338 @@ const stepLabels: Record<DocumentTaskStepState, string> = {
   complete: '완료',
   current: '진행 중',
   failed: '중단',
-  waiting: '진행 전',
-  ready: '실행 전',
+  waiting: '대기',
+  ready: '대기',
   unconfirmed: '확인 필요',
-  review: '문자 확인 필요',
-  stopped: '실행 중단',
-};
-const stepIcons: Record<DocumentTaskStepState, IconName> = {
-  complete: 'circle-check',
-  current: 'loader-circle',
-  failed: 'circle-alert',
-  waiting: 'clock',
-  ready: 'clock',
-  unconfirmed: 'triangle-alert',
-  review: 'triangle-alert',
-  stopped: 'pause',
+  review: '내용 확인',
+  stopped: '중단',
+  unavailable: '기존 입력',
 };
 
-/** 결과 문서 링크는 저장을 재실행하지 않고 정확한 경로만 전달합니다. */
+/** 결과 열람은 저장이나 재실행을 호출하지 않습니다. */
 function documentPath(document: string): string {
   return `/document?${new URLSearchParams({ path: document })}`;
 }
 
-/** 원본 보관·변환·분석 결과를 같은 주소에서 확인하고 허용된 행동만 제공합니다. */
+/** 현재 문서의 세 단계와 필요한 행동을 표시하며 읽기·복귀는 실행과 분리합니다. */
 export function DocumentTaskDetail({
   task,
   busy = false,
   error = null,
   onAction,
+  onBack,
+  backPath = '/documents',
+  historyPath,
+  currentViewPath,
   executionContent,
   textReviewPath,
 }: DocumentTaskDetailProps): JSX.Element {
-  const resultReturnState = { workflowReturnTo: documentTaskPath(task.id) };
+  const resultReturnState = {
+    workflowReturnTo: currentViewPath ?? task.detailPath,
+  };
   const sourcePath = `/source?${new URLSearchParams({ sourceId: task.sourceId, version: task.sourceVersion })}`;
-  const firstResult = task.results[0];
+  const recordPath =
+    historyPath ??
+    (task.jobId
+      ? `/jobs?${new URLSearchParams({ jobId: task.jobId, view: 'history' })}`
+      : `/documents?${new URLSearchParams({ taskId: task.id, view: 'history' })}`);
+  const result =
+    task.results.find(
+      (item: DocumentTaskView['results'][number]): boolean => item.current,
+    ) ?? task.results[0];
   const action = task.primaryAction;
+  const measure = task.measurement;
+  const review = task.textReviewScopes.length > 0;
   return (
     <div
       className={`${styles.root} ${styles.detail}`}
       data-task-detail={task.id}
-      aria-busy={busy}
     >
-      <HeaderActions>
-        {action && (
-          <Button
-            variant={action.id === 'stop-conversion' ? 'surface' : 'primary'}
-            disabled={busy}
-            onClick={(): void => onAction(action.id)}
-          >
-            {action.label}
+      <div className={styles.progressHeader}>
+        {onBack ? (
+          <Button variant="surface" size="small" onClick={onBack}>
+            <Icon name="arrow-left" /> 문서 목록
           </Button>
-        )}
-        {task.textReviewScopes.length > 0 && (
-          <Link
-            className={`${buttonStyles.button} ${buttonStyles.surface}`}
-            to={textReviewPath ?? sourcePath}
-            state={resultReturnState}
-          >
-            {textReviewPath ? '문자 검토와 승인' : '원본과 문자 대조'}
+        ) : (
+          <Link className={styles.textLink} to={backPath}>
+            <Icon name="arrow-left" /> 문서 목록
           </Link>
         )}
-        {!action && task.state === 'complete' && firstResult && (
-          <Link
-            className={`${buttonStyles.button} ${buttonStyles.primary}`}
-            to={documentPath(firstResult.document)}
-            state={resultReturnState}
-          >
-            문서 열기 <Icon name="arrow-right" />
-          </Link>
-        )}
-        {action?.id !== 'refresh' && (
-          <Button
-            variant="surface"
-            disabled={busy}
-            onClick={(): void => onAction('refresh')}
-          >
-            새로고침
-          </Button>
-        )}
-      </HeaderActions>
-      <div className={styles.summary}>
-        <span className={styles.status} data-state={task.state} role="status">
-          {task.status}
-        </span>
-        <span className={styles.meta}>
-          {task.fileName}
-          {task.attemptCount > 0 ? ` · 변환 ${task.attemptCount}회` : ''} ·{' '}
+        <span data-completed-steps>{task.completionLabel}</span>
+      </div>
+      <header className={styles.progressTitle}>
+        <h1>{task.title}</h1>
+        <p className={styles.meta}>
+          {task.fileName} ·{' '}
           <time dateTime={task.updatedAt}>
             {formatTimestamp(task.updatedAt)}
           </time>
+        </p>
+      </header>
+      <ol className={styles.steps} aria-label="문서 등록 단계">
+        {task.steps.map(
+          (step: DocumentTaskStep, index: number): JSX.Element => (
+            <li
+              key={step.id}
+              data-stage={step.id}
+              data-state={step.state}
+              aria-current={
+                step.id === task.activeStep && task.state !== 'complete'
+                  ? 'step'
+                  : undefined
+              }
+            >
+              <span className={styles.stepMark} aria-hidden="true">
+                {step.state === 'complete' ? <Icon name="check" /> : index + 1}
+              </span>
+              <div>
+                <h2>{step.title}</h2>
+                <span>
+                  {step.state === 'unavailable'
+                    ? step.id === 'convert'
+                      ? '기록 없음'
+                      : step.id === 'wiki'
+                        ? '기존 문서'
+                        : '요청 없음'
+                    : stepLabels[step.state]}
+                </span>
+              </div>
+            </li>
+          ),
+        )}
+      </ol>
+      <section
+        className={styles.progressFocus}
+        aria-label="현재 작업"
+        data-progress-focus
+      >
+        <h2 className={styles.focusTitle} aria-live="polite" aria-atomic="true">
+          {task.status}
+        </h2>
+        <p
+          className={styles.progressDescription}
+          role={error ? 'alert' : undefined}
+        >
+          {error ?? task.explanation.body}
+        </p>
+        <div className={styles.progressMeasure} data-progress-measure>
+          {measure ? (
+            <>
+              <div className={styles.progressQuantity}>
+                <div>
+                  <strong>{measure.completed.toLocaleString('ko-KR')}</strong>
+                  <span className={styles.meta}>
+                    {measure.total !== null
+                      ? ` / ${measure.total.toLocaleString('ko-KR')}`
+                      : ''}{' '}
+                    {measure.unit}
+                  </span>
+                </div>
+                {measure.percent !== null && <span>{measure.percent}%</span>}
+              </div>
+              {measure.total !== null && (
+                <progress
+                  className={styles.progressTrack}
+                  max={measure.total}
+                  value={measure.completed}
+                  aria-label="문자 변환 처리량"
+                />
+              )}
+              <div className={styles.measureCaption}>
+                <span>문자 변환 처리 기록</span>
+                <span>
+                  {measure.remaining === null
+                    ? '전체 수량 확인 전'
+                    : `남은 ${measure.remaining.toLocaleString('ko-KR')} ${measure.unit}`}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className={styles.progressOperation}>
+              <strong>{task.operation.title}</strong>
+              <span>{task.operation.note}</span>
+            </div>
+          )}
+        </div>
+        <div className={styles.progressAction}>
+          <p>{task.explanation.next}</p>
+          {review && action?.id !== 'refresh' ? (
+            <Link
+              className={`${buttonStyles.button} ${buttonStyles.primary}`}
+              to={textReviewPath ?? sourcePath}
+              state={resultReturnState}
+            >
+              등록할 내용 확인
+            </Link>
+          ) : action ? (
+            <Button
+              variant={action.id === 'stop-conversion' ? 'surface' : 'primary'}
+              disabled={busy}
+              onClick={(): void => onAction(action.id)}
+            >
+              {action.label}
+            </Button>
+          ) : null}
+          {!review && textReviewPath && (
+            <Link
+              className={styles.textLink}
+              to={textReviewPath}
+              state={resultReturnState}
+            >
+              내용 직접 입력
+            </Link>
+          )}
+        </div>
+      </section>
+      {executionContent}
+      <footer className={styles.progressFooter}>
+        <div className={styles.savedLink}>
+          <Link
+            className={styles.textLink}
+            to={result ? documentPath(result.document) : sourcePath}
+            state={resultReturnState}
+          >
+            <Icon name={result ? 'file-text' : 'files'} />
+            {result ? '저장된 문서 열기' : '원본 보기'}
+          </Link>
+          {result && !result.current && (
+            <small>이전 저장본 · 현재 판본 확인 필요</small>
+          )}
+        </div>
+        <div className={styles.progressTools}>
+          <Link
+            className={styles.textLink}
+            to={`/register?${new URLSearchParams({ replaceSourceId: task.sourceId, version: task.sourceVersion })}`}
+            state={resultReturnState}
+            style={{
+              visibility:
+                (task.activeStep === 'convert' || task.inputLimited) &&
+                !['running', 'complete'].includes(task.state)
+                  ? 'visible'
+                  : 'hidden',
+            }}
+            tabIndex={
+              (task.activeStep === 'convert' || task.inputLimited) &&
+              !['running', 'complete'].includes(task.state)
+                ? undefined
+                : -1
+            }
+            aria-hidden={
+              (task.activeStep !== 'convert' && !task.inputLimited) ||
+              ['running', 'complete'].includes(task.state)
+            }
+          >
+            파일 교체
+          </Link>
+          {action?.id !== 'refresh' && (
+            <Button
+              variant="surface"
+              size="small"
+              disabled={busy}
+              onClick={(): void => onAction('refresh')}
+            >
+              <Icon name="refresh-cw" /> 새로고침
+            </Button>
+          )}
+          <Link
+            className={styles.textLink}
+            to={recordPath}
+            state={resultReturnState}
+          >
+            <Icon name="history" /> 실행 기록
+          </Link>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+export type DocumentTaskDetailLoadingProps = {
+  onBack?: () => void;
+  backPath?: string;
+  error?: string | null;
+  onRetry?: () => void;
+};
+
+/** 최초 조회도 같은 영역을 유지하며 로딩 표시를 실제 처리 단계로 오인하지 않게 합니다. */
+export function DocumentTaskDetailLoading({
+  onBack,
+  backPath = '/documents',
+  error = null,
+  onRetry,
+}: DocumentTaskDetailLoadingProps): JSX.Element {
+  return (
+    <div className={`${styles.root} ${styles.detail}`} data-task-loading>
+      <div className={styles.progressHeader}>
+        {onBack ? (
+          <Button variant="surface" size="small" onClick={onBack}>
+            <Icon name="arrow-left" /> 문서 목록
+          </Button>
+        ) : (
+          <Link className={styles.textLink} to={backPath}>
+            <Icon name="arrow-left" /> 문서 목록
+          </Link>
+        )}
+        <span aria-hidden="true" className={styles.loadingText}>
+          단계 확인 중
         </span>
       </div>
-      <ol className={styles.steps} aria-label="문서 처리 단계">
-        {task.steps.map((step: DocumentTaskStep): JSX.Element => (
-          <li key={step.title} data-state={step.state}>
-            <Icon name={stepIcons[step.state]} />
-            <div>
-              <strong>{step.title}</strong>
-              <span>{stepLabels[step.state]}</span>
-              <small>{step.note}</small>
-            </div>
-          </li>
-        ))}
+      <header className={styles.progressTitle}>
+        <h1>등록 진행</h1>
+        <p className={styles.meta}>문서 정보를 확인하고 있습니다.</p>
+      </header>
+      <ol
+        className={styles.steps}
+        aria-label="문서 등록 단계"
+        aria-hidden="true"
+      >
+        {['문자 변환', 'Wiki 생성', '온톨로지 구성'].map(
+          (title: string, index: number): JSX.Element => (
+            <li key={title}>
+              <span className={styles.stepMark}>{index + 1}</span>
+              <div>
+                <h2>{title}</h2>
+                <span>확인 중</span>
+              </div>
+            </li>
+          ),
+        )}
       </ol>
-      {error && <StatusNotice tone="error">{error}</StatusNotice>}
-      {documentTaskNeedsAttention(task) ? (
-        <StatusNotice
-          tone={task.state === 'failed' ? 'error' : 'warning'}
-          title={task.explanation.title}
+      <section
+        className={styles.progressFocus}
+        aria-label="진행 정보 조회"
+        data-progress-focus
+      >
+        <h2 className={styles.focusTitle} aria-live="polite" aria-atomic="true">
+          {error
+            ? '진행 정보를 확인하지 못했습니다'
+            : '진행 정보를 읽고 있습니다'}
+        </h2>
+        <p
+          className={styles.progressDescription}
+          role={error ? 'alert' : undefined}
         >
-          <p>{task.explanation.body}</p>
-          <p>{task.explanation.next}</p>
-        </StatusNotice>
-      ) : (
-        <section className={styles.explanation} aria-label="현재 작업 안내">
-          <h2>{task.explanation.title}</h2>
-          <p>{task.explanation.body}</p>
-          <p className={styles.secondary}>{task.explanation.next}</p>
-        </section>
-      )}
-      {executionContent}
-      <WorkspaceSection title="보존된 결과">
-        <dl className={styles.results}>
-          <div>
-            <dt>원본</dt>
-            <dd>
-              <Link to={sourcePath} state={resultReturnState}>
-                {task.title} <Icon name="arrow-right" />
-              </Link>
-            </dd>
-          </div>
-          <div>
-            <dt>Wiki 문서</dt>
-            <dd>
-              {task.results.length > 0 ? (
-                <ul className={styles.resultList}>
-                  {task.results.map(
-                    (result: DocumentTaskResult): JSX.Element => (
-                      <li key={result.document}>
-                        <Link
-                          to={documentPath(result.document)}
-                          state={resultReturnState}
-                        >
-                          {result.title} <Icon name="arrow-right" />
-                        </Link>
-                        {!result.current && (
-                          <span> · 저장 당시 결과 · 현재 판본 확인 필요</span>
-                        )}
-                      </li>
-                    ),
-                  )}
-                </ul>
-              ) : task.state === 'unconfirmed' ? (
-                '저장 결과 확인 전'
-              ) : (
-                '저장 완료 전'
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>관계</dt>
-            <dd>
-              {task.results.some(
-                (result: DocumentTaskResult): boolean => result.ontology,
-              ) ? (
-                <ul className={styles.resultList}>
-                  {task.results
-                    .filter(
-                      (result: DocumentTaskResult): boolean => result.ontology,
-                    )
-                    .map((result: DocumentTaskResult): JSX.Element => (
-                      <li key={result.document}>
-                        <Link
-                          to={`/ontology?${new URLSearchParams({ path: result.document })}`}
-                          state={resultReturnState}
-                        >
-                          {result.title}의 관계 확인 <Icon name="arrow-right" />
-                        </Link>
-                        <span>
-                          {result.current
-                            ? ' · 검토 전'
-                            : ' · 현재 판본 확인 필요'}
-                        </span>
-                      </li>
-                    ))}
-                </ul>
-              ) : task.state === 'unconfirmed' ? (
-                '저장 결과 확인 전'
-              ) : (
-                '이번 작업의 추출 완료 전'
-              )}
-            </dd>
-          </div>
-        </dl>
-        {task.hasPreviousResults && (
-          <p className={styles.previous}>
-            이전 성공 결과는 유지됩니다. 위 상태는 현재 시도를 나타냅니다.
-          </p>
-        )}
-      </WorkspaceSection>
-      {task.textReviewScopes.length > 0 && (
-        <WorkspaceSection title="문자 확인이 필요한 위치">
-          <p className={styles.reviewScopes}>
-            {task.textReviewScopes.join(' · ')}
-          </p>
-          <p className={styles.secondary}>
-            이 위치의 변환 문자는 보존되어 있습니다. 문자 인식의 신뢰도가 낮다는
-            안내이며, 원본과 대조해 정확도를 확인해야 합니다.
-          </p>
-          {task.textReviewUnits.length > 0 ? (
-            <div className={styles.reviewUnits}>
-              {task.textReviewUnits.map(
-                (
-                  unit: DocumentTaskView['textReviewUnits'][number],
-                  index: number,
-                ): JSX.Element => (
-                  <details
-                    className={styles.record}
-                    key={`${unit.label}:${index}`}
-                  >
-                    <summary>{unit.label} 변환 문자 보기</summary>
-                    <pre>{unit.content}</pre>
-                  </details>
-                ),
-              )}
-            </div>
-          ) : (
-            <p className={styles.secondary}>
-              이 화면에는 변환 문자가 아직 표시되지 않습니다. 새로고침해 보고를
-              다시 확인해 주세요.
-            </p>
-          )}
-        </WorkspaceSection>
-      )}
-      {task.warnings.length > 0 && task.textReviewScopes.length === 0 && (
-        <WorkspaceSection title="변환 시 확인할 내용">
-          <ul className={styles.warningList}>
-            {task.warnings.map(
-              (warning: string, index: number): JSX.Element => (
-                <li key={`${index}:${warning}`}>{warning}</li>
-              ),
-            )}
-          </ul>
-        </WorkspaceSection>
-      )}
-      <details className={styles.record}>
-        <summary>처리 기록 보기</summary>
-        {task.textReviewScopes.length > 0 && task.warnings.length > 0 && (
-          <details>
-            <summary>문자 인식 처리 기록</summary>
-            <ul className={styles.warningList}>
-              {task.warnings.map(
-                (warning: string, index: number): JSX.Element => (
-                  <li key={`${index}:${warning}`}>{warning}</li>
-                ),
-              )}
-            </ul>
-          </details>
-        )}
-        <dl className={styles.results}>
-          <div>
-            <dt>최근 변경</dt>
-            <dd>{formatTimestamp(task.updatedAt)}</dd>
-          </div>
-          {task.progress && (
-            <div>
-              <dt>문자 변환</dt>
-              <dd>{task.progress} · 전체 작업 완료율이 아닙니다.</dd>
-            </div>
-          )}
-        </dl>
-        {task.attempts.length > 0 && (
-          <ol className={styles.attemptList}>
-            {task.attempts.map(
-              (attempt: DocumentTaskAttemptView): JSX.Element => (
-                <li key={attempt.id}>
-                  <strong>{attempt.title}</strong>
-                  {attempt.startedAt && (
-                    <time dateTime={attempt.startedAt}>
-                      {formatTimestamp(attempt.startedAt)}
-                    </time>
-                  )}
-                  <p>{attempt.message}</p>
-                  <code>{attempt.state}</code>
-                  {attempt.codes.length > 0 && (
-                    <ul>
-                      {attempt.codes.map(
-                        (code: string, index: number): JSX.Element => (
-                          <li key={`${index}:${code}`}>
-                            <code>{code}</code>
-                          </li>
-                        ),
-                      )}
-                    </ul>
-                  )}
-                </li>
-              ),
-            )}
-          </ol>
-        )}
-        <p className={styles.secondary}>
-          이 기기에 기록된 처리 시도입니다. 다른 기기의 실행 기록은 AI 실행
-          기록에서 확인할 수 있습니다.
+          {error ?? '저장된 작업과 결과를 확인하고 있습니다.'}
         </p>
-      </details>
-      <nav className={styles.related} aria-label="작업 관련 화면">
-        <Link to="/tasks">작업 목록</Link>
-        <Link to="/documents">문서 목록</Link>
-        <Link to="/register">다른 문서 등록</Link>
-      </nav>
+        <div
+          className={styles.progressMeasure}
+          data-progress-measure
+          aria-hidden="true"
+        >
+          <div className={styles.loadingBlock} />
+        </div>
+        <div className={styles.progressAction}>
+          <p>
+            {error
+              ? '다시 조회해도 문서 처리를 새로 실행하지 않습니다.'
+              : '문서를 확인한 뒤 현재 단계와 가능한 행동을 표시합니다.'}
+          </p>
+          {error && onRetry && <Button onClick={onRetry}>다시 조회</Button>}
+        </div>
+      </section>
+      <footer className={styles.progressFooter} aria-hidden="true">
+        <span className={styles.loadingText}>저장 결과 확인 중</span>
+      </footer>
     </div>
   );
 }

@@ -40,13 +40,38 @@ def write_text(store, path, text):
         os.fsync(stream.fileno())
 
 
+def bundle_budget(manifest, *, maximum=None):
+    """서버의 보존 등록 묶음에만 고정된 내부 예산을 적용한다."""
+    mode = manifest.get("input_mode")
+    if mode is None:
+        if "input_budget_bytes" in manifest:
+            raise limits.InputCorruptError("An input budget requires a supported fixed mode.")
+        return limits.MAX_BUNDLE_BYTES if maximum is None else maximum
+    references = manifest.get("component_references", {})
+    components = manifest.get("components", {})
+    if (mode != limits.REGISTRATION_REFERENCE_MODE
+            or type(manifest.get("input_budget_bytes")) is not int
+            or manifest.get("input_budget_bytes") != limits.MAX_REGISTRATION_BUNDLE_BYTES
+            or manifest.get("stage") not in limits.STAGES
+            or type(components) is not dict
+            or "data/registration.json" not in components
+            or type(references) is not dict
+            or type(references.get("data/context.json")) is not dict
+            or references.get("data/context.json", {}).get("kind") != "document_context"
+            or manifest.get("stage") == "prepare_wiki" and
+               (type(references.get("data/registration.md")) is not dict
+                or references["data/registration.md"].get("kind") != "registration")):
+        raise limits.InputCorruptError("Invalid preservation registration input mode.")
+    return limits.MAX_REGISTRATION_BUNDLE_BYTES if maximum is None else min(maximum, limits.MAX_REGISTRATION_BUNDLE_BYTES)
+
+
 def publish(store, destination, manifest, components, *, maximum=None):
     """완성된 묶음 디렉터리를 한 번 공개한다. 기존 묶음은 교체하지 않는다."""
     raw_manifest = canonical_json_bytes(manifest)
     references = manifest.get("component_references", {})
     if not isinstance(references, dict) or set(references) - set(components):
         raise limits.InputCorruptError("Invalid fixed component references.")
-    maximum = limits.MAX_BUNDLE_BYTES if maximum is None else maximum
+    maximum = bundle_budget(manifest, maximum=maximum)
     if len(raw_manifest) + sum(len(value.encode("utf-8")) for value in components.values()) > maximum:
         raise limits.InputLimitError("The complete fixed input exceeds its byte budget.")
     source_files.mkdir(store, destination.parent)
@@ -94,10 +119,9 @@ def publish(store, destination, manifest, components, *, maximum=None):
 
 def load(store, directory, *, expected_revision=None, maximum=None):
     # (설명서 dict, 설명서 원문 문자열, 구성별 문자열 dict)를 반환한다. 파일을 고치지 않는다.
-    maximum = limits.MAX_BUNDLE_BYTES if maximum is None else maximum
     # 설명서도 전체 읽기 예산에 포함한다. 작은 한도를 요청했을 때 설명서만으로
     # 한도를 넘지 않도록, 메타데이터 상한과 전체 상한 중 작은 값만 허용한다.
-    text = read_text(store, directory / "manifest.json", maximum=min(1024 * 1024, maximum))
+    text = read_text(store, directory / "manifest.json", maximum=min(1024 * 1024, maximum) if maximum is not None else 1024 * 1024)
     raw = text.encode("utf-8")
     if expected_revision is not None and digest(raw) != expected_revision:
         raise limits.InputConflictError("bundle_revision_conflict")
@@ -105,6 +129,7 @@ def load(store, directory, *, expected_revision=None, maximum=None):
         manifest = json.loads(text, object_pairs_hook=source_files._object)
         if type(manifest) is not dict or canonical_json_bytes(manifest) != raw or type(manifest["components"]) is not dict:
             raise ValueError()
+        maximum = bundle_budget(manifest, maximum=maximum)
         components = {}
         references = manifest.get("component_references", {})
         if type(references) is not dict or set(references) - set(manifest["components"]):
@@ -152,6 +177,8 @@ def document_revision(store, document, revision):
     try:
         snapshot = store.read(document)
         if snapshot.revision == revision:
+            if len(snapshot.content.encode("utf-8")) > limits.MAX_REGISTRATION_BUNDLE_BYTES:
+                raise limits.InputLimitError("The referenced document exceeds the fixed input budget.")
             return snapshot.content
     except FileNotFoundError:
         pass
@@ -160,9 +187,13 @@ def document_revision(store, document, revision):
         if name == "changes.json":
             continue
         validate_history_id(name)
-        content = read_text(store, directory / name, maximum=1024 * 1024)
-        if digest(content.encode("utf-8")) == revision:
-            return content
+        # 다른 큰 이력을 자르거나 한도 오류로 가리지 않고 먼저 지문만 순차 계산한다.
+        fingerprint = sha256()
+        with source_files.open_regular(store, directory / name) as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                fingerprint.update(block)
+        if fingerprint.hexdigest() == revision:
+            return read_text(store, directory / name, maximum=limits.MAX_REGISTRATION_BUNDLE_BYTES)
     raise limits.InputCorruptError("The exact referenced document revision is unavailable.")
 
 

@@ -6,8 +6,36 @@
 
 import re
 
-MAX_TEXT = 4 * 1024 * 1024
-MAX_UNITS = 1000
+MAX_TEXT = 20 * 1024 * 1024
+MAX_UNITS = 10000
+MAX_UNIT_TEXT = 4 * 1024 * 1024
+
+
+def attempted_method(format):
+    """원본 형식에 해당하는 시도 방식을 반환하며 변환 성공을 뜻하지 않는다."""
+    return {"pdf": "pdf_text", "xlsx": "xlsx_values", "docx": "docx_text",
+            "pptx": "pptx_text", "ppt": "pptx_text", "txt": "verbatim", "md": "verbatim"}.get(format, "ocr")
+
+
+def retain_empty_attempt(value, format):
+    """검증된 원본을 worker에 전달했으나 문자가 없는 실패의 근거를 별도 보고에 남긴다."""
+    if value['units'] or value.get('state') != 'failed':
+        return False
+    value['method'] = value.get('method') or attempted_method(format)
+    value['complete'] = False
+    marker = 'conversion_attempt_no_text'
+    if not value['unread_ranges']:
+        value['unread_ranges'] = ['whole source: no_readable_units']
+    if len(value['warnings']) < 100:
+        value['warnings'].append(marker)
+    else:
+        index = next((index for index, text in enumerate(value['warnings']) if len(text) <= 970), None)
+        if index is None:
+            return False  # 진단 보존 한도를 넘으면 기존 경고를 덮지 않는다.
+        value['warnings'][index] += ' | ' + marker
+    if len(value['diagnostics']) < 100:
+        value['diagnostics'].append(dict(code=marker, scope='whole source', unread=True))
+    return True
 
 
 class OutputLimit(Exception):
@@ -24,9 +52,7 @@ def _new_report(format, method):
 
 class Conversion:
     def __init__(self, format, checkpoint=None):
-        self.result = _new_report(format, {"pdf": "pdf_text", "xlsx": "xlsx_values",
-            "docx": "docx_text", "pptx": "pptx_text", "ppt": "pptx_text",
-            "txt": "verbatim", "md": "verbatim"}.get(format, "ocr"))
+        self.result = _new_report(format, attempted_method(format))
         self.checkpoint = checkpoint or (lambda result: None)
         self.total_bytes = 0
         self.checkpoint(self.result)
@@ -47,6 +73,9 @@ class Conversion:
 
     def add(self, unit_id, where, text, method):
         size = len(text.encode("utf-8"))
+        if size > MAX_UNIT_TEXT:
+            self.note("conversion_unit_limit", unit_id)
+            raise OutputLimit()
         if len(self.result["units"]) >= MAX_UNITS or self.total_bytes + size > MAX_TEXT:
             self.note("conversion_output_limit", "remaining source")
             raise OutputLimit()

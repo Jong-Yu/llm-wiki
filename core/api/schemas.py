@@ -4,12 +4,25 @@
 """일반 HTTP API가 함께 사용하는 응답·오류 모델."""
 
 from typing import Generic, Literal, TypeVar
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 
 # Pydantic의 공통 기반이다. extra=forbid는 모르는 필드를 거부하고 strict=True는 자동 형 변환을 막는다.
 class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class PaginationQuery(Model):
+    # HTTP query의 숫자는 문자열이므로 제한된 정수 파싱만 허용한다.
+    limit: int = Field(20, ge=1, le=50, strict=False)
+    cursor: str | None = Field(None, min_length=1, max_length=16384)
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def integer_query(cls, value):
+        if isinstance(value, str) and (not value.isascii() or not value.isdecimal()):
+            raise ValueError("limit must be an integer string")
+        return value
 
 
 class Meta(Model):

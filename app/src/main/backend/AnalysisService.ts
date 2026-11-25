@@ -3,11 +3,7 @@ import type { DocumentTaskService } from './DocumentTaskService';
 import type { AiActivity } from '@contracts/aiSessions.contract';
 import { sameAccessRevision } from '@contracts/connection.contract';
 import type { WorkspaceMembership } from '@contracts/connection.contract';
-import {
-  aiModelArguments,
-  personalAi,
-  discoverAiExecutable,
-} from './personalAi';
+import { aiArguments, personalAi, discoverAiExecutable } from './personalAi';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
@@ -16,6 +12,8 @@ import { z } from 'zod';
 import {
   analysisJobSchema,
   analysisReceiptSchema,
+  analysisInputLimitCodeSchema,
+  analysisInputLimitMessage,
 } from '@contracts/analysis.contract';
 import type {
   AnalysisCancelRequest,
@@ -49,6 +47,7 @@ import {
   spawnPersonalProcess,
   observePersonalProcess,
   stopPersonalProcess,
+  runningActivities,
 } from './personalProcess';
 
 const identifier = z.string().regex(/^[a-f0-9]{32}$/);
@@ -147,9 +146,17 @@ function registrationPayload(
       : {}),
   };
 }
+type Connection = Pick<
+  ConnectionService,
+  | 'analysisContext'
+  | 'isAnalysisCurrent'
+  | 'analysisAccessFailure'
+  | 'onScopeChanged'
+>;
+
 /** Electron은 기존 분석 CLI를 시작하고, 저장 사실은 서버에서 따로 읽습니다. */
 export class AnalysisService {
-  #connection: ConnectionService;
+  #connection: Connection;
   #recovery: ProcessRecovery | undefined;
   #running = new Map<string, Running>();
   #starts = new ExecutionStarts();
@@ -169,7 +176,7 @@ export class AnalysisService {
 
   /** 창·연결 수명과 프로세스 수명을 묶되 화면을 닫는 것만으로 새 실행을 만들지 않습니다. */
   constructor(
-    connection: ConnectionService,
+    connection: Connection,
     recovery?: ProcessRecovery,
     privateRoot?: string,
     tasks?: DocumentTaskService,
@@ -223,14 +230,11 @@ export class AnalysisService {
 
   /** 공개 활동에는 인증정보나 원문을 포함하지 않습니다. */
   activities(): AiActivity[] {
-    return [...this.#running.values()]
-      .filter((run: Running): boolean =>
-        this.#connection.isAnalysisCurrent(run.context),
-      )
-      .map((run: Running): AiActivity => ({
-        ...run.activity,
-        status: run.stopping ? 'stopping' : 'running',
-      }));
+    return runningActivities(
+      this.#running.values(),
+      (context: AnalysisContext): boolean =>
+        this.#connection.isAnalysisCurrent(context),
+    );
   }
 
   /** 접수 중인 작업도 명시 종료 확인에 포함합니다. */
@@ -461,6 +465,7 @@ export class AnalysisService {
   ): string[] {
     const { job, receipts, receiptErrors } = detail;
     const blockers: string[] = [];
+    if (detail.local.failureCode) blockers.push(analysisInputLimitMessage);
     if (job.state === 'cancelled')
       blockers.push('서버에서 취소한 작업은 재개할 수 없습니다.');
     if (job.basis_status !== 'current')
@@ -918,11 +923,7 @@ export class AnalysisService {
         '--profile',
         context.selection.profile,
         '--run-ai',
-        '--ai-provider',
-        ai.provider,
-        '--ai-cli',
-        ai.cli,
-        ...aiModelArguments(ai),
+        ...aiArguments(ai),
       ];
       child = spawnPersonalProcess(runtime, args);
     } catch {
@@ -960,6 +961,7 @@ export class AnalysisService {
       onClose: (code: number | null, stderr: string): void => {
         const local = this.#local.get(stateKey);
         if (local?.status === 'running') {
+          let failureCode: AnalysisLocal['failureCode'];
           let message =
             code === 0
               ? '로컬 실행이 끝났습니다. 서버 저장 결과를 확인해 주세요.'
@@ -971,7 +973,34 @@ export class AnalysisService {
                 error: z.object({ code: z.string() }),
               })
               .parse(JSON.parse(stderr));
-            if (
+            const inputLimit = analysisInputLimitCodeSchema.safeParse(
+              failure.error.code,
+            );
+            if (inputLimit.success) {
+              failureCode = inputLimit.data;
+              message = analysisInputLimitMessage;
+            } else if (failure.error.code === 'segmented_review_incomplete') {
+              message =
+                '일부 내용의 관계를 확인하지 못해 분석을 마치지 못했습니다. 저장한 Wiki 본문은 보존했습니다. 분석을 다시 시작하면 확인되지 않은 결과를 새로 검토합니다.';
+            } else if (
+              [
+                'segmented_source_limit',
+                'segmented_context_limit',
+                'segmented_diagnostic_limit',
+                'segmented_artifact_limit',
+              ].includes(failure.error.code)
+            ) {
+              message =
+                '문서를 나누어 처리했지만 전체 입력이나 결과가 현재 분석 한도를 넘었습니다. 저장한 본문과 처리 기록은 보존했습니다. 원본과 함께 선택한 참고 문서의 범위를 확인해 주세요.';
+            } else if (
+              failure.error.code === 'segmented_semantic_check_unavailable'
+            ) {
+              message =
+                '큰 문서의 구간 분석에서는 별도 의미 검사 옵션을 아직 지원하지 않습니다. 본문은 보존했으며 분석 설정을 확인해야 합니다.';
+            } else if (failure.error.code === 'segmented_retry_limit') {
+              message =
+                '같은 문서의 분석 재시도 한도에 도달했습니다. 본문과 이전 처리 기록은 보존했습니다. 원본과 분석 결과를 확인해 주세요.';
+            } else if (
               [
                 'ai_cli_not_found',
                 'ai_cli_unavailable',
@@ -1020,6 +1049,7 @@ export class AnalysisService {
           this.#local.set(stateKey, {
             status: code === 0 ? 'completed' : 'failed',
             message,
+            failureCode,
           });
         }
       },

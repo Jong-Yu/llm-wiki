@@ -24,17 +24,22 @@ def main():
         parser.add_argument("--" + name)
     parser.add_argument("--profile")
     parser.add_argument("--request-id")
+    parser.add_argument('--resume-report', action='store_true', help='Resume the same saved report without downloading or converting the original.')
+    parser.add_argument('--report-sha256')
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--cancel-file", type=Path)
     parser.add_argument("--submit", action="store_true", help="Store the conversion report separately from the original.")
     parser.add_argument("--ocr", choices=["auto", "never", "always"], default="auto")
     parser.add_argument("--ocr-language", default="eng")
+    parser.add_argument("--page", type=int, help="Re-OCR only this PDF page as an unsubmitted review candidate.")
     parser.add_argument("--timeout", type=float, default=MAX_CONVERSION_SECONDS,
                         help="Total conversion limit in seconds (maximum 1800).")
     parser.add_argument("--idle-timeout", type=float, default=MAX_IDLE_SECONDS,
                         help="Limit without a changed checkpoint in seconds (maximum 120).")
     args = parser.parse_args()
+    if args.page is not None and (not 1 <= args.page <= 1_000_000 or args.submit):
+        parser.error("--page requires a positive PDF page and cannot be combined with --submit")
     if args.diagnose:
         emit({"schema_version": 1, "type": "result", "ok": True, "diagnostics": diagnostics(args.ocr_language)})
         return
@@ -50,11 +55,16 @@ def main():
         for name in (signal.SIGINT, signal.SIGTERM):
             previous[name] = signal.signal(name, cancel)
         try:
-            result = asyncio.run(convert_source(base_url=args.server, tenant=args.tenant, token=read_token(args.token_file),
+            options = {"selected_page": args.page} if args.page is not None else {}
+            from core.client.source_conversion_resume import resume_report
+            execute = resume_report if args.resume_report else convert_source
+            if args.resume_report:
+                options['report_sha256'] = args.report_sha256
+            result = asyncio.run(execute(base_url=args.server, tenant=args.tenant, token=read_token(args.token_file),
                 source_ref={key: getattr(args, key) for key in ("source_id", "source_version", "source_sha256", "registration_revision")},
                 work_dir=args.work_dir, profile=args.profile, request_id=args.request_id, cancel_file=cancel_file,
                 submit=args.submit, ocr=args.ocr, ocr_language=args.ocr_language, timeout=args.timeout,
-                idle_timeout=args.idle_timeout, on_event=emit))
+                idle_timeout=args.idle_timeout, on_event=emit, **options))
             # 시작 전 오류에는 변환 방법이 없다. 로컬 진단은 보존하고 UI에는 null로 보낸다.
             converted = result.get("conversion")
             emit({**result, "type": "result", "conversion": converted if converted and converted.get("method") else None})

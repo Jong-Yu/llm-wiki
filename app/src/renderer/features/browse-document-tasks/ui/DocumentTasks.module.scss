@@ -185,95 +185,258 @@
 }
 
 .detail {
+  max-width: 768px;
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: var(--wiki-space-24);
-  p {
-    margin-block: var(--wiki-space-8);
+}
+
+.progressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.textLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  min-height: var(--wiki-component-control-height-small);
+  color: var(--wiki-color-action-primary);
+  text-decoration: none;
+  &:hover {
+    text-decoration: underline;
   }
-  > [data-workspace-section] {
-    margin-top: 0;
+  svg {
+    flex-shrink: 0;
   }
 }
 
-.summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wiki-space-8) var(--wiki-space-16);
-  .status {
-    font-size: var(--wiki-font-size-14);
-  }
-  .meta {
+.progressTitle {
+  min-width: 0;
+  h1 {
+    margin: 0 0 var(--wiki-space-8);
+    font-size: var(--wiki-font-size-20);
+    line-height: 28px;
+    font-weight: var(--wiki-font-weight-semibold);
     overflow-wrap: anywhere;
+    word-break: keep-all;
+  }
+  p {
+    margin: 0;
   }
 }
 
 .steps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
-  gap: var(--wiki-space-16);
+  gap: var(--wiki-space-24);
   li {
     display: flex;
     align-items: flex-start;
-    gap: var(--wiki-space-8);
-    border-top: 2px solid var(--wiki-color-border-default);
-    padding-top: var(--wiki-space-12);
+    gap: var(--wiki-space-12);
     min-width: 0;
-    svg {
-      margin-top: var(--wiki-space-2);
-      flex-shrink: 0;
+    min-height: 74px;
+    box-sizing: border-box;
+    border-bottom: 2px solid var(--wiki-color-border-default);
+    padding-bottom: var(--wiki-space-16);
+    h2 {
+      margin: 0;
+      font-size: var(--wiki-font-size-14);
+      line-height: var(--wiki-component-control-line-height);
+      font-weight: var(--wiki-font-weight-semibold);
+      word-break: keep-all;
     }
-    div {
-      min-width: 0;
-    }
-    strong,
-    span,
-    small {
+    div > span {
       display: block;
-      overflow-wrap: anywhere;
-    }
-    span {
       margin-top: var(--wiki-space-4);
-    }
-    small {
       color: var(--wiki-color-text-secondary);
       font-size: var(--wiki-font-size-12);
-      margin-top: var(--wiki-space-4);
     }
   }
-  li[data-state='complete'] {
-    border-color: var(--wiki-color-status-success);
-    svg {
-      color: var(--wiki-color-status-success);
+  li[data-state='complete'] .stepMark {
+    border-color: transparent;
+    background: var(--wiki-color-status-success-surface);
+    color: var(--wiki-color-status-success);
+  }
+  li:is([data-state='current'], [data-state='unconfirmed']) {
+    border-color: var(--wiki-color-action-primary);
+    .stepMark {
+      color: var(--wiki-color-action-primary);
+      border-color: currentColor;
     }
   }
-  li[data-state='failed'] {
-    border-color: var(--wiki-color-status-danger);
-    svg,
-    span {
-      color: var(--wiki-color-status-danger);
-    }
-  }
-  li[data-state='unconfirmed'],
-  li[data-state='review'] {
+  li:is([data-state='failed'], [data-state='stopped'], [data-state='review']) {
     border-color: var(--wiki-color-status-warning);
-    svg,
-    span {
+    div > span {
       color: var(--wiki-color-status-warning);
     }
   }
-  li[data-state='current'] {
-    border-color: var(--wiki-color-action-primary);
-    svg,
-    span {
-      color: var(--wiki-color-action-primary);
-    }
+}
+
+.stepMark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-radius-circle);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+
+.progressFocus {
+  padding: var(--wiki-space-24);
+  border-radius: var(--wiki-radius-8);
+  background: var(--wiki-color-surface-subtle);
+  min-width: 0;
+}
+
+.focusTitle {
+  margin: 0 0 var(--wiki-space-8);
+  min-height: 28px;
+  font-size: var(--wiki-font-size-20);
+  line-height: 28px;
+  font-weight: var(--wiki-font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.progressDescription {
+  margin: 0 0 var(--wiki-space-24);
+  min-height: 40px;
+  color: var(--wiki-color-text-secondary);
+  overflow-wrap: anywhere;
+  &[role='alert'] {
+    color: var(--wiki-color-status-danger);
   }
+}
+
+.progressMeasure {
+  min-height: 100px;
+}
+
+.progressQuantity {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8) var(--wiki-space-16);
+  margin-bottom: var(--wiki-space-12);
+  font-variant-numeric: tabular-nums;
+  strong {
+    font-size: var(--wiki-font-size-24);
+    font-weight: var(--wiki-font-weight-semibold);
+  }
+}
+
+.progressTrack {
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: var(--wiki-space-8);
+  border: 0;
+  border-radius: var(--wiki-radius-4);
+  overflow: hidden;
+  background: var(--wiki-color-border-default);
+  &::-webkit-progress-bar {
+    background: var(--wiki-color-border-default);
+  }
+  &::-webkit-progress-value {
+    background: var(--wiki-color-action-primary);
+    border-radius: inherit;
+  }
+  &::-moz-progress-bar {
+    background: var(--wiki-color-action-primary);
+  }
+}
+
+.measureCaption {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-8);
+  margin-top: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+
+.progressOperation {
+  display: grid;
+  gap: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  strong {
+    color: var(--wiki-color-text-primary);
+    font-size: var(--wiki-font-size-20);
+    line-height: 28px;
+    font-weight: var(--wiki-font-weight-semibold);
+  }
+}
+
+.progressAction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wiki-space-16);
+  min-height: 40px;
+  margin-top: var(--wiki-space-12);
+  p {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--wiki-color-text-secondary);
+  }
+  > a,
+  > button {
+    flex-shrink: 0;
+  }
+}
+
+.progressFooter {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--wiki-space-16);
+  border-top: 1px solid var(--wiki-color-border-default);
+  padding-top: var(--wiki-space-16);
+  min-height: var(--wiki-component-control-height-small);
+}
+
+.loadingText {
+  min-height: var(--wiki-component-control-height-small);
+  display: inline-flex;
+  align-items: center;
+}
+.loadingBlock {
+  height: var(--wiki-space-24);
+  width: 60%;
+  border-radius: var(--wiki-radius-4);
+  background: var(--wiki-color-border-default);
+}
+
+.savedLink {
+  display: grid;
+  min-width: 0;
+  small {
+    color: var(--wiki-color-text-secondary);
+  }
+}
+
+.progressTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wiki-space-16);
 }
 
 .reviewScopes {
@@ -426,13 +589,18 @@
     }
   }
   .steps {
-    grid-template-columns: 1fr;
-    gap: var(--wiki-space-12);
+    gap: var(--wiki-space-8);
     li {
-      border-top: 0;
-      border-left: 2px solid var(--wiki-color-border-default);
-      padding: 0 0 0 var(--wiki-space-12);
+      flex-direction: column;
+      gap: var(--wiki-space-8);
     }
+  }
+  .progressFocus {
+    padding: var(--wiki-space-16);
+  }
+  .progressAction {
+    flex-direction: column;
+    align-items: stretch;
   }
   .results > div {
     grid-template-columns: 1fr;

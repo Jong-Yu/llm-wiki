@@ -11,7 +11,7 @@ from core.modules.access.policy import AccessScope
 from core.modules.knowledge.catalogue import list_catalogue
 from core.modules.documents.history import list_versions, read_version, save_content, restore_version
 from core.modules.documents.changes import document_fields
-from .schemas import ContentQuery, DocumentContent, DocumentPage, ListQuery, VersionsQuery, SaveContent, RestoreContent, TrashDocument, TrashQuery
+from .schemas import ContentQuery, DocumentContent, DocumentPage, CatalogueQuery, VersionsQuery, SaveContent, RestoreContent, TrashDocument, TrashQuery
 from core.modules.documents import trash
 
 router = APIRouter(tags=["documents"])
@@ -42,10 +42,10 @@ async def restore_trashed_document(request: Request, tenant: str, token: Annotat
 
 
 @router.get("/documents", response_model=Envelope[DocumentPage])
-def documents(query: Annotated[ListQuery, Query()], scope: Annotated[AccessScope, Depends(authorized)]):
+def documents(query: Annotated[CatalogueQuery, Query()], scope: Annotated[AccessScope, Depends(authorized)]):
     """허용된 위키 문서를 목록 기준에 묶인 페이지로 읽는다."""
     value = list_catalogue(scope.store, tenant=scope.tenant, scope_key=scope_key(scope),
-                           limit=query.limit, cursor=query.cursor)
+                           limit=query.limit, cursor=query.cursor, group_sources=query.group_sources)
     return envelope({**value, "access": access_value(scope)})
 
 

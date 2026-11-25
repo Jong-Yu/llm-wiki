@@ -21,7 +21,7 @@ import type { RecoveryEntry } from '@contracts/recovery.contract';
 import type { ConnectionService, AnalysisContext } from './ConnectionService';
 import { apiFailure, readScopedApiJson, matchesExpectedScope } from './readApi';
 import type { ApiFailure, ReadApiResult } from './readApi';
-import { aiModelArguments, personalAi } from './personalAi';
+import { aiArguments, personalAi } from './personalAi';
 import type { PersonalAi } from './personalAi';
 import {
   assertPersonalRuntime,
@@ -30,6 +30,7 @@ import {
   personalRuntimePaths,
   observePersonalProcess,
   stopPersonalProcess,
+  runningActivities,
 } from './personalProcess';
 import {
   readProcessJournal,
@@ -616,14 +617,11 @@ export class KnowledgeComparisonService {
   }
   /** 활동 목록은 현재 연결의 실행 위치만 공개합니다. */
   activities(): AiActivity[] {
-    return [...this.#running.values()]
-      .filter((run: Running): boolean =>
-        this.#connection.isAnalysisCurrent(run.context),
-      )
-      .map((run: Running): AiActivity => ({
-        ...run.activity,
-        status: run.stopping ? 'stopping' : 'running',
-      }));
+    return runningActivities(
+      this.#running.values(),
+      (context: AnalysisContext): boolean =>
+        this.#connection.isAnalysisCurrent(context),
+    );
   }
   /** 명시 종료 확인에 아직 준비 중인 실행도 포함합니다. */
   get activeCount(): number {
@@ -676,11 +674,7 @@ export class KnowledgeComparisonService {
         execution.workDirectory,
         '--session-registry',
         join(dirname(runtime.privateRoot), 'ai-session-refs'),
-        '--ai-provider',
-        runtime.ai.provider,
-        '--ai-cli',
-        runtime.ai.cli,
-        ...aiModelArguments(runtime.ai),
+        ...aiArguments(runtime.ai),
       ]);
     } catch {
       try {

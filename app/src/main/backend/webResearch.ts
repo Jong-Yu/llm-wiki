@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { aiModelArguments } from './personalAi';
+import { aiArguments } from './personalAi';
 import {
   assertPersonalRuntime,
   createPrivateExecution,
@@ -105,11 +105,7 @@ export async function researchPublicWeb(
         execution.workDirectory,
         questionBased ? '--question-file' : '--query-file',
         inputFile,
-        '--ai-provider',
-        runtime.ai.provider,
-        '--ai-cli',
-        runtime.ai.cli,
-        ...aiModelArguments(runtime.ai),
+        ...aiArguments(runtime.ai),
         '--ai-timeout',
         String(AI_TIMEOUT_SECONDS),
       ],

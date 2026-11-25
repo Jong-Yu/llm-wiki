@@ -157,6 +157,29 @@ function fixture() {
   return { client, state };
 }
 
+await test('요청 기준은 접근 식별자만 보내고 선택적인 accessRevision을 보존한다', async () => {
+  for (const accessRevision of [revision, undefined]) {
+    const { client, state } = fixture();
+    const current = { ...scope, accessRevision };
+    state.scope = current;
+    try {
+      await client.infiniteQuery(ontologySearchOptions(current, input));
+      assert.equal(state.calls.length, 1);
+      assert.deepEqual(state.calls[0].expectedScope, {
+        userId: scope.userId,
+        tenant: scope.tenant,
+        profileId: scope.profileId,
+        policyRevision: scope.policyRevision,
+        ...(accessRevision ? { accessRevision } : {}),
+      });
+      assert.equal(state.calls[0].connectionId, scope.connectionId);
+      assert.deepEqual(current.permissions, ['read']);
+    } finally {
+      client.clear();
+    }
+  }
+});
+
 await test('같은 검색은 진행 중 요청과 15초 내 결과를 공유하고 부분 조회 정보를 유지한다', async () => {
   const { client, state } = fixture();
   try {

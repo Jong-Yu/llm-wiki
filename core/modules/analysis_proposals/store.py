@@ -24,7 +24,7 @@ from core.modules.ontology.errors import OntologyValidationError, OntologyCorrup
 from core.modules.reviews.store import ReviewStore
 from core.modules.reviews.values import _claim_id
 from core.modules.sources import files as source_files
-from core.runtime.extraction_schema import build_submission_schema
+from core.modules.ontology.submission import build_submission_schema
 
 MAX_PROPOSALS = 200
 MAX_EVENTS = 100

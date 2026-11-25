@@ -6,7 +6,6 @@
 import json
 from anyio import to_thread
 from pydantic import ValidationError
-from core.api.errors import error_response
 from core.api.ingress import bounded_stream, content_type, _unique_object as _object
 
 
@@ -41,7 +40,3 @@ async def read_json(request, model):
             error=JobInputError(413, "request_too_large", "The job request exceeds the 256 KiB limit.")):
         raw.extend(chunk)
     return await to_thread.run_sync(_parse, raw, model)
-
-
-def input_error(error):
-    return error_response(error.status, error.code, error.message)

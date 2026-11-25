@@ -1,26 +1,53 @@
 import { Button } from '@renderer/shared/ui/Button';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router';
 import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
-import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
+import {
+  documentTaskPath,
+  workflowReturnTo,
+} from '@renderer/shared/lib/workflowNavigation';
 import type { ImportProcessingSession } from '../model/ImportProcessingSession';
-import type { ImportScope } from '../api/importRegistration.api';
-import { importScopeKey } from '../api/importRegistration.api';
+import type {
+  ImportReplacementResult,
+  ImportScope,
+} from '../api/importRegistration.api';
+import {
+  importScopeKey,
+  readImportReplacement,
+} from '../api/importRegistration.api';
 import {
   newRegistrationSession,
   registrationSession,
+  retainedReplacementSession,
 } from '../model/ImportRegistrationSession';
 import type { ImportRegistrationSession } from '../model/ImportRegistrationSession';
 import { useImportScope } from '../model/useImportScope';
 import { ImportDocumentForm } from './ImportDocumentForm';
-import { ImportDocumentProgress } from './ImportDocumentProgress';
 import styles from './ImportDocumentContent.module.scss';
 import { importProcessingSession } from '../model/importProcessingSessions';
 import { findSourceTask } from '../api/importProcessing.api';
 import type { ImportProcessingResult } from '../model/importProcessing.types';
 
-type ImportWorkspaceProps = { scope: ImportScope; onRefreshScope: () => void };
+type ImportWorkspaceProps = {
+  scope: ImportScope;
+  onRefreshScope: () => void;
+  replacementSession?: ImportRegistrationSession;
+  returnTo?: string;
+};
+type ReplacementWorkspaceProps = {
+  scope: ImportScope;
+  sourceId: string;
+  version: string;
+  returnTo: string;
+  onRefreshScope: () => void;
+};
 type RegisteredTaskProps = {
   session: ImportProcessingSession;
   onLeave: () => void;
@@ -30,6 +57,63 @@ type LegacySourceTaskProps = {
   sourceId: string;
   version: string;
 };
+
+/** 같은 교체 요청을 먼저 복원하고 새 진입에서만 현재 판본을 읽어 교체 대상을 고정합니다. */
+function ReplacementWorkspace({
+  scope,
+  sourceId,
+  version,
+  returnTo,
+  onRefreshScope,
+}: ReplacementWorkspaceProps): JSX.Element {
+  const active = useWorkspaceActivity();
+  const [session, setSession] = useState<ImportRegistrationSession | null>(
+    (): ImportRegistrationSession | null =>
+      retainedReplacementSession(scope, sourceId, version),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  useEffect((): (() => void) => {
+    let current = true;
+    if (active && !session) {
+      void readImportReplacement(scope, sourceId, version).then(
+        (result: ImportReplacementResult): void => {
+          if (!current) return;
+          if (result.ok) setSession(registrationSession(scope, result.data));
+          else setError(result.message);
+        },
+      );
+    }
+    return (): void => {
+      current = false;
+    };
+  }, [active, scope, sourceId, version, session, retry]);
+  if (session)
+    return (
+      <ImportWorkspace
+        scope={scope}
+        onRefreshScope={onRefreshScope}
+        replacementSession={session}
+        returnTo={returnTo}
+      />
+    );
+  return (
+    <section className={styles.notice} role={error ? 'alert' : 'status'}>
+      <p>{error ?? '교체할 원본을 확인하고 있습니다…'}</p>
+      {error && (
+        <Button
+          onClick={(): void => {
+            setError(null);
+            setRetry((value: number): number => value + 1);
+          }}
+        >
+          다시 확인
+        </Button>
+      )}
+      <Link to={returnTo}>진행 상태로 돌아가기</Link>
+    </section>
+  );
+}
 
 /** 이전 등록 진행 주소는 메모리 수명과 무관하게 보존된 같은 작업으로 연결합니다. */
 function LegacySourceTask({
@@ -58,7 +142,7 @@ function LegacySourceTask({
       <Navigate
         to={documentTaskPath(result.data)}
         replace
-        state={{ workflowReturnTo: '/tasks' }}
+        state={{ workflowReturnTo: '/documents' }}
       />
     );
   return (
@@ -76,7 +160,7 @@ function LegacySourceTask({
       <Link to={`/source?${new URLSearchParams({ sourceId, version })}`}>
         등록 원본 열기
       </Link>
-      <Link to="/tasks">작업 목록</Link>
+      <Link to="/documents">문서 목록</Link>
     </section>
   );
 }
@@ -91,9 +175,9 @@ function RegisteredTask({
   const navigate = useNavigate();
   useEffect((): void => {
     if (!active || !snapshot.taskId) return;
-    void navigate(documentTaskPath(snapshot.taskId), {
+    void navigate('/documents', {
       replace: true,
-      state: { workflowReturnTo: '/tasks' },
+      state: { workflowReturnTo: '/documents' },
     });
     onLeave();
   }, [active, navigate, onLeave, snapshot.taskId]);
@@ -103,8 +187,7 @@ function RegisteredTask({
       role={snapshot.error ? 'alert' : 'status'}
     >
       <p>
-        {snapshot.error ??
-          '원본을 보관했습니다. 작업 화면을 준비하고 있습니다…'}
+        {snapshot.error ?? '원본을 보관했습니다. 등록을 계속하고 있습니다…'}
       </p>
       {snapshot.error && (
         <Button
@@ -113,10 +196,10 @@ function RegisteredTask({
             void session.begin();
           }}
         >
-          작업 준비 다시 시도
+          등록 계속
         </Button>
       )}
-      <Link to="/tasks">작업 목록</Link>
+      <Link to="/documents">문서 목록</Link>
     </section>
   );
 }
@@ -125,15 +208,18 @@ function RegisteredTask({
 function ImportWorkspace({
   scope,
   onRefreshScope,
+  replacementSession,
+  returnTo,
 }: ImportWorkspaceProps): JSX.Element {
   const [session, setSession] = useState<ImportRegistrationSession>(
-    (): ImportRegistrationSession => registrationSession(scope),
+    (): ImportRegistrationSession =>
+      replacementSession ?? registrationSession(scope),
   );
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [parameters] = useSearchParams();
   const sourceId = parameters.get('sourceId');
   const version = parameters.get('version');
-  if (sourceId && version) {
+  if (!replacementSession && sourceId && version) {
     return (
       <LegacySourceTask
         key={`${sourceId}:${version}`}
@@ -163,32 +249,24 @@ function ImportWorkspace({
       </section>
     );
   if (state.completed)
-    if (scope.canPrepare)
-      return (
-        <RegisteredTask
-          session={importProcessingSession(scope, state.completed, state.draft)}
-          onLeave={(): void => setSession(newRegistrationSession(scope))}
-        />
-      );
-  if (state.completed)
     return (
-      <ImportDocumentProgress
-        key={state.completed.requestId}
-        scope={scope}
-        registered={state.completed}
-        targetDocument={state.draft.targetDocument}
+      <RegisteredTask
         session={importProcessingSession(scope, state.completed, state.draft)}
-        onNewRegistration={(): void =>
-          setSession(newRegistrationSession(scope))
-        }
+        onLeave={(): void => {
+          if (!replacementSession) setSession(newRegistrationSession(scope));
+        }}
       />
     );
-  return <ImportDocumentForm session={session} scope={scope} />;
+  return (
+    <ImportDocumentForm session={session} scope={scope} returnTo={returnTo} />
+  );
 }
 
 /** 기존 권한 선택을 읽고 신규 원본과 후속 처리의 화면을 조립합니다. */
 export function ImportDocumentContent(): JSX.Element {
   const model = useImportScope();
+  const [parameters] = useSearchParams();
+  const location = useLocation();
   if (model.state.status === 'loading')
     return (
       <p className={styles.notice} role="status">
@@ -225,6 +303,18 @@ export function ImportDocumentContent(): JSX.Element {
           </Link>
         </div>
       </section>
+    );
+  const replacementId = parameters.get('replaceSourceId');
+  if (replacementId !== null)
+    return (
+      <ReplacementWorkspace
+        key={`${importScopeKey(model.state.scope)}:${replacementId}:${parameters.get('version') ?? ''}`}
+        scope={model.state.scope}
+        sourceId={replacementId}
+        version={parameters.get('version') ?? ''}
+        returnTo={workflowReturnTo(location.state) ?? '/documents'}
+        onRefreshScope={model.refresh}
+      />
     );
   return (
     <ImportWorkspace

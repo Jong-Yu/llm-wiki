@@ -349,9 +349,10 @@ export class ImportProcessingSession {
       this.#stopAutomaticPreparation();
       this.#update({
         phase: 'conversion_unconfirmed',
-        canRetryConversion: false,
-        message:
-          '변환 보고의 저장 결과를 확인 중입니다. 원본을 다시 올리지 않고 같은 보고를 조회합니다.',
+        canRetryConversion: run.canResumeUpload === true,
+        message: run.canResumeUpload
+          ? '변환한 내용은 보관되어 있습니다. 저장 계속을 누르면 같은 보고의 남은 부분만 저장합니다.'
+          : '변환 보고의 저장 결과를 확인 중입니다. 원본을 다시 올리지 않고 같은 보고를 조회합니다.',
       });
       return false;
     }

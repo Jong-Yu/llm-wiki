@@ -591,6 +591,8 @@ async function verify(): Promise<void> {
   );
   window.show();
   window.focus();
+  // macOS 창 활성화와 별도로 실제 키 입력을 받을 본문에도 초점을 줍니다.
+  window.webContents.focus();
   await until('document.hasFocus()');
   await js(
     "[...document.querySelectorAll('[data-workspace-page]:not([hidden]) button')].find(b => b.textContent.trim() === '새 미리보기 확인').focus()",

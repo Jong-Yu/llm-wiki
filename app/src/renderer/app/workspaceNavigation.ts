@@ -19,12 +19,15 @@ export function workspacePageKey(pathname: string, search: string): string {
       return `proposal:${query.get('document') ?? ''}:${query.get('proposalId') ?? ''}`;
     case '/jobs':
       return `job:${query.get('jobId') ?? ''}`;
+    case '/documents':
     case '/tasks':
+      if (query.has('jobId')) return `document-progress:${query.get('jobId')}`;
       if (query.has('workflowId'))
         return `workflow:${query.get('workflowId') ?? ''}`;
-      return `task:${query.get('taskId') ?? 'list'}`;
+      return query.has('taskId')
+        ? `task:${query.get('taskId')}:${query.get('view') ?? 'progress'}`
+        : '/documents';
     case '/notifications':
-    case '/documents':
     case '/register':
     case '/ontology':
     case '/review':
@@ -65,8 +68,7 @@ export function workspaceParentLocation(
     return `/document?path=${encodeURIComponent(document)}`;
   if (pathname === '/jobs' || pathname === '/sessions/history')
     return '/sessions';
-  if (pathname === '/tasks')
-    return query.has('workflowId') ? '/notifications' : '/tasks';
+  if (pathname === '/tasks') return '/documents';
   if (pathname === '/notifications') return '/notifications';
   if (pathname === '/artifact' || pathname === '/chat') return '/chat';
   return '/documents';
@@ -141,26 +143,27 @@ export function workspaceBreadcrumb(
     }
     case '/jobs':
       return [{ label: 'AI 세션', to: '/sessions' }, { label: '분석 작업' }];
+    case '/documents':
     case '/tasks':
+      if (query.has('jobId')) return [documents, { label: '등록 진행' }];
       if (query.has('workflowId'))
         return [
-          { label: '알림', to: '/notifications' },
+          documents,
           {
             label:
               titleOf(`workflow:${query.get('workflowId') ?? ''}`) ??
-              '문자 검토와 처리',
+              '내용 확인',
           },
         ];
       return query.get('taskId')
         ? [
-            { label: '작업', to: '/tasks' },
+            documents,
             {
               label:
-                titleOf(`task:${query.get('taskId') ?? ''}`) ??
-                '문서 처리 작업',
+                titleOf(`task:${query.get('taskId') ?? ''}`) ?? '등록 진행',
             },
           ]
-        : [{ label: '작업' }];
+        : [{ label: '문서' }];
     case '/artifact':
       return [
         { label: 'AI 채팅', to: '/chat' },
@@ -170,8 +173,6 @@ export function workspaceBreadcrumb(
             '산출물',
         },
       ];
-    case '/documents':
-      return [{ label: '문서' }];
     case '/notifications':
       return [{ label: '알림' }];
     case '/ontology':

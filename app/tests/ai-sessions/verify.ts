@@ -4,6 +4,7 @@ import {
   readSessionScope,
   questionStatus,
   SessionScopeError,
+  unwrapSessionResult,
 } from '../../src/renderer/features/browse-ai-sessions/api/aiSessions.api';
 import { mergeSessionPages } from '../../src/renderer/features/browse-ai-sessions/model/useSessionCatalog';
 import {
@@ -183,6 +184,32 @@ Object.defineProperty(globalThis, 'window', {
   value: mock,
 });
 try {
+  const payload = { retained: ['original result'] };
+  assert.equal(unwrapSessionResult({ ok: true, data: payload }), payload);
+  for (const error of [
+    { code: 'access_changed', message: 'scope changed' },
+    { code: 'custom_denial', message: 'scope changed', status: 403 },
+  ]) {
+    assert.throws(
+      (): unknown => unwrapSessionResult({ ok: false, error }),
+      (cause: unknown): boolean =>
+        cause instanceof SessionScopeError && cause.message === error.message,
+    );
+  }
+  assert.throws(
+    (): unknown =>
+      unwrapSessionResult({
+        ok: false,
+        error: { code: 'storage_busy', message: 'try later', status: 503 },
+      }),
+    (cause: unknown): boolean =>
+      cause instanceof Error &&
+      !(cause instanceof SessionScopeError) &&
+      cause.message === 'try later',
+  );
+  console.log(
+    'PASS session results preserve data and distinguish scope denial from ordinary failure',
+  );
   const session = await readSessionScope();
   const all = { sourceId: null, sourceVersion: null, document: null };
   const first = await readSessionPage(session, all, null);
@@ -213,7 +240,7 @@ try {
   const selected = await readSessionPage(
     session,
     { ...all, document: 'fixture.md' },
-    { analysis: 'next-analysis', question: null },
+    { analysis: 'next-analysis', question: null, comparison: null },
   );
   assert.equal(analysisCursor, 'next-analysis');
   assert.equal(questionCalls, previousQuestions);
@@ -231,6 +258,7 @@ try {
   const questionFirst = await readSessionPage(session, all, {
     analysis: null,
     question: 'start-question',
+    comparison: null,
   });
   assert.equal(questionFirst.hasGaps, false);
   assert.equal(questionFirst.incomplete, true);
@@ -266,6 +294,7 @@ try {
   const questionGap = await readSessionPage(session, all, {
     analysis: null,
     question: 'start-question',
+    comparison: null,
   });
   questionIncomplete = false;
   assert.equal(mergeSessionPages(questionGap, questionFinal).incomplete, true);

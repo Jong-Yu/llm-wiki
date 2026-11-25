@@ -1,11 +1,12 @@
 """AI 호출 전 실행 준비 실패를 CLI 설치 문제로 가리지 않고, Windows 자식 프로세스가 콘솔 창을 만들지 않는지 검사한다."""
 
+import asyncio
 import json
 from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 from core.client.ai import claude as claude_module
 from core.client.ai import codex as codex_module
@@ -47,6 +48,65 @@ class PreflightErrorTests(unittest.IsolatedAsyncioTestCase):
                                  "ai_cli_unavailable")
                 self.assertEqual(await self.check(module, adapter_type, ClientPlatformError("raw C:\\path")),
                                  "ai_cli_unavailable")
+
+
+class CliCapabilityTests(unittest.IsolatedAsyncioTestCase):
+    """각 제공자의 도움말·실행 경계와 성공 시에만 재사용하는 준비 결과를 검사한다."""
+
+    adapters = ((codex_module, CodexAdapter, ("exec", "--help")),
+                (claude_module, ClaudeAdapter, ("--help",)))
+
+    async def test_provider_help_and_cached_version_keep_their_execution_boundary(self):
+        environment = {"PATH": "/fixture/bin"}
+        version = "한글" * 120
+        for module, adapter_type, help_arguments in self.adapters:
+            other = claude_module if module is codex_module else codex_module
+            with self.subTest(adapter=adapter_type.__name__), \
+                    patch.object(module, "cli_command", return_value=["fixture-cli"]) as command, \
+                    patch.object(module, "_execute", AsyncMock(side_effect=[
+                        (0, f"  {version}\n".encode(), b""),
+                        (0, " ".join(module._REQUIRED_FLAGS).encode(), b""),
+                    ])) as execute, \
+                    patch.object(other, "cli_command", side_effect=AssertionError("wrong provider")), \
+                    patch.object(other, "_execute", side_effect=AssertionError("wrong provider")):
+                adapter = adapter_type(cli="fixture-cli")
+                result = await adapter._check(environment)
+                self.assertEqual(result, (["fixture-cli"], version[:200]))
+                self.assertIs(await adapter._check(environment), result)
+                self.assertEqual(command.call_args_list, [call("fixture-cli"), call("fixture-cli")])
+                self.assertEqual(execute.await_args_list, [
+                    call(["fixture-cli", "--version"], directory=None, environment=environment),
+                    call(["fixture-cli", *help_arguments], directory=None, environment=environment),
+                ])
+                command.side_effect = ClientPlatformError("ai_cli_unavailable")
+                with self.assertRaisesRegex(AIAdapterError, "ai_cli_unavailable"):
+                    await adapter._check(environment)
+                self.assertIs(adapter._capabilities, result)
+                self.assertEqual(execute.await_count, 2)
+
+    async def test_failed_probe_never_caches_and_a_later_probe_can_retry(self):
+        version = (0, b"fixture 1.0", b"")
+        for module, adapter_type, _ in self.adapters:
+            help_output = (0, " ".join(module._REQUIRED_FLAGS).encode(), b"")
+            failures = (
+                ([(1, b"", b"")], AIAdapterError, "ai_cli_unavailable"),
+                ([version, (1, b"", b"")], AIAdapterError, "ai_cli_unavailable"),
+                ([version, (0, b"missing options", b"")], AIAdapterError, "ai_cli_incompatible"),
+                ([version, asyncio.CancelledError()], asyncio.CancelledError, None),
+                ([(0, b"\xff", b"")], UnicodeDecodeError, None),
+            )
+            for responses, error_type, code in failures:
+                with self.subTest(adapter=adapter_type.__name__, failure=code or error_type.__name__), \
+                        patch.object(module, "cli_command", return_value=["fixture-cli"]), \
+                        patch.object(module, "_execute", AsyncMock(side_effect=responses)) as execute:
+                    adapter = adapter_type(cli="fixture-cli")
+                    with self.assertRaises(error_type) as raised:
+                        await adapter._check({})
+                    if code is not None:
+                        self.assertEqual(raised.exception.code, code)
+                    self.assertIsNone(adapter._capabilities)
+                    execute.side_effect = [version, help_output]
+                    self.assertEqual(await adapter._check({}), (["fixture-cli"], "fixture 1.0"))
 
 
 class ClaudeRunErrorTests(unittest.IsolatedAsyncioTestCase):

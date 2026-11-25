@@ -26,7 +26,8 @@ from core.runtime.client_process import WindowsJob, process_arguments, spawn_opt
 from .analysis import _private_directory, server_url
 from .transport import AnalysisClientError, api_call
 from .source_conversion_worker import atomic_json, transient_checkpoint_error
-from .source_conversion_report import empty_conversion, interrupt_conversion
+from .source_conversion_report import empty_conversion, interrupt_conversion, retain_empty_attempt
+from .source_conversion_parts import needs_parts
 
 MAX_ORIGINAL = 20 * 1024 * 1024
 MAX_CONVERSION_SECONDS = 30 * 60
@@ -164,7 +165,7 @@ async def read_checkpoint(path, *, final=False):
 
 
 async def run_worker(original, format, result_path, *, ocr, language, timeout, cancel_file, emit,
-                     idle_timeout=MAX_IDLE_SECONDS):
+                     idle_timeout=MAX_IDLE_SECONDS, selected_page=None):
     scratch = Path(tempfile.mkdtemp(prefix="scratch-", dir=result_path.parent))
     failure_path = scratch / "worker-failure.json"
     environment = {**os.environ, "TMPDIR": str(scratch), "TEMP": str(scratch), "TMP": str(scratch)}
@@ -178,6 +179,8 @@ async def run_worker(original, format, result_path, *, ocr, language, timeout, c
         arguments = [sys.executable, "-B", "-m", "core.client.source_conversion_worker",
                      str(original), format, str(result_path), "--ocr", ocr, "--language", language,
                      "--failure-report", str(failure_path)]
+        if selected_page is not None:
+            arguments.extend(["--page", str(selected_page)])
         process = await asyncio.create_subprocess_exec(*process_arguments(arguments),
             cwd=Path(__file__).resolve().parents[2], env=environment, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, **spawn_options())
@@ -327,7 +330,7 @@ async def submit_report(http, base, query, body, user_id, emit):
 
 async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profile=None, request_id=None,
                          cancel_file=None, submit=False, ocr="auto", ocr_language="eng", timeout=MAX_CONVERSION_SECONDS,
-                         idle_timeout=MAX_IDLE_SECONDS, on_event=None, http=None):
+                         idle_timeout=MAX_IDLE_SECONDS, on_event=None, http=None, selected_page=None):
     """원본 기준을 고정하고 다운로드→격리 변환→선택한 보고 저장을 실행한다."""
     base_url = server_url(base_url)
     check_ref(source_ref)
@@ -337,6 +340,9 @@ async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profi
             or not 0 < idle_timeout <= MAX_IDLE_SECONDS
             or re.fullmatch(r"[A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)*", ocr_language) is None):
         raise AnalysisClientError("invalid_conversion_options")
+    # 한 쪽 재인식은 검토 후보만 만들며 전체 변환 보고로 제출할 수 없다.
+    if selected_page is not None and (type(selected_page) is not int or not 1 <= selected_page <= 1_000_000 or submit):
+        raise AnalysisClientError("invalid_page_conversion_options")
     request_id = request_id or uuid4().hex
     if re.fullmatch(r"[a-f0-9]{32}", request_id) is None:
         raise AnalysisClientError("invalid_request_id")
@@ -367,14 +373,18 @@ async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profi
         if not original or original["source_sha256"] != source_ref["source_sha256"]:
             raise AnalysisClientError("source_basis_changed")
         local["format"] = original["format"]
+        if selected_page is not None and original["format"] != "pdf":
+            raise AnalysisClientError("page_conversion_requires_pdf")
         path = await download(http, base + f"/sources/{source_ref['source_id']}/versions/{source_ref['source_version']}/file" + query,
                               directory, original, cancel_file, emit)
         local["original_file"] = str(path)
-        conversion = await run_worker(path, original["format"], result_path, ocr=ocr, language=ocr_language,
-                                     timeout=timeout, idle_timeout=idle_timeout, cancel_file=cancel_file, emit=emit)
+        options = {"selected_page": selected_page} if selected_page is not None else {}
+        conversion = await run_worker(path, original["format"], result_path,
+                                     ocr="always" if selected_page is not None else ocr, language=ocr_language,
+                                     timeout=timeout, idle_timeout=idle_timeout, cancel_file=cancel_file, emit=emit, **options)
         local["conversion"] = conversion
         if conversion.get("worker_failure"):
-            # 첫 checkpoint 이전 실패는 UI가 method 없는 보고를 null로 투영하므로 코드도 별도로 보낸다.
+            # 시도 방식과 별개로 실제 worker 실패 코드를 유지한다.
             local["error"] = {"code": conversion["worker_failure"]["code"]}
         if cancelled(cancel_file):
             conversion["complete"] = False
@@ -382,13 +392,23 @@ async def convert_source(*, base_url, tenant, token, source_ref, work_dir, profi
             if not any("conversion_cancelled" in value for value in conversion["unread_ranges"]):
                 interrupt_conversion(conversion, "conversion_cancelled", diagnostic=False)
             atomic_json(result_path, conversion)
-        if conversion["units"]:
+        empty_attempt = retain_empty_attempt(conversion, original['format'])
+        if empty_attempt:
+            # 읽을 수 없던 checkpoint를 덮지 않고 실제 시도 보고만 별도 보존한다.
+            attempted_path = directory / 'attempt-conversion.json'
+            atomic_json(attempted_path, conversion)
+            local['result_file'] = str(attempted_path)
+        if conversion["units"] or empty_attempt:
             body = report_body(conversion, source_ref, request_id, profile)
             atomic_json(report_path, body)
             local["report_file"] = str(report_path)
+            local['report_sha256'] = sha256(report_path.read_bytes()).hexdigest()
+            atomic_json(directory / 'report-owner.json', dict(user_id=catalog['access']['user_id'], tenant=tenant,
+                profile_id=profile, request_id=request_id, source_ref=source_ref, report_sha256=local['report_sha256']))
             if submit and conversion["state"] != "cancelled":
-                if len(json.dumps(body, ensure_ascii=False).encode()) > 8 * 1024 * 1024:
-                    local["receipt"] = {"state": "rejected", "error": {"code": "report_transport_limit"}}
+                if needs_parts(body):
+                    from .source_conversion_parts import submit as submit_parts
+                    local["receipt"] = await submit_parts(http, base, query, body, catalog["access"]["user_id"], emit)
                 else:
                     local["receipt"] = await submit_report(http, base, query, body, catalog["access"]["user_id"], emit)
         local["state"] = "report_unconfirmed" if local["receipt"]["state"] == "unconfirmed" else conversion["state"]

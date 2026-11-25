@@ -461,6 +461,7 @@ test.describe('등록 템플릿과 실제 산출물', (): void => {
         'templateId',
       );
       if (!templateId) throw new Error('template_missing');
+      if (!bridge.templates) throw new Error('templates_bridge_missing');
       const detail = await bridge.templates.read({ ...session, templateId });
       if (!detail.ok) throw new Error(detail.error.code);
       const changed = await bridge.templates.save({

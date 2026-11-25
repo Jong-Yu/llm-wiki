@@ -11,6 +11,7 @@ from core.modules.documents.store import WikiStore
 from core.modules.ontology.store import OntologyStore
 from core.modules.reviews.store import ReviewStore
 from core.runtime.application import create_application
+from core.tests.poc_access.fixtures import grant_test_membership_for_user
 
 root = Path(sys.argv[1])
 if (root.parent.resolve() != root.parent or root.parent.parent != Path('/private/tmp')
@@ -19,7 +20,8 @@ if (root.parent.resolve() != root.parent or root.parent.parent != Path('/private
     raise RuntimeError('Only a new isolated relation review test directory is permitted')
 config = initialize_new_server(root)
 policy = AccessPolicy(config["access_config"], config["tenant_root"])
-AuthService(policy).signup("관계 검증")
+user = AuthService(policy).signup("관계 검증")
+grant_test_membership_for_user(policy, user["user_id"])
 wiki = WikiStore(root / "data/sdv-platform")
 ontology = OntologyStore(wiki)
 reviews = ReviewStore(wiki)

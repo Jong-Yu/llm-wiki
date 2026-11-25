@@ -17,13 +17,18 @@ from .rule_selection import (COMMON_INSTRUCTIONS, SELECTION_GUIDANCE, STAGE_INST
                              rules_view_configuration, select_rules)
 
 
-DIAGNOSTIC_GUIDANCE_VERSION = "existing_diagnostic_evidence_contract_v1"
+DIAGNOSTIC_GUIDANCE_VERSION = "existing_diagnostic_evidence_contract_v2"
 DIAGNOSTIC_GUIDANCE = (
     "진단의 기존 저장 계약: diagnostics.findings의 verdict가 ambiguous, not_run, undetermined가 아니면 "
     "source는 null일 수 없으며 실제 원문의 quote와 start_line/end_line을 함께 제출한다. "
     "quote의 첫 문자와 마지막 문자는 각각 선언한 시작 줄과 끝 줄에 실제로 있어야 한다. "
     "rule_results에서 pass 또는 fail을 보고하려면 실제로 검토한 reviewed_ranges가 하나 이상 있어야 한다. "
-    "이 조건을 맞추려고 인용·줄 번호를 발명하거나 원래의 사실·의견을 삭제 또는 다른 판정으로 바꾸지 않는다."
+    "이 조건을 맞추려고 인용·줄 번호를 발명하거나 원래의 사실·의견을 삭제 또는 다른 판정으로 바꾸지 않는다. "
+    "등록 입력의 data/conversion.json에 user_input_resolution이 있으면 원래 unread_ranges와 complete는 "
+    "수정하지 않은 과거 변환 보고이며 resolved_ranges는 별도 불변 사용자 입력 또는 명시 빈 페이지 확인으로 보완된 범위다. "
+    "현재 등록 본문에는 effective_units에 따른 사용자 선택이 반영되어 있다. 과거 변환 진단을 그대로 새 "
+    "diagnostics.unread_ranges에 복사하지 않는다. remaining_ranges와 현재 필수 본문을 확인하고 실제로 읽지 못한 범위만 "
+    "새 unread_ranges에 남긴다. 사용자 입력으로 OCR 정확도나 원본 전체를 확인했다고 주장하지 않는다."
 )
 SOURCE_LINE_REFERENCE_POLICY = "fixed_target_field_line_coordinates_v2"
 SOURCE_LINE_REFERENCE_GUIDANCE = (

@@ -11,12 +11,16 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   RuntimeSettingsService,
   withCurrentBundledRuntime,
 } from '@main/settings/RuntimeSettingsService';
 import type { BundledRuntimePaths } from '@main/settings/bundledRuntime';
-import type { RuntimeSettings } from '@contracts/runtime.contract';
+import type {
+  RuntimeCheck,
+  RuntimeSettings,
+} from '@contracts/runtime.contract';
 import { storedRuntimeSettingsSchema } from '@contracts/runtime.contract';
 import { z } from 'zod';
 
@@ -54,6 +58,132 @@ async function fakeClaude(
   );
   await chmod(path, 0o755);
   return path;
+}
+
+/** 실제 모델 대신 가짜 실행기로 진단의 부분 결과·실패·동시 실행 경계를 검사합니다. */
+async function verifyRuntimeDiagnostics(
+  base: string,
+  cli: string,
+): Promise<void> {
+  const directory = join(base, 'runtime-diagnostics');
+  const bundle = await fakeBundle(
+    directory,
+    `#!/bin/sh
+mode="$(cat "$0.mode" 2>/dev/null)"
+if [ "$3" = "tools.runtime_doctor" ]; then
+  if [ "$mode" = "invalid-doctor" ]; then echo 'not-json'; exit 0; fi
+  if [ "$mode" = "failed-doctor" ]; then echo 'private diagnostic stderr' >&2; exit 23; fi
+  echo '{"python_supported":true,"dependencies":[{"status":"ok"}],"ai":{"status":"ok","login":"credentials_present"}}'
+  exit 7
+fi
+if [ "$mode" = "hold-ocr" ]; then
+  echo ready > "$0.ocr-started"
+  n=0
+  while [ ! -e "$0.release" ] && [ "$n" -lt 250 ]; do sleep 0.02; n=$((n+1)); done
+fi
+if [ "$mode" = "failed-ocr" ]; then echo 'private diagnostic stderr' >&2; exit 23; fi
+echo '{"diagnostics":{"tesseract":{"available":true,"ready":true}}}'
+`,
+  );
+  const settingsDirectory = join(directory, 'settings');
+  await mkdir(settingsDirectory);
+  await writeFile(
+    join(settingsDirectory, 'runtime.json'),
+    JSON.stringify({
+      version: 2,
+      settings: {
+        ...bundle,
+        provider: 'claude',
+        codex: cli,
+        claude: cli,
+        models: { codex: 'default', claude: 'default' },
+      },
+    }),
+  );
+  const service = new RuntimeSettingsService(
+    settingsDirectory,
+    '',
+    async (): Promise<null> => null,
+    bundle,
+    async (): Promise<string | null> => cli,
+  );
+  await service.initialize();
+  const ready = await service.diagnose();
+  assert.equal(ready.checks.length, 4);
+  assert.ok(
+    ready.checks.every((check: RuntimeCheck): boolean => check.status === 'ok'),
+  );
+  assert.equal(ready.checks[3]?.optional, true);
+  assert.equal(ready.cliConnection, undefined);
+  assert.equal(ready.saved, true);
+  const preserved = await readFile(join(settingsDirectory, 'runtime.json'));
+  process.stdout.write(
+    'PASS diagnostic JSON is accepted despite nonzero exit\n',
+  );
+
+  await writeFile(`${bundle.python}.mode`, 'failed-ocr');
+  const partial = await service.diagnose();
+  assert.deepEqual(partial.checks.slice(0, 3), ready.checks.slice(0, 3));
+  assert.equal(partial.checks[3]?.status, 'error');
+  assert.equal(partial.checks[3]?.optional, true);
+  assert.doesNotMatch(JSON.stringify(partial), /private diagnostic stderr/u);
+  process.stdout.write(
+    'PASS OCR failure preserves the other diagnostic results\n',
+  );
+
+  for (const mode of ['invalid-doctor', 'failed-doctor']) {
+    await writeFile(`${bundle.python}.mode`, mode);
+    const failed = await service.diagnose();
+    assert.equal(failed.checks.length, 1);
+    assert.equal(failed.checks[0]?.name, '개인 실행 환경');
+    assert.equal(failed.checks[0]?.status, 'error');
+    assert.doesNotMatch(
+      JSON.stringify(failed),
+      /private diagnostic stderr|not-json/u,
+    );
+    assert.deepEqual(failed.settings, ready.settings);
+    await writeFile(`${bundle.python}.mode`, 'ready');
+    assert.deepEqual((await service.diagnose()).checks, ready.checks);
+  }
+  assert.deepEqual(
+    await readFile(join(settingsDirectory, 'runtime.json')),
+    preserved,
+  );
+  process.stdout.write(
+    'PASS failed diagnostics preserve settings and permit retry\n',
+  );
+
+  await writeFile(`${bundle.python}.mode`, 'hold-ocr');
+  const pending = service.diagnose();
+  try {
+    let started = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      started = await readFile(`${bundle.python}.ocr-started`, 'utf8')
+        .then((value: string): boolean => value.trim() === 'ready')
+        .catch((): boolean => false);
+      if (started) break;
+      await delay(20);
+    }
+    assert.equal(
+      started,
+      true,
+      'OCR should start after publishing doctor results',
+    );
+    assert.deepEqual(service.snapshot().checks, ready.checks.slice(0, 3));
+    await assert.rejects(service.diagnose(), /busy/u);
+    await assert.rejects(service.testAi(), /busy/u);
+    assert.throws((): void => {
+      service.selectProvider('codex');
+    }, /busy/u);
+  } finally {
+    await writeFile(`${bundle.python}.release`, 'release');
+    await pending;
+  }
+  assert.deepEqual(service.snapshot().checks, ready.checks);
+  assert.equal(service.selectProvider('codex').settings.provider, 'codex');
+  process.stdout.write(
+    'PASS diagnostics publish partial results and guard concurrent operations\n',
+  );
 }
 
 /** 새 프로세스처럼 서비스를 다시 만들고 실제 호출 없이 확인 기록을 복원하는지 검사합니다. */
@@ -547,9 +677,64 @@ exit 1
   assert.equal(failed?.status, 'failed');
   assert.equal(failed?.path, null);
   process.stdout.write('PASS claude diagnostic report is saved and opened\n');
+
+  const cannotOpen = new RuntimeSettingsService(
+    join(base, 'app-data-open-error', 'runtime-settings'),
+    '',
+    async (): Promise<null> => null,
+    diagnosticBundle,
+    async (): Promise<string | null> => loggedIn,
+    async (): Promise<string> => {
+      throw new Error('private open error');
+    },
+  );
+  await cannotOpen.initialize();
+  const unopened = (await cannotOpen.diagnoseClaude()).diagnosticReport;
+  assert.equal(unopened?.status, 'saved');
+  assert.ok(unopened.path);
+  assert.match(unopened.message, /보고서를 열지 못했/u);
+  assert.doesNotMatch(unopened.message, /private open error/u);
+  assert.ok((await readFile(unopened.path, 'utf8')).length > 0);
+  process.stdout.write(
+    'PASS report opening failure preserves the saved report\n',
+  );
+
+  let ambiguousOpened = false;
+  const ambiguous = new RuntimeSettingsService(
+    join(base, 'app-data-ambiguous', 'runtime-settings'),
+    '',
+    async (): Promise<null> => null,
+    await fakeBundle(
+      join(base, 'LLM-Wiki-ambiguous'),
+      reportPython.replace(
+        'exit 1\n',
+        'cp "$target" "${target%.txt}-2.txt"\nexit 0\n',
+      ),
+    ),
+    async (): Promise<string | null> => loggedIn,
+    async (): Promise<string> => {
+      ambiguousOpened = true;
+      return '';
+    },
+  );
+  await ambiguous.initialize();
+  const uncertain = (await ambiguous.diagnoseClaude()).diagnosticReport;
+  assert.equal(uncertain?.status, 'failed');
+  assert.equal(uncertain?.path, null);
+  assert.equal(ambiguousOpened, false);
+  assert.equal(
+    (await readdir(join(base, 'app-data-ambiguous', 'diagnostics'))).length,
+    2,
+  );
+  process.stdout.write(
+    'PASS multiple new reports are retained without choosing one\n',
+  );
+  await verifyRuntimeDiagnostics(base, loggedIn);
   await verifyAiRestart(base);
 }
 void main().catch((error: unknown): void => {
-  process.stderr.write(`${error instanceof Error ? error.stack : error}\n`);
+  process.stderr.write(
+    `${error instanceof Error ? error.stack : String(error)}\n`,
+  );
   process.exitCode = 1;
 });

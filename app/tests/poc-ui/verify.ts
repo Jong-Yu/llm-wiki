@@ -70,6 +70,32 @@ app.setPath('userData', join(root, 'electron-user'));
 app.setName('LLM Wiki isolated verification');
 const results: string[] = [];
 const fetchOriginal = globalThis.fetch;
+/** 현재 등록 요청의 식별자와 변환 참조를 시험 응답에 반영합니다. */
+function registrationDetail(
+  detail: AnalysisDetail,
+  request: AnalysisStartRequest,
+): AnalysisDetail {
+  const registration = request.registration;
+  assert.ok(registration);
+  return analysisDetailSchema.parse({
+    ...detail,
+    job: {
+      ...detail.job,
+      request_id: registration.requestId,
+      registration: {
+        mode: 'preserve',
+        title: registration.title,
+        conversion_ref: registration.conversionRef
+          ? {
+              conversion_id: registration.conversionRef.conversionId,
+              conversion_revision:
+                registration.conversionRef.conversionRevision,
+            }
+          : null,
+      },
+    },
+  });
+}
 /** 검증 실패에도 비밀을 출력하지 않고 체크 이름만 남깁니다. */
 async function check(
   name: string,
@@ -426,8 +452,8 @@ async function verify(): Promise<void> {
       assert.ok(jobFixture);
       const local = connection.localContext();
       assert.ok(local);
-      const initial = jobFixture;
-      const partial: AnalysisDetail = analysisDetailSchema.parse({
+      let initial = jobFixture;
+      let partial: AnalysisDetail = analysisDetailSchema.parse({
         ...initial,
         job: {
           ...initial.job,
@@ -477,6 +503,8 @@ async function verify(): Promise<void> {
         ): Promise<AnalysisDetailResult> => {
           registrations += 1;
           assert.equal(request.sourceId, initial.job.source_ref.source_id);
+          initial = registrationDetail(initial, request);
+          partial = registrationDetail(partial, request);
           return { ok: true, data: initial };
         },
         inspectJob: async (): Promise<AnalysisExecutionInspectionResult> => ({
@@ -534,7 +562,7 @@ async function verify(): Promise<void> {
       assert.ok(jobFixture);
       const local = connection.localContext();
       assert.ok(local);
-      const initial = jobFixture;
+      let initial = jobFixture;
       let registrations = 0;
       let executions = 0;
       const api: ImportProcessingApi = {
@@ -544,8 +572,12 @@ async function verify(): Promise<void> {
         conversionStart: async (): Promise<never> => {
           throw new Error('MD must not convert');
         },
-        register: async (): Promise<AnalysisDetailResult> => {
+        register: async (
+          _scope: SourceConversionScope,
+          request: AnalysisStartRequest,
+        ): Promise<AnalysisDetailResult> => {
           registrations += 1;
+          initial = registrationDetail(initial, request);
           return { ok: true, data: initial };
         },
         inspectJob: async (): Promise<AnalysisExecutionInspectionResult> => ({
@@ -635,8 +667,8 @@ async function verify(): Promise<void> {
       assert.ok(jobFixture);
       const local = connection.localContext();
       assert.ok(local);
-      const initial = jobFixture;
-      const failed = analysisDetailSchema.parse({
+      let initial = jobFixture;
+      let failed = analysisDetailSchema.parse({
         ...initial,
         local: { status: 'failed', message: 'AI 사용 한도로 중단됐습니다.' },
         job: { ...initial.job, reported_status: 'failed' },
@@ -708,8 +740,13 @@ async function verify(): Promise<void> {
             data: { ...conversion, state: 'running', receiptState: 'pending' },
           };
         },
-        register: async () => {
+        register: async (
+          _scope: SourceConversionScope,
+          request: AnalysisStartRequest,
+        ): Promise<AnalysisDetailResult> => {
           registrations += 1;
+          initial = registrationDetail(initial, request);
+          failed = registrationDetail(failed, request);
           return { ok: true, data: initial };
         },
         inspectJob: async () => ({

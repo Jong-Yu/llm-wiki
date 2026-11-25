@@ -1,11 +1,19 @@
 import type { JSX } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { DocumentLibrary } from '@renderer/features/browse-document-library';
+import { DocumentProgressPage } from './DocumentProgressPage';
 import { sourceAnalysisStarter } from './sourceAnalysisStarter';
 
 /** 문서 목록의 업무 흐름과 신규 상세·온톨로지 진입을 페이지에서 연결합니다. */
 export function DocumentLibraryPage(): JSX.Element {
   const navigate = useNavigate();
+  const [parameters] = useSearchParams();
+  if (
+    parameters.has('taskId') ||
+    parameters.has('workflowId') ||
+    parameters.has('jobId')
+  )
+    return <DocumentProgressPage />;
   return (
     <DocumentLibrary
       analysisStarter={sourceAnalysisStarter}

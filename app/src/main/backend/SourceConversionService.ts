@@ -4,8 +4,9 @@ import { sameAccessRevision } from '@contracts/connection.contract';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { readConversionParts } from './sourceConversionParts';
 import {
   conversionReportSchema,
   conversionSourceSchema,
@@ -54,6 +55,8 @@ type StoredRun = {
   taskId?: string;
   journal: RecoveryEntry | null;
   persistence: Promise<void>;
+  resumeWorkDirectory?: string;
+  reportSha256?: string;
 };
 type Running = {
   record: StoredRun;
@@ -182,7 +185,10 @@ export class SourceConversionService {
       const previous = this.#runs.get(key(context, request));
       if (previous?.value.receiptState === 'unconfirmed')
         await this.#confirm(previous);
-      if (previous?.value.receiptState === 'unconfirmed')
+      if (
+        previous?.value.receiptState === 'unconfirmed' &&
+        !previous.value.canResumeUpload
+      )
         return apiFailure(
           'report_unconfirmed',
           '이전 보고의 저장 상태를 먼저 확인해 주세요. 같은 보고를 자동 재전송하지 않습니다.',
@@ -223,32 +229,55 @@ export class SourceConversionService {
         this.#options.workRoot,
         context.token,
       );
-      const record: StoredRun = {
-        context,
-        cancelFile: join(execution.directory, 'cancel'),
-        submitted: false,
-        taskId: request.taskId,
-        journal: journal ?? null,
-        persistence: Promise.resolve(),
-        value: {
-          requestId: randomUUID().replaceAll('-', ''),
-          source: {
-            sourceId: request.sourceId,
-            sourceVersion: request.sourceVersion,
-            sourceSha256: request.sourceSha256,
-            registrationRevision: request.registrationRevision,
-          },
+      const resume =
+        previous?.value.receiptState === 'unconfirmed' &&
+        previous.value.canResumeUpload === true &&
+        !!previous.resumeWorkDirectory;
+      const record: StoredRun =
+        resume && previous
+          ? previous
+          : {
+              context,
+              cancelFile: join(execution.directory, 'cancel'),
+              submitted: false,
+              taskId: request.taskId,
+              journal: journal ?? null,
+              persistence: Promise.resolve(),
+              resumeWorkDirectory: relative(
+                this.#options.workRoot,
+                execution.workDirectory,
+              ).replaceAll('\\', '/'),
+              value: {
+                requestId: randomUUID().replaceAll('-', ''),
+                source: {
+                  sourceId: request.sourceId,
+                  sourceVersion: request.sourceVersion,
+                  sourceSha256: request.sourceSha256,
+                  registrationRevision: request.registrationRevision,
+                },
+                state: 'running',
+                format: null,
+                progress: null,
+                report: null,
+                receiptState: 'pending',
+                reference: null,
+                message: conversionMessage('running'),
+                diagnosticCodes: [],
+                cleanupWarning: false,
+              },
+            };
+      if (resume) {
+        record.context = context;
+        record.cancelFile = join(execution.directory, 'cancel');
+        record.submitted = true;
+        record.value = {
+          ...record.value,
           state: 'running',
-          format: null,
-          progress: null,
-          report: null,
           receiptState: 'pending',
-          reference: null,
-          message: conversionMessage('running'),
-          diagnosticCodes: [],
-          cleanupWarning: false,
-        },
-      };
+          canResumeUpload: false,
+          message: '보관한 문자 변환 결과의 저장을 이어가고 있습니다.',
+        };
+      }
       try {
         record.journal = await writeProcessJournal(
           request.taskId ? this.#tasks?.recovery : this.#recovery,
@@ -261,6 +290,8 @@ export class SourceConversionService {
             requestId: record.value.requestId,
             source: record.value.source,
             snapshot: { ...record.value, report: null },
+            resumeWorkDirectory: record.resumeWorkDirectory,
+            reportSha256: record.reportSha256,
           },
           journal?.revision ?? null,
         );
@@ -296,7 +327,12 @@ export class SourceConversionService {
           '--token-file',
           execution.tokenFile,
           '--work-dir',
-          execution.workDirectory,
+          resume && record.resumeWorkDirectory
+            ? join(
+                this.#options.workRoot,
+                ...record.resumeWorkDirectory.split('/'),
+              )
+            : execution.workDirectory,
           '--request-id',
           record.value.requestId,
           '--cancel-file',
@@ -306,6 +342,14 @@ export class SourceConversionService {
           '--ocr-language',
           request.ocrLanguage,
           '--submit',
+          ...(resume
+            ? [
+                '--resume-report',
+                ...(record.reportSha256
+                  ? ['--report-sha256', record.reportSha256]
+                  : []),
+              ]
+            : []),
         ];
         const child = spawnPersonalProcess(runtime, args);
         child.stderr?.resume();
@@ -323,7 +367,7 @@ export class SourceConversionService {
         return this.#result(record);
       } catch (error: unknown) {
         record.value.state = 'failed';
-        record.value.receiptState = 'not_submitted';
+        record.value.receiptState = resume ? 'unconfirmed' : 'not_submitted';
         record.value.message =
           '변환 실행기를 시작하지 못했습니다. 원본은 보존됩니다.';
         record.value.diagnosticCodes = ['conversion_start_failed'];
@@ -405,6 +449,8 @@ export class SourceConversionService {
             requestId: value.requestId,
             source: value.source,
             snapshot: { ...value, report: null },
+            resumeWorkDirectory: record.resumeWorkDirectory,
+            reportSha256: record.reportSha256,
           },
           record.journal?.revision ?? null,
         );
@@ -451,6 +497,7 @@ export class SourceConversionService {
           )
             throw new Error('wrong_basis');
           terminal = true;
+          if (event.report_sha256) record.reportSha256 = event.report_sha256;
           record.value.format = event.format;
           record.value.report = event.conversion;
           record.value.state =
@@ -494,8 +541,8 @@ export class SourceConversionService {
     child.stdout?.on('data', (chunk: Buffer): void => {
       if (invalid) return;
       buffer += decoder.write(chunk);
-      // UTF-8 4 MiB의 JSON escape와 진단 여유를 포함하는 한 이벤트 상한입니다.
-      if (buffer.length > 32 * 1024 * 1024) {
+      // 보존한 20 MiB 전체 보고의 JSON escape와 진단 여유를 포함한 로컬 IPC 상한입니다.
+      if (buffer.length > 128 * 1024 * 1024) {
         invalid = true;
         buffer = '';
         record.value.diagnosticCodes = ['converter_output_limit'];
@@ -557,6 +604,7 @@ export class SourceConversionService {
     if (!this.#connection.isAnalysisCurrent(context)) return;
     const controller = new AbortController();
     this.#requests.add(controller);
+    record.value.canResumeUpload = false;
     try {
       const reportId = conversionId(
         context.selection.tenant,
@@ -568,13 +616,18 @@ export class SourceConversionService {
       );
       url.searchParams.set('profile', context.selection.profile);
       const response = await readApiJson(url.href, context.token, controller, {
+        // 과거 단일 보고의 JSON 이스케이프 크기까지 읽되 새 부분 보고는 아래의 8 MiB를 지킵니다.
         maxResponseBytes: 32 * 1024 * 1024,
       });
       if (!this.#connection.isAnalysisCurrent(context)) return;
       if (!response.ok) {
         this.#connection.analysisAccessFailure(response);
         record.value.state = 'report_unconfirmed';
-        record.value.message = conversionMessage('report_unconfirmed');
+        record.value.canResumeUpload =
+          response.error.status === 404 && !!record.resumeWorkDirectory;
+        record.value.message = record.value.canResumeUpload
+          ? '변환한 내용은 이 기기에 보관되어 있습니다. 저장 계속을 누르면 아직 저장하지 못한 부분만 이어서 보냅니다.'
+          : conversionMessage('report_unconfirmed');
         return;
       }
       const { data } = conversionStoredSchema.parse(response.value);
@@ -597,18 +650,36 @@ export class SourceConversionService {
         )
       )
         throw new Error('invalid_receipt');
+      const resolved = await readConversionParts(
+        data,
+        async (partId: string): Promise<unknown> => {
+          const partUrl = new URL(
+            `${context.active.serverUrl}tenants/${encodeURIComponent(context.selection.tenant)}/analysis-conversion-parts/${partId}`,
+          );
+          partUrl.searchParams.set('profile', context.selection.profile);
+          const part = await readApiJson(
+            partUrl.href,
+            context.token,
+            controller,
+            { maxResponseBytes: 8 * 1024 * 1024 },
+          );
+          if (!part.ok || !this.#connection.isAnalysisCurrent(context))
+            throw new Error('conversion_part_unavailable');
+          return part.value;
+        },
+      );
       const report = conversionReportSchema.parse({
         ...manifest,
         diagnostics: record.value.report?.diagnostics ?? [],
         unit_methods: record.value.report?.unit_methods ?? {},
-        units: manifest.units.map(
+        units: resolved.units.map(
           (
-            unit: (typeof manifest.units)[number],
+            unit: (typeof resolved.units)[number],
           ): {
             unit_id: string;
             location: (typeof unit)['location'];
             content: string | undefined;
-          } => ({ ...unit, content: data.components[unit.unit_id] }),
+          } => ({ ...unit, content: resolved.components[unit.unit_id] }),
         ),
       });
       record.value.report = report;
@@ -619,7 +690,11 @@ export class SourceConversionService {
         conversionRevision: data.revision,
         requestId: record.value.requestId,
       };
-      record.value.state = report.complete ? 'complete' : 'partial';
+      record.value.state = report.complete
+        ? 'complete'
+        : report.units.length
+          ? 'partial'
+          : 'failed';
       record.value.message = conversionMessage(
         record.value.state,
         record.value.report,
@@ -680,6 +755,14 @@ export class SourceConversionService {
           registrationRevision: z.string(),
         }),
         snapshot: sourceConversionRunSchema.nullish(),
+        resumeWorkDirectory: z
+          .string()
+          .regex(/^exec-[a-zA-Z0-9-]+\/work$/)
+          .optional(),
+        reportSha256: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
       })
       .parse(
         entry
@@ -730,6 +813,8 @@ export class SourceConversionService {
         journal: entry ?? null,
         persistence: Promise.resolve(),
         value: recovered,
+        resumeWorkDirectory: value.resumeWorkDirectory,
+        reportSha256: value.reportSha256,
       });
     }
     return entry ?? null;

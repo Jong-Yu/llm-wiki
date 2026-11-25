@@ -50,11 +50,15 @@ export const conversionCliEventSchema = z.discriminatedUnion('type', [
         .object({ code: z.string().regex(/^[a-zA-Z0-9_.-]{1,128}$/) })
         .optional(),
     }),
+    report_sha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   }),
 ]);
 export const conversionStoredSchema = z.object({
   data: z.object({
-    manifest: z.object({
+    manifest: z.looseObject({
       id: z.string().regex(/^[a-f0-9]{32}$/),
       kind: z.literal('conversions'),
       user_id: z.string(),
@@ -78,7 +82,24 @@ export const conversionStoredSchema = z.object({
         .array(
           conversionReportSchema.shape.units.element.omit({ content: true }),
         )
-        .max(1000),
+        .max(10000)
+        .optional(),
+      parts: z
+        .array(
+          z.object({
+            part_id: z.string().regex(/^[a-f0-9]{32}$/),
+            part_revision: z.string().regex(/^[a-f0-9]{64}$/),
+          }),
+        )
+        .max(64)
+        .optional(),
+      unit_count: z.number().int().min(1).max(10000).optional(),
+      text_bytes: z
+        .number()
+        .int()
+        .min(0)
+        .max(20 * 1024 * 1024)
+        .optional(),
     }),
     revision: z.string().regex(/^[a-f0-9]{64}$/),
     components: z.record(z.string(), z.string().max(4 * 1024 * 1024)),
@@ -95,6 +116,33 @@ export const conversionStoredSchema = z.object({
           (value: string | null | undefined): string | undefined =>
             value ?? undefined,
         ),
+    }),
+  }),
+});
+export const conversionPartStoredSchema = conversionStoredSchema.extend({
+  data: conversionStoredSchema.shape.data.extend({
+    manifest: conversionStoredSchema.shape.data.shape.manifest.extend({
+      kind: z.literal('conversion_parts'),
+      conversion_request_id: z.string().regex(/^[a-f0-9]{32}$/),
+      part_index: z.number().int().min(0).max(63),
+      units: z
+        .array(
+          conversionReportSchema.shape.units.element.omit({ content: true }),
+        )
+        .min(1)
+        .max(1000),
+      components: z.record(
+        z.string(),
+        z.object({
+          file: z.string(),
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+          size_bytes: z
+            .number()
+            .int()
+            .min(0)
+            .max(4 * 1024 * 1024),
+        }),
+      ),
     }),
   }),
 });

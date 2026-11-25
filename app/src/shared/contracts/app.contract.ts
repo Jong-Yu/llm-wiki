@@ -1,5 +1,7 @@
 import type { KnowledgeComparisonsBridge } from './knowledgeComparisons.contract';
+import type { SourceVisualPreviewsBridge } from './sourceVisualPreviews.contract';
 import type { DocumentTasksBridge } from './documentTasks.contract';
+import type { RegistrationDraftsBridge } from './registrationDrafts.contract';
 import type { NotificationsBridge } from './notifications.contract';
 import type { AiSessionsBridge } from './aiSessions.contract';
 import type { RecoveryBridge } from './recovery.contract';
@@ -39,6 +41,8 @@ export type GetAppInfoResult =
     };
 
 export type WikiBridge = {
+  sourceVisualPreviews?: SourceVisualPreviewsBridge;
+  registrationDrafts?: RegistrationDraftsBridge;
   notifications?: NotificationsBridge;
   documentTasks?: DocumentTasksBridge;
   templates?: TemplatesBridge;

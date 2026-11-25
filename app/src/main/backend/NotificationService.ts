@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { NotificationContentReader } from './NotificationContentReader';
 import {
   notificationDetailDataSchema,
   notificationListDataSchema,
   notificationMutationDataSchema,
   notificationReadStateDataSchema,
   notificationAccessSchema,
+  notificationApproveSchema,
+  notificationLocation,
+  notificationLocationKey,
 } from '@contracts/notifications.contract';
 import type {
   NotificationSession,
@@ -24,8 +28,13 @@ import type {
   NotificationContinueResult,
   NotificationPageResult,
   NotificationWorkflow,
+  NotificationCorrectRequest,
+  NotificationRetryPageRequest,
+  NotificationRetryPageResult,
+  NotificationCancelRetryRequest,
+  NotificationCancelRetryResult,
 } from '@contracts/notifications.contract';
-import { conversionNeedsPageApproval } from '@contracts/sourceConversion.contract';
+import { conversionNeedsContentReview } from '@contracts/sourceConversion.contract';
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
 import type { DocumentTask } from '@contracts/documentTasks.contract';
 import type { AnalysisContext, ConnectionService } from './ConnectionService';
@@ -38,7 +47,7 @@ import {
   readScopedApiJson,
   readApiPageBytes,
 } from './readApi';
-import type { ApiFailure } from './readApi';
+import type { ApiFailure, ReadApiResult } from './readApi';
 import type { ProcessRecovery } from './processRecovery';
 import {
   readProcessJournal,
@@ -47,6 +56,7 @@ import {
 } from './processRecovery';
 import type { RecoveryEntry } from '@contracts/recovery.contract';
 import { ExecutionStarts } from './ExecutionStarts';
+import type { SourcePageOcrService } from './SourcePageOcrService';
 
 type Connection = Pick<
   ConnectionService,
@@ -67,6 +77,8 @@ const pendingApproval = z.object({
   requestId: z.string(),
   expectedRevision: z.string(),
   targetDocument: z.string().optional(),
+  correctionRefs: notificationApproveSchema.shape.correctionRefs,
+  correctionsRevision: notificationApproveSchema.shape.correctionsRevision,
 });
 const executionEntry = z.object({
   workflowId: z.string(),
@@ -96,6 +108,21 @@ function changed(): ApiFailure {
   );
 }
 
+/** 재인식 취소는 같은 계정·관점·요청의 개인 실행에만 적용합니다. */
+function pageRetryKey(request: NotificationCancelRetryRequest): string {
+  const scope = request.expectedScope;
+  return JSON.stringify([
+    request.connectionId,
+    scope.userId,
+    scope.tenant,
+    scope.profileId,
+    scope.policyRevision,
+    scope.accessRevision ?? null,
+    request.workflowId,
+    request.requestId,
+  ]);
+}
+
 /** 서버의 알림·페이지 확인·승인 영수증을 소유하고 실행은 기존 개인 실행기에 연결합니다. */
 export class NotificationService {
   readonly #connection: Connection;
@@ -103,22 +130,37 @@ export class NotificationService {
   readonly #device: NotificationDevice;
   readonly #recovery: ProcessRecovery;
   readonly #requests = new Set<AbortController>();
+  readonly #contentReader: NotificationContentReader;
   readonly #starts = new ExecutionStarts();
   readonly #flushes = new ExecutionStarts();
+  readonly #pageOcr: Pick<SourcePageOcrService, 'run' | 'stop'> | undefined;
+  readonly #pageRetries = new Map<string, AbortController>();
 
   constructor(
     connection: Connection,
     analysis: Analysis,
     device: NotificationDevice,
     recovery: ProcessRecovery,
+    pageOcr?: Pick<SourcePageOcrService, 'run' | 'stop'>,
   ) {
     this.#connection = connection;
     this.#analysis = analysis;
     this.#device = device;
     this.#recovery = recovery;
+    this.#pageOcr = pageOcr;
+    this.#contentReader = new NotificationContentReader(
+      (context: AnalysisContext, path: string): Promise<ReadApiResult> =>
+        this.#api(context, path),
+    );
     connection.onScopeChanged((): void => {
       for (const controller of this.#requests) controller.abort();
     });
+  }
+
+  /** 종료 시 후보 생성만 중단하며 원본·보관 보고·서버 보정은 변경하지 않습니다. */
+  async stop(): Promise<void> {
+    for (const controller of this.#pageRetries.values()) controller.abort();
+    await this.#pageOcr?.stop();
   }
 
   /** 다른 PC의 claim을 화면에서 복사해도 이 PC의 직접 분석 실행으로 우회할 수 없습니다. */
@@ -185,14 +227,33 @@ export class NotificationService {
     path: string,
     body?: Record<string, unknown>,
   ): Promise<{ ok: true; value: unknown } | ApiFailure> {
-    return readScopedApiJson(this.#connection, this.#requests, context, path, {
-      schema: envelope,
-      changed,
-      invalidMessage: '알림 응답을 확인할 수 없습니다.',
-      profile: 'get-query',
-      body,
-      maxResponseBytes: 8 * 1024 * 1024,
-    });
+    const result = await readScopedApiJson(
+      this.#connection,
+      this.#requests,
+      context,
+      path,
+      {
+        schema: envelope,
+        changed,
+        invalidMessage: '알림 응답을 확인할 수 없습니다.',
+        profile: 'get-query',
+        body,
+        maxResponseBytes: 8 * 1024 * 1024,
+      },
+    );
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        correction_basis_changed:
+          '수정된 문자를 다시 확인한 뒤 승인해 주세요. 구버전 앱이라면 새 버전으로 열어 주세요.',
+        approval_basis_changed:
+          '승인한 수정본과 현재 처리 기준이 다릅니다. 최신 검토 기록을 다시 확인해 주세요.',
+        page_approval_required:
+          '확인 전이거나 보류한 쪽이 남아 있습니다. 해당 쪽을 다시 인식하거나 직접 수정한 뒤 문자 사용을 확인해 주세요.',
+      };
+      const message = messages[result.error.code];
+      if (message) return { ...result, error: { ...result.error, message } };
+    }
+    return result;
   }
 
   /** 재연결은 저장된 로컬 보고를 같은 멱등 키로 전송하며 실행·승인은 재시도하지 않습니다. */
@@ -237,7 +298,7 @@ export class NotificationService {
     const review =
       run.receiptState === 'saved' &&
       run.reference &&
-      conversionNeedsPageApproval(run.report);
+      conversionNeedsContentReview(run.report);
     const failure = ['failed', 'cancelled', 'report_unconfirmed'].includes(
       run.state,
     );
@@ -320,27 +381,10 @@ export class NotificationService {
     const context = await this.#context(request);
     if ('ok' in context) return context;
     await this.flush(context);
-    const result = await this.#api(
-      context,
-      `notification-workflows/${request.workflowId}`,
-    );
+    const result = await this.#contentReader.read(context, request.workflowId);
     if (!result.ok) return result;
-    const data = notificationDetailDataSchema.parse(result.value);
-    const { workflow, conversion } = data;
-    if (
-      workflow.workflow_id !== request.workflowId ||
-      !!workflow.conversion_ref !== !!conversion ||
-      (conversion &&
-        workflow.conversion_ref &&
-        (conversion.manifest.id !== workflow.conversion_ref.conversion_id ||
-          conversion.revision !== workflow.conversion_ref.conversion_revision ||
-          JSON.stringify(conversion.manifest.source_ref) !==
-            JSON.stringify(workflow.source_ref)))
-    )
-      return apiFailure(
-        'source_mismatch',
-        '고정 원본과 변환 보고의 연결을 확인할 수 없습니다.',
-      );
+    const { data } = result;
+    const { workflow } = data;
     if (workflow.approval) {
       const pending = (
         await readProcessJournal(
@@ -395,6 +439,143 @@ export class NotificationService {
       : result;
   }
 
+  /** 원래 보고는 보존하고 사용자가 본 판본에 수정 문자를 별도로 저장합니다. */
+  async correct(
+    request: NotificationCorrectRequest,
+  ): Promise<NotificationMutationResult> {
+    const finish = this.#starts.begin(
+      `correct:${request.connectionId}:${request.workflowId}`,
+    );
+    if (!finish)
+      return apiFailure(
+        'correction_busy',
+        '수정 문자의 저장 결과를 확인하고 있습니다.',
+      );
+    try {
+      const context = await this.#context(request, true);
+      if ('ok' in context) return context;
+      // 먼저 최신 판본으로 바꾸지 않습니다. 응답 유실 재시도도 원래 요청으로 검증합니다.
+      const result = await this.#api(
+        context,
+        `notification-workflows/${request.workflowId}/corrections`,
+        {
+          request_id: request.requestId,
+          expected_revision: request.expectedRevision,
+          ...notificationLocation(request),
+          method: request.method,
+          content: request.content,
+          warnings: request.warnings ?? [],
+        },
+      );
+      if (!result.ok) return result;
+      const data = notificationMutationDataSchema.parse(result.value);
+      if (
+        data.workflow.workflow_id !== request.workflowId ||
+        !data.workflow.pages.some(
+          (page: NotificationWorkflow['pages'][number]): boolean =>
+            notificationLocationKey(page) ===
+              notificationLocationKey(request) && !!page.correction_ref,
+        )
+      )
+        return apiFailure(
+          'correction_unconfirmed',
+          '수정 문자의 저장 여부를 다시 확인해 주세요. 원래 요청은 새로 만들지 않습니다.',
+        );
+      return { ok: true, data };
+    } finally {
+      finish();
+    }
+  }
+
+  /** 선택한 원본 한 쪽을 개인 PC에서 다시 읽고 저장 전 검토 후보만 반환합니다. */
+  async retryPage(
+    request: NotificationRetryPageRequest,
+  ): Promise<NotificationRetryPageResult> {
+    if (!this.#pageOcr)
+      return apiFailure(
+        'page_ocr_unavailable',
+        '이 PC의 문자 인식 실행기를 준비해 주세요. 문자를 직접 수정할 수도 있습니다.',
+      );
+    const finish = this.#starts.begin('page-ocr');
+    if (!finish)
+      return apiFailure(
+        'conversion_busy',
+        '이 PC에서 다른 쪽의 문자를 다시 인식하고 있습니다.',
+      );
+    const controller = new AbortController();
+    const key = pageRetryKey(request);
+    this.#pageRetries.set(key, controller);
+    this.#requests.add(controller);
+    try {
+      const context = await this.#context(request, true);
+      if ('ok' in context) return context;
+      const detail = await this.read(request);
+      if (!detail.ok) return detail;
+      const workflow = detail.data.workflow;
+      if (
+        workflow.state !== 'review' ||
+        workflow.blocked_reason ||
+        workflow.revision !== request.expectedRevision ||
+        !workflow.pages.some(
+          (page: NotificationWorkflow['pages'][number]): boolean =>
+            page.page === request.page,
+        )
+      )
+        return apiFailure(
+          'conflict',
+          '검토 상태가 변경되었습니다. 최신 상태에서 다시 문자 인식을 시작해 주세요.',
+        );
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      if (controller.signal.aborted)
+        return apiFailure(
+          'cancelled',
+          '문자 재인식을 취소했습니다. 보관 문자는 그대로입니다.',
+        );
+      const result = await this.#pageOcr.run(
+        context,
+        workflow.source_ref,
+        request.page,
+        request.requestId,
+        controller.signal,
+      );
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      if (controller.signal.aborted)
+        return apiFailure(
+          'cancelled',
+          '문자 재인식을 취소했습니다. 보관 문자는 그대로입니다.',
+        );
+      if (!result.ok) return result;
+      const current = await this.read(request);
+      if (!current.ok) return current;
+      if (current.data.workflow.revision !== request.expectedRevision)
+        return apiFailure(
+          'conflict',
+          '재인식 중 검토 상태가 변경되었습니다. 새 상태를 확인한 뒤 다시 시도해 주세요.',
+        );
+      if (result.data.page !== request.page)
+        return apiFailure(
+          'invalid_page',
+          '선택한 쪽의 재인식 결과를 확인할 수 없습니다.',
+        );
+      return result;
+    } finally {
+      this.#pageRetries.delete(key);
+      this.#requests.delete(controller);
+      finish();
+    }
+  }
+
+  /** 취소 요청으로 보관된 페이지 판단이나 수정 결과를 지우지 않습니다. */
+  async cancelRetry(
+    request: NotificationCancelRetryRequest,
+  ): Promise<NotificationCancelRetryResult> {
+    const context = await this.#context(request, true);
+    if ('ok' in context) return context;
+    const controller = this.#pageRetries.get(pageRetryKey(request));
+    controller?.abort();
+    return { ok: true, data: { cancelled: !!controller } };
+  }
+
   /** 승인 전 요청을 보호 저장하고 명시 재시도도 같은 요청만 사용합니다. */
   async approve(
     request: NotificationApproveRequest,
@@ -420,10 +601,12 @@ export class NotificationService {
         ).find(
           (item: RecoveryEntry): boolean => item.key === request.workflowId,
         ) ?? null;
-      let intent = {
+      let intent: z.infer<typeof pendingApproval> = {
         workflowId: request.workflowId,
         requestId: request.requestId,
         expectedRevision: request.expectedRevision,
+        correctionRefs: request.correctionRefs,
+        correctionsRevision: request.correctionsRevision,
         ...(request.targetDocument
           ? { targetDocument: request.targetDocument }
           : {}),
@@ -459,6 +642,12 @@ export class NotificationService {
           expected_revision: intent.expectedRevision,
           device_id: this.#device.deviceId,
           device_name: this.#device.deviceName,
+          ...(intent.correctionsRevision
+            ? { corrections_revision: intent.correctionsRevision }
+            : {}),
+          ...(intent.correctionRefs
+            ? { correction_refs: intent.correctionRefs }
+            : {}),
           ...(intent.targetDocument
             ? { target_document: intent.targetDocument }
             : {}),
@@ -784,13 +973,7 @@ export class NotificationService {
     if ('ok' in context) return context;
     const detail = await this.read(request);
     if (!detail.ok) return detail;
-    if (
-      !detail.data.workflow.pages.some(
-        (page: NotificationWorkflow['pages'][number]): boolean =>
-          page.page === request.page,
-      )
-    )
-      return apiFailure('invalid_page', '검토 대상 쪽을 선택해 주세요.');
+    // 원본 API가 고정 판본·실제 페이지 범위를 검증하므로 정상 페이지도 대조할 수 있습니다.
     const source = detail.data.workflow.source_ref;
     const query = new URLSearchParams({
       source_sha256: source.source_sha256,

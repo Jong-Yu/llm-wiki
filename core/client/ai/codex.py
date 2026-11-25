@@ -303,18 +303,23 @@ class CodexAdapter:
         self._question_profile_checked = False
 
     async def _check(self, environment):
+        return await self._check_cli_capabilities(environment, command=cli_command, execute=_execute,
+            help_arguments=("exec", "--help"), required_flags=_REQUIRED_FLAGS)
+
+    async def _check_cli_capabilities(self, environment, *, command, execute, help_arguments, required_flags):
+        """제공자별 실행 경계를 유지하며 경로를 재확인하고 성공한 지원 옵션 검사만 보관한다."""
         try:
-            executable = cli_command(self.cli)
+            executable = command(self.cli)
         except ClientPlatformError as error:
             raise AIAdapterError(str(error)) from None
         if self._capabilities is None:
-            for arguments in (("--version",), ("exec", "--help")):
-                code, output, _ = await _execute([*executable, *arguments], directory=None, environment=environment)
+            for arguments in (("--version",), help_arguments):
+                code, output, _ = await execute([*executable, *arguments], directory=None, environment=environment)
                 if code != 0:
                     raise AIAdapterError("ai_cli_unavailable")
                 if arguments[0] == "--version":
                     version = output.decode("utf-8").strip()[:200]
-                elif not all(flag in output.decode("utf-8") for flag in _REQUIRED_FLAGS):
+                elif not all(flag in output.decode("utf-8") for flag in required_flags):
                     raise AIAdapterError("ai_cli_incompatible")
             self._capabilities = executable, version
         return self._capabilities

@@ -343,13 +343,13 @@ class CheckpointTest(unittest.TestCase):
 
 
 class WorkerTest(unittest.IsolatedAsyncioTestCase):
-    async def test_failure_before_first_unit_has_public_error_without_conversion_method(self):
+    async def test_failure_before_first_unit_retains_attempt_method_without_claiming_conversion(self):
         from core.client.source_conversion_report import empty_conversion
         source = dict(source_id='a' * 32, source_version='b' * 32,
                       source_sha256='c' * 64, registration_revision='d' * 64)
         catalog = {'source_id': source['source_id'], 'current_version': source['source_version'],
                    'registration_revision': source['registration_revision'],
-                   'versions': [{**source, 'format': 'pdf', 'size_bytes': 10}]}
+                   'versions': [{**source, 'format': 'pdf', 'size_bytes': 10}], 'access': {'user_id': 'fixture'}}
         failure = empty_conversion('pdf', 'conversion_checkpoint_locked')
         failure['worker_failure'] = {'code': 'conversion_checkpoint_locked', 'exit_code': 1, 'winerror': 32}
         with TemporaryDirectory() as temporary:
@@ -359,7 +359,11 @@ class WorkerTest(unittest.IsolatedAsyncioTestCase):
                 result = await convert_source(base_url='http://127.0.0.1:8766', tenant='test', token='private',
                     source_ref=source, work_dir=Path(temporary).resolve() / 'work', http=object())
         self.assertFalse(result['ok'])
-        self.assertIsNone(result['conversion']['method'])
+        self.assertEqual(result['conversion']['method'], 'pdf_text')
+        self.assertEqual(result['conversion']['units'], [])
+        self.assertFalse(result['conversion']['complete'])
+        self.assertEqual(result['state'], 'failed')
+        self.assertIn('conversion_attempt_no_text', result['conversion']['warnings'])
         self.assertEqual(result['error'], {'code': 'conversion_checkpoint_locked'})
 
     async def test_worker_checkpoint_failure_retains_units_and_safe_reason(self):
@@ -413,11 +417,22 @@ sys.exit(worker.main())
 
 
 class RegistrationFlowTest(unittest.IsolatedAsyncioTestCase):
+    async def workflow_mutation(self, http, path, operation, **values):
+        current = await http.get(path)
+        self.assertEqual(current.status_code, 200, current.text)
+        workflow = current.json()['data']['workflow']
+        response = await http.post(path + '/' + operation, json=dict(request_id=uuid4().hex,
+            expected_revision=workflow['revision'], **values))
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()['data']['workflow']
+
     async def test_actual_upload_worker_report_response_loss_and_preserved_markdown_revision(self):
-        await self.registration_flow('docx')
+        await self.registration_flow('docx', manual_content_appendix=(
+            '사용자 직접 보완: Unread header condition.\nFootnote exception.\nEndnote exception.\n'
+            'Reviewer comment.\n삽입 기록: Inserted condition.\n삭제 기록: Deleted condition.\n그림: 흰색 빈 이미지.'))
 
     async def test_actual_xlsx_upload_worker_report_and_preserved_markdown_revision(self):
-        await self.registration_flow('xlsx')
+        await self.registration_flow('xlsx', manual_content_appendix='사용자 직접 보완: 계산 표 J14의 =1+2 계산 결과는 3.')
 
     async def test_complex_xlsx_structure_and_cells_reach_exact_markdown_revision(self):
         from .test_source_conversion_xlsx_complex import complex_xlsx_bytes
@@ -427,7 +442,7 @@ class RegistrationFlowTest(unittest.IsolatedAsyncioTestCase):
         from .test_source_conversion_xlsx_sheets import multisheet_bytes
         await self.registration_flow('xlsx', original=multisheet_bytes(), expected_state='complete')
 
-    async def registration_flow(self, format, *, original=None, expected_state='partial'):
+    async def registration_flow(self, format, *, original=None, expected_state='partial', manual_content_appendix=None):
         import httpx2
         from core.common.access import access_dict
         from core.modules.access.policy import AccessPolicy
@@ -496,10 +511,33 @@ class RegistrationFlowTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([item['location'] for item in stored['units']], [item['location'] for item in expected_report['units']])
                 self.assertEqual(json.loads(Path(converted['report_file']).read_text()),
                                  report_body(conversion, source, converted['request_id'], None))
-                response = await http.post(prefix + '/analysis-jobs/registrations', json=dict(request_id=uuid4().hex,
+                request_id, execution_claim_id, workflow_path = uuid4().hex, None, None
+                expected_body = '\n\n'.join(unit['content'] for unit in conversion['units'])
+                if not conversion['complete'] and conversion['unread_ranges']:
+                    # 누락이 있는 옛 fixture도 현재 제품과 같이 직접 입력을 확정한다.
+                    # 합성 작성자가 헤더/각주/수식 누락을 실제 보완한 전체 본문을 선택한다.
+                    self.assertTrue(manual_content_appendix)
+                    manual_content = expected_body + '\n\n' + manual_content_appendix
+                    expected_body = manual_content
+                    workflow_path = prefix + '/notification-workflows/' + converted['receipt']['conversion_ref']['conversion_id']
+                    selected = await self.workflow_mutation(http, workflow_path, 'corrections',
+                        whole_document=True, method='manual', content=manual_content)
+                    correction = selected['pages'][0]['correction_ref']
+                    await self.workflow_mutation(http, workflow_path, 'pages', decisions=[dict(
+                        whole_document=True, correction_ref=correction, state='usable')])
+                    await self.workflow_mutation(http, workflow_path, 'approve', device_id='1' * 32,
+                        device_name='Synthetic owner', target_document='conditions.md',
+                        correction_refs=[dict(whole_document=True, correction_ref=correction)])
+                    granted = await self.workflow_mutation(http, workflow_path, 'claim',
+                        device_id='1' * 32, device_name='Synthetic owner')
+                    request_id, execution_claim_id = granted['resume_request_id'], granted['execution']['claim_id']
+                response = await http.post(prefix + '/analysis-jobs/registrations', json=dict(request_id=request_id,
                     source_ref=source, title='조건 보존', document='conditions.md', conversion_ref=converted['receipt']['conversion_ref']))
                 self.assertEqual(response.status_code, 201, response.text)
                 created = response.json()['data']
+                if workflow_path:
+                    await self.workflow_mutation(http, workflow_path, 'execution',
+                        claim_id=execution_claim_id, job_id=created['job_id'])
                 download = await http.get(prefix + f"/sources/{source['source_id']}/versions/{source['source_version']}/file")
                 self.assertEqual(download.content, original)
                 rejected = await convert_source(base_url=base, tenant=tenant, token=user['token'],
@@ -510,7 +548,8 @@ class RegistrationFlowTest(unittest.IsolatedAsyncioTestCase):
             def authorize(permission=None):
                 return access_dict(policy.authorize(user['token'], tenant, permission or 'source_write'))
             jobs = JobStore(scope.store, rulesets=rules); args = dict(tenant=tenant, user_id=user['user_id'])
-            claimed = jobs.claim(created['job_id'], **args, expected_job_revision=created['job_revision'], authorize=authorize)
+            claimed = jobs.claim(created['job_id'], **args, expected_job_revision=created['job_revision'], authorize=authorize,
+                                 execution_claim_id=execution_claim_id)
             inputs = InputStore(scope.store, rules, jobs=jobs)
             fixed = inputs.prepare(created['job_id'], **args, run_id=claimed['run_id'],
                 expected_job_revision=claimed['job_revision'], stage='prepare_wiki', authorize=authorize)
@@ -523,10 +562,11 @@ class RegistrationFlowTest(unittest.IsolatedAsyncioTestCase):
                 expected_revision=None, authorize=authorize)
             self.assertTrue(saved['saved'], saved)
             document = scope.store.read('conditions.md')
-            self.assertEqual(parse_document(document.content).body, '\n\n'.join(unit['content'] for unit in conversion['units']))
+            self.assertEqual(parse_document(document.content).body, expected_body)
             report = jobs.query(created['job_id'], **args)['conversion']
             self.assertEqual(report['first_markdown']['revision'], document.revision)
             self.assertEqual(report['source_ref'], source)
             self.assertEqual(report['warnings'], conversion['warnings'])
             self.assertEqual(report['unread_ranges'], conversion['unread_ranges'])
+            self.assertEqual(report['complete'], conversion['complete'])
             self.assertEqual(len(list((scope.store.data_dir / '_sources').iterdir())), 1)

@@ -4,8 +4,8 @@
 """실제 제공하는 작업 접수 모델. AI 실행·저장 완료를 임의 생성하지 않는다."""
 
 from typing import Literal
-from pydantic import Field, JsonValue, field_validator
-from core.api.schemas import Access, Model
+from pydantic import Field, JsonValue
+from core.api.schemas import Access, Model, PaginationQuery
 from core.api.v1.analysis_plans.schemas import SourceRef as RegistrationSourceRef, ConversionRef
 
 
@@ -43,16 +43,8 @@ class Cancel(Model):
     reason: str = Field("", max_length=1000)
 
 
-class ListQuery(Model):
-    limit: int = Field(20, ge=1, le=50, strict=False)
-    cursor: str | None = Field(None, min_length=1, max_length=16384)
-
-    @field_validator("limit", mode="before")
-    @classmethod
-    def integer_string(cls, value):
-        if isinstance(value, str) and (not value.isascii() or not value.isdecimal()):
-            raise ValueError("limit must be an integer string")
-        return value
+class ListQuery(PaginationQuery):
+    pass
 
 
 class SourceRef(Model):

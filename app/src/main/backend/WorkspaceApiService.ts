@@ -207,7 +207,7 @@ const routes: { [O in Operation]: RouteSpec<O> } = {
     'GET',
     ['analysis-jobs', 'job_id', 'artifacts/requests', 'request_id'],
   ],
-  search: ['GET', 'documents/search', ['query', 'limit']],
+  search: ['GET', 'documents/search', ['query', 'limit', 'group_sources']],
   ontology: ['GET', 'documents/ontology', ['document']],
   connections: ['GET', 'documents/connections', ['document', 'limit']],
   context: ['POST', 'knowledge/context/query'],
@@ -296,6 +296,19 @@ function unknownOutcome(
       ...(recovery ? { recovery } : {}),
     },
   };
+}
+
+/** 늦은 조회는 숨기고 이미 보낸 쓰기는 원래 범위의 영수증으로 확인하게 합니다. */
+function scopeChangedOutcome(
+  mutation: boolean,
+  recovery?: WorkspaceRecovery,
+): Failure {
+  return mutation
+    ? unknownOutcome(undefined, recovery)
+    : apiFailure(
+        'scope_changed',
+        '조회 중 연결 범위가 변경되어 이전 결과를 숨겼습니다.',
+      );
 }
 
 /** 외부 실패 본문을 반사하지 않고 상태·안전한 코드·재조회 기준만 전달합니다. */
@@ -412,11 +425,19 @@ function planningRecovery(
     : { operation: 'analysisPlan', input: { plan_id: fixedId } };
 }
 
+type Connection = Pick<
+  ConnectionService,
+  | 'analysisContext'
+  | 'isAnalysisCurrent'
+  | 'invalidateApiScope'
+  | 'onScopeChanged'
+>;
+
 /** 허용 업무별 HTTP 요청을 main 인증/선택 수명에 묶고 쓰기를 한 번만 실행합니다. */
 export class WorkspaceApiService {
-  #connection: ConnectionService;
+  #connection: Connection;
   #requests = new Set<AbortController>();
-  constructor(connection: ConnectionService) {
+  constructor(connection: Connection) {
     this.#connection = connection;
     connection.onScopeChanged((): void => {
       for (const controller of this.#requests) controller.abort();
@@ -519,12 +540,7 @@ export class WorkspaceApiService {
           /* 오류 본문을 읽지 못해도 HTTP 권한 거부는 유지합니다. */
         }
         if (!this.#connection.isAnalysisCurrent(context))
-          return mutation
-            ? unknownOutcome(undefined, recovery)
-            : apiFailure(
-                'scope_changed',
-                '조회 중 연결 범위가 변경되어 이전 결과를 숨겼습니다.',
-              );
+          return scopeChangedOutcome(mutation, recovery);
         const failure = workspaceHttpFailure(
           response.status,
           value,
@@ -539,12 +555,7 @@ export class WorkspaceApiService {
       }
       const value = await readWorkspaceJsonBody(response);
       if (!this.#connection.isAnalysisCurrent(context))
-        return mutation
-          ? unknownOutcome(undefined, recovery)
-          : apiFailure(
-              'scope_changed',
-              '조회 중 연결 범위가 변경되어 이전 결과를 숨겼습니다.',
-            );
+        return scopeChangedOutcome(mutation, recovery);
       const parsed = envelopeSchema.parse(value);
       const access = accessSchema.parse(parsed.data.access);
       // 지도 페이지는 전체 지식 JSON으로 위장하지 않고 별도 경량 계약까지 검사합니다.
@@ -613,10 +624,7 @@ export class WorkspaceApiService {
     } catch (error: unknown) {
       if (mutation) return unknownOutcome(undefined, recovery);
       if (!this.#connection.isAnalysisCurrent(context))
-        return apiFailure(
-          'scope_changed',
-          '조회 중 연결 범위가 변경되어 이전 결과를 숨겼습니다.',
-        );
+        return scopeChangedOutcome(false);
       if (timeout.aborted)
         return apiFailure(
           'timeout',

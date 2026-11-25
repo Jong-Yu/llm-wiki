@@ -1,9 +1,6 @@
 import type { z } from 'zod';
 import { sameAccessRevision } from '@contracts/connection.contract';
-import type {
-  WorkspaceRequest,
-  WorkspaceScope,
-} from '@contracts/workspace.contract';
+import type { WorkspaceRequest } from '@contracts/workspace.contract';
 import { workspaceGateway } from '@renderer/platform/workspace';
 import type {
   OntologyOutcome,
@@ -22,17 +19,6 @@ export type CleanupOperation = Extract<
       | 'cleanupUndo';
   }
 >;
-
-/** 사용자·공간·관점 기준만 보내며 인증 비밀과 UI 권한 목록은 보내지 않습니다. */
-export function cleanupScope(scope: OntologyScope): WorkspaceScope {
-  return {
-    userId: scope.userId,
-    tenant: scope.tenant,
-    profileId: scope.profileId,
-    policyRevision: scope.policyRevision,
-    ...(scope.accessRevision ? { accessRevision: scope.accessRevision } : {}),
-  };
-}
 
 /** 저장은 한 번만 전송하고 응답 유실·형식 오류는 영수증 조회가 필요한 상태로 돌립니다. */
 export async function executeCleanup<T>(

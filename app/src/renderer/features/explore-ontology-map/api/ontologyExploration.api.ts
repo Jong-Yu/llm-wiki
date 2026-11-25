@@ -15,7 +15,10 @@ import type {
 import { sameAccessRevision } from '@contracts/connection.contract';
 import type { WorkspaceRequest } from '@contracts/workspace.contract';
 import { workspaceGateway } from '@renderer/platform/workspace';
-import { validateOntologyScope } from './ontologyMap.api';
+import {
+  validateOntologyScope,
+  workspaceScopeForOntology,
+} from './ontologyMap.api';
 import type {
   OntologyOutcome,
   OntologyScope,
@@ -38,15 +41,7 @@ async function executePage<T>(
     const result = await workspaceGateway.execute({
       ...request,
       connectionId: scope.connectionId,
-      expectedScope: {
-        userId: scope.userId,
-        tenant: scope.tenant,
-        profileId: scope.profileId,
-        policyRevision: scope.policyRevision,
-        ...(scope.accessRevision
-          ? { accessRevision: scope.accessRevision }
-          : {}),
-      },
+      expectedScope: workspaceScopeForOntology(scope),
     });
     const after = await validateOntologyScope(scope);
     if (!after.ok) return after;

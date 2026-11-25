@@ -2,7 +2,7 @@
 
 호출 입구는 run_analysis다. 실제 모델 실행은 adapter.run에, 입력 확인은
 inputs/assembly에, 저장은 서버의 기존 결과 도구에 맡긴다. 토큰은 AI에 넘기지 않는다.
-이번 어댑터는 UTF-8 원본과 대상 문서 한 개를 처리하며 원문을 임의로 분할하지 않는다.
+이번 어댑터는 대상 문서 한 개를 처리하며 큰 고정 입력은 검증된 범위로 나누어 처리한다.
 """
 
 import asyncio
@@ -167,6 +167,10 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                         "request_id": uuid4().hex, "document": document,
                         "expected_revision": target.get("source_revision"),
                         "content": captured["components"]["data/registration.md"]}
+                    if captured["manifest"].get("input_mode") == "registration-reference-v1":
+                        arguments.pop("content")
+                        arguments["content_ref"] = {"component": "data/registration.md",
+                            "sha256": captured["manifest"]["components"]["data/registration.md"]["sha256"]}
                     await timings.wait("currentness", _current(client, common, revision), operation="job", stage=stage)
                     lease.check()
                     receipt = await timings.wait("storage", _store_result(client, "analysis_job_wiki_write",
@@ -174,9 +178,52 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                     receipts.append(receipt)
                     revision = receipt["job_revision"]
                     continue
-                with timings.measure("preparation", operation="assemble_input", stage=stage):
-                    assembled = assemble_input(fixed, stage_directory, stage=stage, target_document=document,
-                                               input_view=input_view, rules_view=rules_view)
+                try:
+                    with timings.measure("preparation", operation="assemble_input", stage=stage):
+                        assembled = assemble_input(fixed, stage_directory, stage=stage, target_document=document,
+                                                   input_view=input_view, rules_view=rules_view)
+                except AnalysisClientError as error:
+                    if stage != "extract_ontology" or error.code != "analysis_prompt_limit":
+                        raise
+                    from .segmented_input import ENABLED
+                    if not ENABLED:
+                        raise
+                    from .segmented_workflow import run as run_segmented
+                    captured = load_input(fixed, stage_directory)
+                    if any(captured["manifest"]["actor"][key] != value for key, value in initial_profile.items()):
+                        raise AnalysisClientError("analysis_profile_changed")
+                    # 하나의 대화 세션이 전체 문서를 읽었다고 재사용하지 않는다.
+                    if hasattr(underlying_adapter, "persist_session"):
+                        underlying_adapter.persist_session = False
+
+                    async def segment_current():
+                        await timings.wait("currentness", _current(client, common, revision),
+                                           operation="job", stage=stage)
+                        await timings.wait("currentness", _current_input(client, common, selected, fixed, revision),
+                                           operation="input", stage=stage)
+
+                    result = await run_segmented(fixed=fixed, directory=stage_directory,
+                        job_directory=directory.parent, document=document, adapter=adapter, lease=lease,
+                        current=segment_current, executions=executions,
+                        execution_config_sha256=execution_config_sha256, input_view=input_view,
+                        rules_view=rules_view, semantic_check=semantic_check, timings=timings)
+                    target = next(item for item in captured["manifest"]["dependency"]["documents"]
+                                  if item["document"] == document)
+                    arguments = {**common, **selected, "expected_job_revision": revision,
+                        "bundle_id": fixed["bundle_id"], "bundle_revision": fixed["bundle_revision"],
+                        "request_id": uuid4().hex, "document": document,
+                        "expected_revision": target["source_revision"],
+                        "expected_state_revision": target["state_revision"],
+                        "execution": result["execution"], **result["payload"]}
+                    await segment_current()
+                    lease.check()
+                    receipt = await timings.wait("storage", _store_result(client, "analysis_job_ontology_generate",
+                        arguments, stage_directory), stage=stage, operation="save_complete_segmented_graph")
+                    receipts.append(receipt)
+                    revision = receipt["job_revision"]
+                    _record(stage_directory / "finished.json", {"status": "stored",
+                        "request_id": arguments["request_id"], "segmented": True})
+                    continue
                 if any(assembled["manifest"]["actor"][key] != value for key, value in initial_profile.items()):
                     raise AnalysisClientError("analysis_profile_changed")
                 _record(stage_directory / "assembly.json", assembled["assembly"])

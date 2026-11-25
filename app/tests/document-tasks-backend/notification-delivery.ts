@@ -140,6 +140,7 @@ export async function verifyNotificationDelivery(): Promise<void> {
           access,
           conversion: null,
           events: [],
+          corrections: [],
           workflow: {
             workflow_id: workflowId,
             revision,

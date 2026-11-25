@@ -226,7 +226,8 @@ async function mount(): Promise<void> {
             <ImportDocumentProgress
               scope={scope}
               registered={registered}
-              draft={draft}
+              targetDocument={draft.targetDocument}
+              session={session}
               onNewRegistration={(): void => {}}
             />
           </section>

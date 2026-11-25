@@ -3,8 +3,9 @@ from hashlib import sha256
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import httpx2
@@ -20,7 +21,7 @@ from core.runtime.application import create_application
 from core.runtime.extraction_schema import build_submission_schema
 from core.modules.documents.metadata import parse_document
 from core.modules.analysis_jobs.store import JobStore
-from core.client.transport import AnalysisClientError, client_error_code
+from core.client.transport import AnalysisClientError, client_error_code, tool_call
 
 
 class SyntheticAdapter:
@@ -49,6 +50,26 @@ class SyntheticAdapter:
 
 
 class ClientIntegration(unittest.IsolatedAsyncioTestCase):
+    async def test_input_limit_is_retained_without_exposing_remote_error_text(self):
+        from core.mcp.results import _error_details, _result
+        from core.modules.analysis_inputs.contracts import InputLimitError
+        response = _result({'ok': False, 'error': _error_details(
+            InputLimitError('private source path'), 'analysis_job_input_prepare')})
+        client = SimpleNamespace(call_tool=AsyncMock(return_value=response))
+        with self.assertRaises(AnalysisClientError) as stopped:
+            await tool_call(client, 'analysis_job_input_prepare', {})
+        self.assertEqual(stopped.exception.code, 'input_limit')
+        self.assertNotIn('private', str(stopped.exception))
+        client.call_tool.assert_awaited_once()
+        for value in ({'ok': False, 'error': {'code': 'private-token'}},
+                      {'error': {'code': 'input_limit'}},
+                      {'ok': False, 'error': 'private path'}):
+            client.call_tool.return_value = _result({'ok': False, **value}) if 'ok' in value else SimpleNamespace(
+                structured_content=value, is_error=True)
+            with self.assertRaises(AnalysisClientError) as hidden:
+                await tool_call(client, 'analysis_job_input_prepare', {})
+            self.assertEqual(hidden.exception.code, 'mcp_request_failed')
+
     async def test_signup_http_mcp_registration_personal_flow_and_no_repeat(self):
         await self.registration_flow('full')
 

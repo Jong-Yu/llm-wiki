@@ -91,7 +91,8 @@ def publish(service, job, request_id, payload):
     if len(names) >= MAX_RESULTS:
         raise ResultError("result_limit")
     stored_payload = payload
-    if payload["stage"] == "prepare_wiki" and job["events"][0]["details"].get("registration"):
+    if (payload["stage"] == "prepare_wiki" and "content" in payload
+            and job["events"][0]["details"].get("registration")):
         # 기본 MD 본문은 고정 입력에 한 번 보관한다. 요청은 그 검증 가능한 판본을 참조한다.
         _, _, parts = files.load(service.store, service.jobs.job_root(job["job_id"]) / "inputs" / payload["bundle_id"],
                                  expected_revision=payload["bundle_revision"])

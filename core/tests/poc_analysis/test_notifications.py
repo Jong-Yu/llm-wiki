@@ -12,6 +12,7 @@ from core.api.v1.notifications.schemas import Approve, Claim, CreateWorkflow, Ex
 from core.modules.analysis_jobs.contracts import JobConflictError, JobValidationError
 from core.modules.analysis_jobs.store import JobStore
 from core.modules.analysis_plans.store import PlanStore
+from core.modules.analysis_plans.contracts import PlanCommand
 from core.modules.notifications.store import LOW, NotificationStore, identity, review_pages
 from core.tests.poc_analysis.test_registration import RegistrationTest
 
@@ -41,7 +42,10 @@ class NotificationTest(unittest.TestCase):
             unread_ranges=[f'page 1: {LOW}', f'page 2: {LOW}'], warnings=[LOW], units=[
                 dict(unit_id='page1', location=dict(kind='pages', start=1, end=1), content='Synthetic retained text one.'),
                 dict(unit_id='page2', location=dict(kind='pages', start=2, end=2), content='Synthetic retained text two.')])
-        result = PlanStore(self.store, self.actor, rulesets=self.rules).conversion(self.conversion_body, self.auth)
+        command = self.conversion_body.model_dump(exclude={"profile"})
+        before = deepcopy(command)
+        result = PlanStore(self.store, self.actor, rulesets=self.rules).conversion(command, self.auth)
+        self.assertEqual(command, before)
         self.reference = dict(conversion_id=result['manifest']['id'], conversion_revision=result['revision'])
         self.workflow_id = result['manifest']['id']
         self.request.update(source_ref=self.source, conversion_ref=self.reference)
@@ -49,6 +53,43 @@ class NotificationTest(unittest.TestCase):
 
     def detail(self):
         return self.service().detail(self.workflow_id)['workflow']
+
+    def test_conversion_command_and_stored_report_are_isolated_from_returned_manifest(self):
+        self.conversion()
+        command = self.conversion_body.model_dump(exclude={"profile"})
+        command['request_id'] = uuid4().hex
+        before = deepcopy(command)
+        plans = PlanStore(self.store, self.actor, rulesets=self.rules)
+        result = plans.conversion(body=command, authorize=self.auth)
+        stored = deepcopy(result['manifest'])
+        result['manifest']['warnings'].append('caller-only change')
+        result['manifest']['units'][0]['location']['start'] = 999
+        self.assertEqual(command, before)
+        self.assertEqual(plans.read('conversions', stored['id'])['manifest'], stored)
+        replay = plans.conversion(command, self.auth)
+        self.assertTrue(replay['replayed'])
+        self.assertEqual(replay['revision'], result['revision'])
+
+    def test_plain_plan_command_preserves_nullable_fields_and_detaches_result(self):
+        self.conversion()
+        plans = PlanStore(self.store, self.actor, rulesets=self.rules)
+        conversion = self.conversion_body.model_dump(exclude={"profile"})
+        conversion.update(request_id=uuid4().hex, complete=True, unread_ranges=[], warnings=[])
+        converted = plans.conversion(conversion, self.auth)
+        command: PlanCommand = dict(request_id=uuid4().hex, source_ref=deepcopy(self.source),
+            wiki_ref=None, conversion_ref=dict(conversion_id=converted['manifest']['id'],
+                conversion_revision=converted['revision']), locations=[], context_documents=[],
+            outputs=[dict(document='command-plan.md', title='Synthetic plan', purpose='Contract isolation',
+                          locations=[], outputs=['wiki', 'ontology'])])
+        before = deepcopy(command)
+        result = plans.create(body=command, authorize=self.auth)
+        result['manifest']['plan']['outputs'][0]['title'] = 'caller-only change'
+        self.assertEqual(command, before)
+        stored = plans.read('plans', result['manifest']['id'])
+        self.assertEqual(stored['manifest']['plan'], before)
+        replay = plans.create(command, self.auth)
+        self.assertTrue(replay['replayed'])
+        self.assertEqual(replay['revision'], result['revision'])
 
     def mutate(self, operation, model, **kwargs):
         body = model(request_id=uuid4().hex, expected_revision=self.detail()['revision'], **kwargs)
@@ -230,7 +271,7 @@ class NotificationTest(unittest.TestCase):
         old = self.conversion()
         self.approve()
         fresh = self.conversion_body.model_copy(update={'request_id': uuid4().hex})
-        PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh, self.auth)
+        PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh.model_dump(exclude={"profile"}), self.auth)
         with self.assertRaises(JobConflictError) as stale:
             self.grant()
         self.assertEqual(stale.exception.code, 'conversion_basis_changed')
@@ -297,7 +338,7 @@ class NotificationTest(unittest.TestCase):
         self.assertIn('execution_claim_consumed', attempts)
 
     def test_existing_report_explicit_initialization_preserves_manifest(self):
-        with patch('core.modules.notifications.store.review_pages', return_value=[]):
+        with patch('core.modules.notifications.store.review_targets', return_value=[]):
             original = self.conversion()
         self.assertNotIn('approval_workflow_id', original['manifest'])
         self.assertEqual(self.service().list()['items'], [])
@@ -327,7 +368,7 @@ class NotificationTest(unittest.TestCase):
         self.conversion(); self.approve()
         fresh = self.conversion_body.model_copy(update={'request_id': uuid4().hex})
         with patch.object(NotificationStore, 'database', side_effect=OSError('simulated delivery outage')):
-            PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh, self.auth)
+            PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh.model_dump(exclude={"profile"}), self.auth)
         with patch.object(NotificationStore, 'reconcile_locked', return_value=None):
             with self.assertRaises(JobConflictError) as stale:
                 self.grant()
@@ -338,7 +379,7 @@ class NotificationTest(unittest.TestCase):
         original = self.conversion(); approved = self.approve()
         before = self.service().list()['latest_sequence']
         fresh = self.conversion_body.model_copy(update={'request_id': uuid4().hex})
-        new = PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh, self.auth)
+        new = PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh.model_dump(exclude={"profile"}), self.auth)
         listing = self.service().list(filter='approval')
         self.assertEqual(listing['approval_count'], 1)
         self.assertEqual([item['workflow_id'] for item in listing['items']], [new['manifest']['id']])
@@ -375,7 +416,7 @@ class NotificationTest(unittest.TestCase):
         old_path = service.pending_path('conversion', old_id)
         original_pointer = json.loads(old_path.read_text())
         fresh = self.conversion_body.model_copy(update={'request_id': uuid4().hex})
-        new = PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh, self.auth)
+        new = PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh.model_dump(exclude={"profile"}), self.auth)
         first = service.list()
         self.assertEqual(first['approval_count'], 1)
         old_notice = next(item for item in first['items'] if item['workflow_id'] == old_id)
@@ -415,7 +456,7 @@ class NotificationTest(unittest.TestCase):
         claimed = self.jobs.claim(self.job_id, **self.scope, expected_job_revision=self.query()['job_revision'],
             authorize=self.auth, execution_claim_id=linked['execution']['claim_id'])
         fresh = self.conversion_body.model_copy(update={'request_id': uuid4().hex})
-        PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh, self.auth)
+        PlanStore(self.store, self.actor, rulesets=self.rules).conversion(fresh.model_dump(exclude={"profile"}), self.auth)
         old = self.service().detail(self.workflow_id)['workflow']
         self.assertEqual(old['state'], 'running')
         self.assertNotIn('blocked_reason', old)

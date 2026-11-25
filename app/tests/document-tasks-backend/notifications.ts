@@ -269,6 +269,8 @@ export async function verifyNotifications(
         latest_sequence: 0,
         access: actor,
       });
+    if (path.includes('/sources/') && path.endsWith('/pages'))
+      return envelope({ ...source, page_count: 170, access: actor });
     if (path.includes('/versions/')) {
       if (pageScopeChanges) current = false;
       return new Response(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), {
@@ -589,7 +591,8 @@ export async function verifyNotifications(
         },
       },
     );
-    assert.equal(posted.length, beforeFrameEvents);
+    assert.equal(posted.length, beforeFrameEvents + 1);
+    assert.ok(posted.at(-1)?.path.endsWith('/notification-workflows'));
     await service.observeConversion(context, task, failure);
     assert.equal(
       (await readProcessJournal(recovery, context, 'notification-outbox'))

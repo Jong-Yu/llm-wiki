@@ -13,12 +13,14 @@ from .contracts import JobValidationError, JobCorruptError, identifier, revision
 def registration(job):
     value = job["events"][0]["details"].get("registration")
     if value is not None:
-        validate(value)
+        validate(value, approved=True)
     return value
 
 
-def validate(value):
-    if (type(value) is not dict or set(value) != {"mode", "title", "conversion_ref"}
+def validate(value, *, approved=False):
+    fields = {"mode", "title", "conversion_ref"}
+    extra = {"approved_corrections", "approval_ref"}
+    if (type(value) is not dict or (set(value) != fields and not (approved and set(value) == fields | extra))
             or value["mode"] != "preserve" or type(value["title"]) is not str
             or not value["title"].strip() or len(value["title"]) > 200):
         raise JobValidationError("A preservation registration needs a bounded title.")
@@ -27,6 +29,43 @@ def validate(value):
         if type(ref) is not dict or set(ref) != {"conversion_id", "conversion_revision"}:
             raise JobValidationError("A complete conversion reference is required.")
         identifier(ref["conversion_id"]); revision(ref["conversion_revision"])
+    if 'approved_corrections' in value:
+        from core.modules.analysis_plans.corrections import validate_reference, target, target_key
+        fixed = value['approved_corrections']
+        approval = value['approval_ref']
+        if (ref is None or type(fixed) is not list or not fixed or len(fixed) > 10101
+                or type(approval) is not dict or set(approval) != {'workflow_id', 'request_id', 'approval_revision'}):
+            raise JobValidationError('A fixed page correction needs its server approval reference.')
+        identifier(approval['workflow_id']); identifier(approval['request_id']); revision(approval['approval_revision'])
+        if approval['workflow_id'] != ref['conversion_id']:
+            raise JobValidationError('The approved correction belongs to a different workflow.')
+        pages, identifiers = set(), set()
+        for item in fixed:
+            if type(item) is not dict or set(item) != set(target(item)) | {'correction_ref'}:
+                raise JobValidationError('An approved correction needs its exact content target.')
+            validate_reference(item['correction_ref'])
+            key = target_key(item)
+            if key in pages or item['correction_ref']['correction_id'] in identifiers:
+                raise JobValidationError('Approved corrections must identify distinct pages and records.')
+            pages.add(key); identifiers.add(item['correction_ref']['correction_id'])
+
+
+def freeze_approval(value, workflow):
+    """서버가 확인한 승인 참조만 최초 접수 사건에 고정한다. 외부 요청은 이를 받지 않는다."""
+    from core.common.json_codec import canonical_json_hash
+    from core.modules.analysis_plans.corrections import target
+    if workflow is None:
+        return value
+    approval = workflow['approval']
+    corrections = [dict(**target(page), correction_ref=dict(page['correction_ref']))
+                   for page in approval['pages'] if page.get('correction_ref')]
+    if not corrections:
+        return value
+    fixed = dict(value, approved_corrections=corrections, approval_ref=dict(
+        workflow_id=workflow['workflow_id'], request_id=approval['request_id'],
+        approval_revision=canonical_json_hash(approval)))
+    validate(fixed, approved=True)
+    return fixed
 
 
 def original_path(sources, source_id, source_version):
@@ -72,16 +111,30 @@ def materialize(jobs, job, actor):
     else:
         from core.modules.analysis_plans.store import PlanStore
         ref = value["conversion_ref"]
-        manifest, _, parts = PlanStore(jobs.store, actor)._load_locked("conversions", ref["conversion_id"], ref["conversion_revision"])
+        plans = PlanStore(jobs.store, actor)
+        manifest, _, parts = plans._load_locked("conversions", ref["conversion_id"], ref["conversion_revision"])
         if manifest["source_ref"] != reference:
             raise JobValidationError("The conversion belongs to a different original version.")
-        body = "\n\n".join(parts[unit["unit_id"]] for unit in manifest["units"])
+        corrected = []
+        units = manifest['units']
+        if value.get('approved_corrections'):
+            from core.modules.analysis_plans import corrections
+            raw_report = dict(manifest=manifest, components=parts)
+            corrected = [corrections.load(plans, item['correction_ref'],
+                workflow_id=value['approval_ref']['workflow_id'], source_ref=reference, conversion_ref=ref,
+                selected_target=corrections.target(item), report=raw_report) for item in value['approved_corrections']]
+            units, parts = corrections.effective_units(raw_report, corrected)
+        body = "\n\n".join(parts[unit["unit_id"]] for unit in units)
         report = {key: manifest[key] for key in ("method", "complete", "unread_ranges", "warnings",
                     "coverage", "original_coverage", "units")}
+        if corrected:
+            report['approved_corrections'] = [dict(**corrections.target(item), **{key: item[key] for key in
+                ('correction_ref', 'method', 'warnings', 'created_at', 'request_id')}) for item in corrected]
+            report['approval_ref'] = value['approval_ref']
+            report['effective_units'] = units
+            report['user_input_resolution'] = corrections.resolution(raw_report, corrected)
     content = render_document(body, title=value["title"], document_id=job["job_id"],
                               source={"id": source["source_id"], "version": source["source_version"]})
-    if len(content.encode("utf-8")) > 1024 * 1024:
-        raise JobValidationError("The preserved Markdown exceeds the document byte limit; it was not truncated.")
     return content, {"schema_version": 1, "mode": "preserve", "source_ref": reference,
         "conversion_ref": value["conversion_ref"], "author": "AI", "actor": job["actor"],
         "semantic_validation": "not_run", "body_sha256": sha256(body.encode()).hexdigest(),

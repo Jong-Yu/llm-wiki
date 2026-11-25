@@ -12,7 +12,10 @@ import {
   importScopeKey,
   submitImport,
 } from '../api/importRegistration.api';
-import type { ImportScope } from '../api/importRegistration.api';
+import type {
+  ImportReplacement,
+  ImportScope,
+} from '../api/importRegistration.api';
 import {
   importDocumentSchema,
   initialImportValues,
@@ -39,10 +42,15 @@ export type ImportRegistrationSnapshot = {
 /** 라우트 이동 중에도 같은 범위의 초안과 미확정 요청을 보존합니다. */
 export class ImportRegistrationSession {
   readonly scope: ImportScope;
+  readonly replacement: ImportReplacement | null;
   #snapshot: ImportRegistrationSnapshot;
   #listeners = new Set<() => void>();
-  constructor(scope: ImportScope) {
+  constructor(
+    scope: ImportScope,
+    replacement: ImportReplacement | null = null,
+  ) {
     this.scope = scope;
+    this.replacement = replacement;
     this.#snapshot = {
       draft: initialImportValues(scope.canExtract),
       file: null,
@@ -118,11 +126,13 @@ export class ImportRegistrationSession {
       this.#snapshot.requestId ||
       this.#snapshot.completed ||
       this.#snapshot.scopeInvalid ||
-      !this.scope.canRegister
+      !this.scope.canRegister ||
+      !this.scope.canPrepare
     )
       return;
     const parsed = importDocumentSchema.safeParse(draft);
     if (!parsed.success) return;
+    if (this.replacement && parsed.data.kind !== 'file') return;
     const requestId = crypto.randomUUID().replaceAll('-', '');
     const {
       userId,
@@ -143,6 +153,15 @@ export class ImportRegistrationSession {
         policyRevision,
       },
       title: parsed.data.title,
+      ...(this.replacement
+        ? {
+            target: {
+              sourceId: this.replacement.sourceId,
+              expectedRegistrationRevision:
+                this.replacement.expectedRegistrationRevision,
+            },
+          }
+        : {}),
     };
     const request: SourceRegistrationRequest =
       parsed.data.kind === 'file'
@@ -201,6 +220,23 @@ export class ImportRegistrationSession {
         error:
           '원본 등록을 조정 중입니다. 같은 요청의 확인 결과를 다시 확인해 주세요.',
       });
+      return;
+    }
+    if (
+      this.replacement &&
+      !this.#snapshot.foreignRequest &&
+      (record.item.sourceId !== this.replacement.sourceId ||
+        record.item.sourceVersion === this.replacement.sourceVersion)
+    ) {
+      this.#failure(
+        {
+          code: 'outcome_unknown',
+          message:
+            '교체 결과가 원래 문서의 새 판본과 일치하지 않습니다. 같은 요청의 결과 확인을 유지합니다.',
+        },
+        'receipt',
+        true,
+      );
       return;
     }
     if (this.#snapshot.foreignRequest) {
@@ -265,14 +301,26 @@ export class ImportRegistrationSession {
 }
 
 const sessions = new Map<string, ImportRegistrationSession>();
+/** 신규 등록과 각 원본 판본 교체의 입력·미확정 요청은 서로 공유하지 않습니다. */
+function registrationKey(
+  scope: ImportScope,
+  replacement: ImportReplacement | null,
+): string {
+  return JSON.stringify([
+    importScopeKey(scope),
+    replacement?.sourceId ?? null,
+    replacement?.sourceVersion ?? null,
+  ]);
+}
 /** 인증 기준이 같은 라우트 재방문만 기존 초안을 이어갑니다. */
 export function registrationSession(
   scope: ImportScope,
+  replacement: ImportReplacement | null = null,
 ): ImportRegistrationSession {
-  const key = importScopeKey(scope);
+  const key = registrationKey(scope, replacement);
   const existing = sessions.get(key);
   if (existing) return existing;
-  const created = new ImportRegistrationSession(scope);
+  const created = new ImportRegistrationSession(scope, replacement);
   sessions.set(key, created);
   return created;
 }
@@ -282,6 +330,19 @@ export function newRegistrationSession(
   scope: ImportScope,
 ): ImportRegistrationSession {
   const created = new ImportRegistrationSession(scope);
-  sessions.set(importScopeKey(scope), created);
+  sessions.set(registrationKey(scope, null), created);
   return created;
+}
+
+/** 결과 미확인 중에는 현재 판본 조회로 기존 요청을 가리지 않고 같은 세션을 먼저 복원합니다. */
+export function retainedReplacementSession(
+  scope: ImportScope,
+  sourceId: string,
+  sourceVersion: string,
+): ImportRegistrationSession | null {
+  return (
+    sessions.get(
+      JSON.stringify([importScopeKey(scope), sourceId, sourceVersion]),
+    ) ?? null
+  );
 }

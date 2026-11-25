@@ -57,7 +57,7 @@ export const conversionReportSchema = z
         'pptx_text',
       ])
       .nullable(),
-    units: z.array(conversionUnitSchema).max(1000),
+    units: z.array(conversionUnitSchema).max(10000),
     complete: z.boolean(),
     unread_ranges: z.array(z.string().max(1000)).max(100),
     warnings: z.array(z.string().max(1000)).max(100),
@@ -96,7 +96,7 @@ export const conversionReportSchema = z
           size + new TextEncoder().encode(unit.content).byteLength,
         0,
       ) <=
-        4 * 1024 * 1024,
+        20 * 1024 * 1024,
   );
 export const conversionProgressSchema = z.object({
   stage: z.enum(['download', 'convert', 'submit']),
@@ -136,6 +136,7 @@ export const sourceConversionRunSchema = z.object({
     .max(100),
   cleanupWarning: z.boolean(),
   historyWarning: z.string().max(2000).optional(),
+  canResumeUpload: z.boolean().optional(),
 });
 const resultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: sourceConversionRunSchema.nullable() }),
@@ -180,6 +181,13 @@ export function conversionNeedsTextReview(
       warning.includes('worker:'),
     )
   );
+}
+
+/** 불완전한 변환의 명시 누락은 원인별 해결 또는 내용 입력 화면에서 확인합니다. */
+export function conversionNeedsContentReview(
+  report: ConversionReviewReport | null | undefined,
+): boolean {
+  return report?.complete === false && report.unread_ranges.length > 0;
 }
 
 /** 첫 승인 범위는 원본 페이지를 대조할 수 있는 PDF 쪽 보고로 한정합니다. */

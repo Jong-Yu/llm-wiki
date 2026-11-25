@@ -1,7 +1,7 @@
 import { matchesExpectedScope } from './readApi';
 import { ExecutionStarts } from './ExecutionStarts';
 import type { AiActivity } from '@contracts/aiSessions.contract';
-import { aiModelArguments, personalAi } from './personalAi';
+import { aiArguments, personalAi } from './personalAi';
 import type { PersonalAi } from './personalAi';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -27,6 +27,7 @@ import {
   personalRuntimePaths,
   observePersonalProcess,
   stopPersonalProcess,
+  runningActivities,
 } from './personalProcess';
 
 export type ProposalRuntime = {
@@ -418,14 +419,11 @@ export class ProposalExecutionService {
 
   /** 공개 활동에는 인증정보나 원문을 포함하지 않습니다. */
   activities(): AiActivity[] {
-    return [...this.#running.values()]
-      .filter((run: Running): boolean =>
-        this.#connection.isAnalysisCurrent(run.context),
-      )
-      .map((run: Running): AiActivity => ({
-        ...run.activity,
-        status: run.stopping ? 'stopping' : 'running',
-      }));
+    return runningActivities(
+      this.#running.values(),
+      (context: AnalysisContext): boolean =>
+        this.#connection.isAnalysisCurrent(context),
+    );
   }
 
   /** 접수 중인 작업도 종료 확인에 포함합니다. */
@@ -468,11 +466,7 @@ export class ProposalExecutionService {
         '--work-dir',
         execution.workDirectory,
         '--run-ai',
-        '--ai-provider',
-        runtime.ai.provider,
-        '--ai-cli',
-        runtime.ai.cli,
-        ...aiModelArguments(runtime.ai),
+        ...aiArguments(runtime.ai),
         ...(request.semanticCheck ? ['--semantic-check'] : []),
       ]);
     } catch (error: unknown) {

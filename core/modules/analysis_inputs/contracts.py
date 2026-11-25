@@ -7,6 +7,10 @@ from core.modules.analysis_jobs.contracts import identifier, revision
 
 STAGES = {"read_source": "source_write", "prepare_wiki": "write", "extract_ontology": "ontology_write"}
 MAX_BUNDLE_BYTES = 8 * 1024 * 1024
+# 서버가 등록 원문의 불변 참조로 만든 묶음만 페이지별로 더 크게 읽을 수 있다.
+# 요청 본문·모델 프롬프트의 8 MiB 한도와는 별개다.
+REGISTRATION_REFERENCE_MODE = "registration-reference-v1"
+MAX_REGISTRATION_BUNDLE_BYTES = 32 * 1024 * 1024
 MAX_EXTRACTION_BYTES = 4 * 1024 * 1024
 MAX_BUNDLES = 100
 MAX_EXTRACTIONS = 100

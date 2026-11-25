@@ -17,7 +17,7 @@ type OriginalPageProps = {
   onAccessLost: () => void;
 };
 
-/** 고정된 원본 판본의 해당 쪽만 bridge로 가져와 확대해서 표시합니다. */
+/** 고정된 원본 판본의 해당 페이지만 bridge로 가져와 확대해서 표시합니다. */
 export function OriginalPage({
   scope,
   workflowId,
@@ -25,12 +25,21 @@ export function OriginalPage({
   onAvailable,
   onAccessLost,
 }: OriginalPageProps): JSX.Element {
-  const [image, setImage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<{ basis: string; image: string } | null>(
+    null,
+  );
+  const [failure, setFailure] = useState<{
+    basis: string;
+    message: string;
+  } | null>(null);
   const [retry, setRetry] = useState(0);
   const [zoom, setZoom] = useState(false);
+  const basis = JSON.stringify([scope, workflowId, page, retry]);
+  const error = failure?.basis === basis ? failure.message : null;
+  const image = loaded?.basis === basis ? loaded.image : null;
   useEffect((): (() => void) => {
     let live = true;
+    onAvailable(false);
     void notificationsApi
       .page({ ...notificationSession(scope), workflowId, page })
       .then(
@@ -38,25 +47,28 @@ export function OriginalPage({
           if (!live) return;
           if (!result.ok) {
             if (notificationAccessLost(result.error)) onAccessLost();
-            setError(result.error.message);
+            setFailure({ basis, message: result.error.message });
           } else if (result.data.page !== page)
-            setError(
-              '요청한 쪽과 다른 원본이 반환되었습니다. 다시 확인해 주세요.',
-            );
-          else setImage(result.data.dataUrl);
+            setFailure({
+              basis,
+              message:
+                '요청한 페이지와 다른 원본이 반환되었습니다. 다시 확인해 주세요.',
+            });
+          else setLoaded({ basis, image: result.data.dataUrl });
         },
       )
       .catch((): void => {
-        if (live) setError('원본 쪽을 불러오지 못했습니다.');
+        if (live)
+          setFailure({ basis, message: '원본 페이지를 불러오지 못했습니다.' });
       });
     return (): void => {
       live = false;
     };
-  }, [onAccessLost, onAvailable, page, retry, scope, workflowId]);
+  }, [basis, onAccessLost, onAvailable, page, retry, scope, workflowId]);
   return (
     <>
       <div className={styles.paneHeading}>
-        <strong>원본 {page}쪽</strong>
+        <strong>원본 {page}페이지</strong>
         <Button
           variant="surface"
           size="small"
@@ -72,7 +84,7 @@ export function OriginalPage({
       <div
         className={styles.paperViewport}
         tabIndex={0}
-        aria-label={`원본 ${page}쪽 보기`}
+        aria-label={`원본 ${page}페이지 보기`}
       >
         {error ? (
           <div role="alert">
@@ -82,8 +94,8 @@ export function OriginalPage({
               size="small"
               onClick={(): void => {
                 setRetry(retry + 1);
-                setImage(null);
-                setError(null);
+                setLoaded(null);
+                setFailure(null);
                 onAvailable(false);
               }}
             >
@@ -93,18 +105,21 @@ export function OriginalPage({
         ) : image ? (
           <img
             src={image}
-            alt={`등록한 PDF의 ${page}쪽 원본`}
+            alt={`등록한 PDF의 ${page}페이지 원본`}
             data-zoom={zoom}
             onLoad={(): void => {
               onAvailable(true);
             }}
             onError={(): void => {
-              setError('원본 이미지를 표시하지 못했습니다.');
+              setFailure({
+                basis,
+                message: '원본 이미지를 표시하지 못했습니다.',
+              });
               onAvailable(false);
             }}
           />
         ) : (
-          <p role="status">원본 {page}쪽을 불러오고 있습니다…</p>
+          <p role="status">원본 {page}페이지를 불러오고 있습니다…</p>
         )}
       </div>
     </>

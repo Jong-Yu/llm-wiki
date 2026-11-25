@@ -51,5 +51,11 @@ async def tool_call(client, name, arguments):
     result = await client.call_tool(name, arguments)
     value = result.structured_content
     if result.is_error or type(value) is not dict or value.get("ok") is not True:
+        # 입력 한도는 같은 자료의 재시도로 해결되지 않는다. 알려진 코드만 보존하고
+        # 서버 메시지·경로·알 수 없는 오류 코드는 기존 일반 오류로 숨긴다.
+        error = value.get("error") if type(value) is dict else None
+        if (type(value) is dict and value.get("ok") is False
+                and type(error) is dict and error.get("code") == "input_limit"):
+            raise AnalysisClientError("input_limit")
         raise AnalysisClientError("mcp_request_failed")
     return {key: item for key, item in value.items() if key not in {"ok", "access"}}

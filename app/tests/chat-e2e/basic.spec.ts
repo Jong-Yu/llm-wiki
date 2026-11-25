@@ -113,7 +113,7 @@ test.describe('정상 흐름', () => {
     await expect(composer(page)).toBeVisible();
     await shot(page, '긴-답변-끝');
     await conversation(page).evaluate((element) => {
-      let node: HTMLElement | null = element;
+      let node: Element | null = element;
       while (node && node.scrollHeight <= node.clientHeight) node = node.parentElement;
       node?.scrollTo(0, 0);
     });

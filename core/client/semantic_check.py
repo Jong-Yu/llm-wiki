@@ -23,7 +23,7 @@ from core.common.json_codec import canonical_json_bytes, canonical_json_hash
 from core.modules.analysis_results import diagnostics
 from core.modules.analysis_results.contracts import ResultError
 from core.runtime.client_platform import private_directory, write_new
-from core.runtime.extraction_schema import select_submission_schema
+from core.modules.ontology.submission import select_submission_schema
 
 
 RULE_QUESTIONS = {

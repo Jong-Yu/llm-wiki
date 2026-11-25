@@ -71,11 +71,13 @@ def main():
     parser.add_argument("result", type=Path)
     parser.add_argument("--ocr", choices=["auto", "never", "always"], default="auto")
     parser.add_argument("--language", default="eng")
+    parser.add_argument("--page", type=int)
     parser.add_argument("--failure-report", type=Path)
     args = parser.parse_args()
     try:
+        options = {"selected_page": args.page} if args.page is not None else {}
         convert_file(args.original, args.format, ocr=args.ocr, language=args.language,
-                     checkpoint=lambda value: atomic_json(args.result, value))
+                     checkpoint=lambda value: atomic_json(args.result, value), **options)
     except Exception as error:
         if args.failure_report is not None:
             try:

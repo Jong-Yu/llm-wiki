@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router';
+import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
 import { AnalysisJobWorkspace } from '@renderer/features/browse-ai-sessions';
 import { documentTaskApi } from '@renderer/features/browse-document-tasks';
 import {
@@ -20,13 +21,21 @@ import {
 type JobDestinationProps = { scope: ImportScope; jobId: string | null };
 
 /** 같은 기기의 문서 작업에 연결된 분석은 통합 상세 주소로 열고 과거 주소도 유지합니다. */
-function JobDestination({ scope, jobId }: JobDestinationProps): JSX.Element {
+function JobDestination({
+  scope,
+  jobId,
+}: JobDestinationProps): JSX.Element | null {
+  const active = useWorkspaceActivity();
   const [destination, setDestination] = useState<string | null | undefined>(
     undefined,
   );
   const location = useLocation();
   useEffect((): (() => void) => {
     let current = true;
+    if (!active || !jobId)
+      return (): void => {
+        current = false;
+      };
     void documentTaskApi
       .list({
         connectionId: scope.connectionId,
@@ -57,7 +66,9 @@ function JobDestination({ scope, jobId }: JobDestinationProps): JSX.Element {
     return (): void => {
       current = false;
     };
-  }, [scope, jobId]);
+  }, [scope, jobId, active]);
+  if (!jobId) return <AnalysisJobWorkspace jobId={null} />;
+  if (!active && destination) return null;
   if (destination === undefined)
     return <p role="status">연결된 작업을 확인하고 있습니다…</p>;
   return destination ? (
@@ -78,6 +89,8 @@ export function AnalysisJobPage(): JSX.Element {
   const [search] = useSearchParams();
   const model = useImportScope();
   const jobId = search.get('jobId');
+  if (search.get('view') === 'history')
+    return <AnalysisJobWorkspace jobId={jobId} />;
   if (model.state.status === 'loading')
     return <p role="status">작업 공간을 확인하고 있습니다…</p>;
   return model.state.status === 'ready' ? (

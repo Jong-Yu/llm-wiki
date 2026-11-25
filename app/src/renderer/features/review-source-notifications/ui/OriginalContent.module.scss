@@ -1,0 +1,39 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  height: 40px;
+  padding: 0 var(--wiki-space-16);
+  flex-wrap: nowrap;
+  font-size: var(--wiki-font-size-12);
+}
+
+.toolbar input {
+  width: 4.5rem;
+  min-height: 30px;
+  text-align: center;
+  border: 1px solid var(--wiki-color-border-default);
+  border-radius: 4px;
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-primary);
+  font: inherit;
+}
+
+.count {
+  min-width: 3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.notice {
+  margin: 0;
+  padding: var(--wiki-space-8) var(--wiki-space-16);
+  height: 64px;
+  overflow: auto;
+  font-size: var(--wiki-font-size-12);
+  line-height: 1.5;
+  color: var(--wiki-color-text-secondary);
+}
+
+.viewport.viewport {
+  height: calc(clamp(400px, 52vh, 620px) - 104px);
+}

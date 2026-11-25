@@ -1,7 +1,7 @@
 import { ExecutionStarts } from './ExecutionStarts';
 import { researchPublicWeb } from './webResearch';
 import type { AiActivity } from '@contracts/aiSessions.contract';
-import { aiModelArguments, personalAi } from './personalAi';
+import { aiArguments, personalAi } from './personalAi';
 import type { PersonalAi } from './personalAi';
 import type { ChildProcess } from 'node:child_process';
 import { access, readFile, rm, writeFile } from 'node:fs/promises';
@@ -25,6 +25,7 @@ import {
   observePersonalProcess,
   runPersonalCommand,
   stopPersonalProcess,
+  runningActivities,
 } from './personalProcess';
 import type { PrivateExecution } from './personalProcess';
 import type {
@@ -611,14 +612,11 @@ export class QuestionRunService {
 
   /** 공개 활동에는 인증정보나 원문을 포함하지 않습니다. */
   activities(): AiActivity[] {
-    return [...this.#running.values()]
-      .filter((run: Running): boolean =>
-        this.#connection.isAnalysisCurrent(run.context),
-      )
-      .map((run: Running): AiActivity => ({
-        ...run.activity,
-        status: run.stopping ? 'stopping' : 'running',
-      }));
+    return runningActivities(
+      this.#running.values(),
+      (context: AnalysisContext): boolean =>
+        this.#connection.isAnalysisCurrent(context),
+    );
   }
 
   /**
@@ -661,11 +659,7 @@ export class QuestionRunService {
           execution.workDirectory,
           '--question-file',
           questionFile,
-          '--ai-provider',
-          runtime.ai.provider,
-          '--ai-cli',
-          runtime.ai.cli,
-          ...aiModelArguments(runtime.ai),
+          ...aiArguments(runtime.ai),
           '--ai-timeout',
           '30',
         ],
@@ -805,11 +799,7 @@ export class QuestionRunService {
         '--session-dir',
         runtime.sessionRoot,
         '--run-ai',
-        '--ai-provider',
-        runtime.ai.provider,
-        '--ai-cli',
-        runtime.ai.cli,
-        ...aiModelArguments(runtime.ai),
+        ...aiArguments(runtime.ai),
         ...(request.reclaim ? ['--reclaim'] : []),
       ]);
     } catch {

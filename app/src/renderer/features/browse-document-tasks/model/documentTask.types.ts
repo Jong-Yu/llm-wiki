@@ -22,11 +22,22 @@ export type DocumentTaskStepState =
   | 'ready'
   | 'unconfirmed'
   | 'review'
-  | 'stopped';
+  | 'stopped'
+  | 'unavailable';
+export type DocumentTaskStage = 'convert' | 'wiki' | 'ontology';
 export type DocumentTaskStep = {
+  id: DocumentTaskStage;
   title: string;
   state: DocumentTaskStepState;
   note: string;
+};
+/** 수량은 변환기의 convert 기록이며 내용 정확도나 전체 등록 완료율이 아닙니다. */
+export type DocumentTaskMeasurement = {
+  completed: number;
+  total: number | null;
+  percent: number | null;
+  remaining: number | null;
+  unit: string;
 };
 export type DocumentTaskResult = {
   document: string;
@@ -45,7 +56,9 @@ export type DocumentTaskAttemptView = {
 
 /** 조회한 기록을 화면에만 투영하며 저장·실행 payload로 되돌리지 않습니다. */
 export type DocumentTaskView = {
+  inputLimited?: boolean;
   id: string;
+  detailPath: string;
   title: string;
   fileName: string;
   sourceId: string;
@@ -57,6 +70,11 @@ export type DocumentTaskView = {
   progress: string | null;
   jobId: string | null;
   steps: readonly DocumentTaskStep[];
+  activeStep: DocumentTaskStage;
+  completedStepCount: number;
+  completionLabel: string;
+  measurement: DocumentTaskMeasurement | null;
+  operation: { title: string; note: string };
   explanation: { title: string; body: string; next: string };
   results: readonly DocumentTaskResult[];
   hasPreviousResults: boolean;

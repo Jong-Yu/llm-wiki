@@ -18,7 +18,7 @@ from uuid import UUID
 from jsonschema import Draft202012Validator
 
 from core.common.json_codec import canonical_json_bytes
-from core.runtime.client_platform import private_directory, is_windows, ClientPlatformError, platform_error_code
+from core.runtime.client_platform import private_directory, is_windows, platform_error_code
 from core.runtime.client_process import cli_command
 from .codex import CodexAdapter, _ENVIRONMENT as _CODEX_ENVIRONMENT, _execute, _object, _web_search_queries, _write_new
 from .contracts import AIAdapterError, MAX_PROMPT_BYTES, MAX_RESULT_BYTES, MAX_SCHEMA_BYTES
@@ -268,21 +268,8 @@ class ClaudeAdapter(CodexAdapter):
         super().__init__(cli=cli, model=model, timeout_seconds=timeout_seconds, on_event=on_event)
 
     async def _check(self, env):
-        try:
-            executable = cli_command(self.cli)
-        except ClientPlatformError as error:
-            raise AIAdapterError(str(error)) from None
-        if self._capabilities is None:
-            for arguments in (("--version",), ("--help",)):
-                code, output, _ = await _execute([*executable, *arguments], directory=None, environment=env)
-                if code != 0:
-                    raise AIAdapterError("ai_cli_unavailable")
-                if arguments[0] == "--version":
-                    version = output.decode("utf-8").strip()[:200]
-                elif not all(flag in output.decode("utf-8") for flag in _REQUIRED_FLAGS):
-                    raise AIAdapterError("ai_cli_incompatible")
-            self._capabilities = executable, version
-        return self._capabilities
+        return await self._check_cli_capabilities(env, command=cli_command, execute=_execute,
+            help_arguments=("--help",), required_flags=_REQUIRED_FLAGS)
 
     async def preflight(self):
         try:

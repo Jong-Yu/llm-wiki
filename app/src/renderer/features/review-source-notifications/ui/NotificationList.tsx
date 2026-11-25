@@ -28,7 +28,7 @@ type Filter = NonNullable<NotificationListRequest['filter']>;
 const filters: readonly { value: Filter; label: string }[] = [
   { value: 'all', label: '전체' },
   { value: 'unread', label: '읽지 않음' },
-  { value: 'approval', label: '승인 대기' },
+  { value: 'approval', label: '내용 확인' },
 ];
 
 /** 서버 알림을 현재 허용 범위에서 읽으며 읽음 처리와 승인을 분리합니다. */
@@ -240,7 +240,7 @@ export function NotificationList({
           {!data.items.length && (
             <p className={styles.empty}>
               {filter === 'approval'
-                ? '현재 승인 대기 중인 작업이 없습니다.'
+                ? '내용을 확인할 문서가 없습니다.'
                 : filter === 'unread'
                   ? '읽지 않은 알림이 없습니다.'
                   : '보관된 알림이 없습니다.'}
@@ -295,7 +295,7 @@ export function NotificationList({
                   void navigate(notificationWorkflowPath(item.workflow_id));
                 }}
               >
-                {item.state === 'review' ? '검토하기' : '작업 보기'}
+                {item.state === 'review' ? '내용 확인' : '문서 보기'}
               </Button>
             </article>
           ))}
@@ -313,8 +313,8 @@ export function NotificationList({
         </Button>
       )}
       <p className={styles.receipt}>
-        알림을 읽어도 문자 사용을 승인하지 않습니다. 앱이 닫힌 동안 서버에
-        기록된 알림은 다음 연결 때 가져옵니다.
+        알림을 열면 해당 문서로 이동합니다. 앱이 닫힌 동안 서버에 기록된 알림은
+        다음 연결 때 가져옵니다.
       </p>
     </section>
   );

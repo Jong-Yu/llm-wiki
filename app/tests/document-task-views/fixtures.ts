@@ -76,3 +76,36 @@ export function fixtureAnalysis(task: DocumentTask): AnalysisDetail {
     local: { status: 'failed', message: '관계 추출 중 연결이 끊겼습니다.' },
   });
 }
+
+/** 같은 대상의 Wiki와 온톨로지 현재 저장 영수증을 모두 제공하는 완료 예입니다. */
+export function fixtureCompleteAnalysis(task: DocumentTask): AnalysisDetail {
+  const detail = fixtureAnalysis(task);
+  const wiki = detail.receipts[0];
+  if (!wiki?.receipt) throw new Error('Wiki fixture receipt missing');
+  return analysisDetailSchema.parse({
+    ...detail,
+    job: {
+      ...detail.job,
+      reported_status: null,
+      result_summary: {
+        ...detail.job.result_summary,
+        status: 'complete',
+        saved_count: 2,
+      },
+    },
+    local: { status: 'completed', message: '저장 완료' },
+    receipts: [
+      wiki,
+      {
+        ...wiki,
+        request_id: '9'.repeat(32),
+        receipt: {
+          ...wiki.receipt,
+          stage: 'extract_ontology',
+          graph_revision: 'e'.repeat(64),
+          state_revision: 'e'.repeat(64),
+        },
+      },
+    ],
+  });
+}

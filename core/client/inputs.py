@@ -16,7 +16,22 @@ from .transport import AnalysisClientError, tool_call
 
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
+MAX_REFERENCE_INPUT_BYTES = 32 * 1024 * 1024
 MAX_COMPONENTS = 64
+
+
+def input_budget(manifest):
+    """서버가 고정한 등록 참조 모드만 큰 로컬 사본을 허용한다. 프롬프트 한도는 별개다."""
+    mode = manifest.get("input_mode")
+    if mode is None:
+        if "input_budget_bytes" in manifest:
+            raise AnalysisClientError("invalid_input_snapshot")
+        return MAX_INPUT_BYTES
+    if (mode != "registration-reference-v1"
+            or manifest.get("input_budget_bytes") != MAX_REFERENCE_INPUT_BYTES
+            or "data/registration.json" not in manifest.get("components", {})):
+        raise AnalysisClientError("invalid_input_snapshot")
+    return MAX_REFERENCE_INPUT_BYTES
 
 
 # xb는 새 바이너리 파일만 만드는 모드다. 같은 경로에 기존 작업 파일이 있으면 덮어쓰지 않고 실패한다.
@@ -33,9 +48,9 @@ def _manifest_bytes(serialized, manifest, revision, error_code):
 
 
 # offset은 문자 위치지만 크기와 hash는 UTF-8 바이트 기준이다. 두 단위를 혼동하면 한글/이모지에서 틀어진다.
-async def _receive_component(client, arguments, name, metadata, *, available):
+async def _receive_component(client, arguments, name, metadata, *, available, maximum=MAX_INPUT_BYTES):
     """문자 offset으로 페이지를 잇고, 완성된 UTF-8 바이트의 크기·hash를 대조한다."""
-    if type(metadata.get("size_bytes")) is not int or not 0 <= metadata["size_bytes"] <= MAX_INPUT_BYTES:
+    if type(metadata.get("size_bytes")) is not int or not 0 <= metadata["size_bytes"] <= maximum:
         raise AnalysisClientError("input_component_limit")
     payload, offset = bytearray(), 0
     while True:
@@ -120,6 +135,7 @@ async def receive_input(client, *, tenant, job_id, run_id, expected_job_revision
     if profile is not None and manifest.get("actor", {}).get("profile_id") != profile:
         raise AnalysisClientError("bundle_scope_mismatch")
     components = bundle["components"]
+    maximum = input_budget(manifest)
     if (type(components) is not dict or not 1 <= len(components) <= MAX_COMPONENTS
             or set(components) != set(manifest.get("components", {}))):
         raise AnalysisClientError("input_component_limit")
@@ -132,7 +148,8 @@ async def receive_input(client, *, tenant, job_id, run_id, expected_job_revision
         pinned = manifest["components"][name]
         if any(metadata.get(key) != pinned.get(key) for key in ("sha256", "size_bytes")):
             raise AnalysisClientError("input_component_mismatch")
-        payload = await _receive_component(client, arguments, name, metadata, available=MAX_INPUT_BYTES - total)
+        payload = await _receive_component(client, arguments, name, metadata,
+                                           available=maximum - total, maximum=maximum)
         total += len(payload)
         # 서버의 구성 이름은 대응표에만 두고 로컬 경로는 정해진 번호로 만든다.
         filename = f"component-{index:03}.txt"
@@ -209,6 +226,7 @@ def load_input(fixed_input, directory):
         raw = _local_bytes(directory, fixed_input["manifest_file"], MAX_INPUT_BYTES)
         manifest = json.loads(raw)
         _manifest_bytes(raw, manifest, fixed_input["bundle_revision"], "bundle_hash_mismatch")
+        maximum = input_budget(manifest)
         for key in ("tenant", "job_id", "run_id", "stage"):
             if manifest[key] != fixed_input[key]:
                 raise AnalysisClientError("bundle_scope_mismatch")
@@ -224,10 +242,10 @@ def load_input(fixed_input, directory):
         for name, relative in locations.items():
             if type(relative) is not str or re.fullmatch(r"inputs/component-[0-9]{3}\.txt", relative) is None:
                 raise AnalysisClientError("unsafe_input_snapshot")
-            value = _local_bytes(directory, relative, MAX_INPUT_BYTES)
+            value = _local_bytes(directory, relative, maximum)
             metadata = manifest["components"][name]
             total += len(value)
-            if total > MAX_INPUT_BYTES:
+            if total > maximum:
                 raise AnalysisClientError("input_component_limit")
             if len(value) != metadata["size_bytes"] or sha256(value).hexdigest() != metadata["sha256"]:
                 raise AnalysisClientError("input_component_mismatch")

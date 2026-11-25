@@ -91,10 +91,10 @@ const navigation: readonly NavigationItem[] = [
     routes: ['/chat', '/artifact'],
   },
   {
-    path: '/tasks',
-    label: '작업',
+    path: '/sessions',
+    label: 'AI 세션',
     icon: 'bot',
-    routes: ['/tasks', '/jobs', '/sessions', '/sessions/history'],
+    routes: ['/jobs', '/sessions', '/sessions/history'],
   },
 ];
 

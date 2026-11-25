@@ -35,6 +35,6 @@ def configured_rulesets(root, policy_path, access):
     if root is None or policy_path is None or access is None:
         raise ValueError("Ruleset root and policy require authenticated tenant mode.")
     from core.modules.extraction_rules.store import RulesetRegistry
-    from core.runtime.extraction_schema import build_submission_schema
+    from core.modules.ontology.submission import build_submission_schema
     return RulesetRegistry(root, policy_path, access.tenant_root,
                            expected_schema=build_submission_schema())

@@ -5,6 +5,7 @@
 방법은 계획에 계속 남으며, 변환 정확도는 client_reported로 구분한다.
 """
 
+from copy import deepcopy
 from hashlib import sha256
 from io import BytesIO
 from core.common.json_codec import canonical_json_hash
@@ -15,6 +16,7 @@ from core.modules.reviews.store import ReviewStore
 from core.modules.sources.store import SourceStore
 from core.modules.sources import files
 from core.modules.sources.contracts import IMAGE_FORMATS, identifier
+from .contracts import ConversionCommand, PlanCommand
 
 MAX_TEXT_BYTES = 4 * 1024 * 1024
 MAX_RECORDS = 1000
@@ -37,23 +39,26 @@ class PlanStore:
     def _path(self, kind, value):
         """사용자 입력 경로 대신 허용한 종류와 검증된 ID로만 위치를 계산한다."""
         identifier(value)
-        if kind not in {"plans", "conversions"}:
+        if kind not in {"plans", "conversions", "conversion_parts", "corrections"}:
             raise ValueError("Invalid analysis planning resource")
         return self.root / kind / value
 
-    def _load_locked(self, kind, value, revision=None):
+    def _load_locked(self, kind, value, revision=None, *, resolve_parts=True):
         """불변 파일과 구성별 크기/hash를 공통 입력 모듈에서 재검사한다."""
         manifest, text, components = inputs_files.load(self.store, self._path(kind, value),
             expected_revision=revision, maximum=8 * 1024 * 1024)
         if (manifest.get("tenant") != self.actor["tenant"] or manifest.get("user_id") != self.actor["user_id"]
                 or manifest.get("id") != value or manifest.get("kind") != kind):
             raise InputCorruptError("The analysis planning record has a different owner")
+        if kind == 'conversions' and 'parts' in manifest and resolve_parts:
+            from .conversion_parts import resolve
+            manifest, components = resolve(self, manifest)
         return manifest, inputs_files.digest(text.encode()), components
 
-    def read(self, kind, value, revision=None):
+    def read(self, kind, value, revision=None, *, transport=False):
         """조회는 복구나 재변환을 실행하지 않고 당시 묶음 전체를 반환한다."""
         with self.sources._coordination_lock():
-            manifest, actual, components = self._load_locked(kind, value, revision)
+            manifest, actual, components = self._load_locked(kind, value, revision, resolve_parts=not transport)
             return {"manifest": manifest, "revision": actual, "components": components}
 
     def _publish_locked(self, kind, request_id, payload, manifest, components, authorize):
@@ -69,7 +74,8 @@ class PlanStore:
             if old["payload_hash"] != digest:
                 raise InputConflictError("request_conflict")
             return {"manifest": old, "revision": revision, "components": stored, "replayed": True}
-        if len(files.entries(self.store, path.parent, maximum=MAX_RECORDS + 1)) >= MAX_RECORDS:
+        maximum_records = 10000 if kind == 'corrections' else MAX_RECORDS
+        if len(files.entries(self.store, path.parent, maximum=maximum_records + 1)) >= maximum_records:
             raise InputLimitError("Analysis planning record count exceeded")
         value_manifest = {**manifest, "schema_version": 1, "kind": kind, "id": value,
             "tenant": self.actor["tenant"], "user_id": self.actor["user_id"], "actor": self.actor,
@@ -77,10 +83,14 @@ class PlanStore:
         authorize()
         notification = pending = None
         if kind == "conversions":
-            from core.modules.notifications.store import NotificationStore, review_pages
+            from core.modules.notifications.store import NotificationStore, review_targets
             notification = NotificationStore(self.store, self.actor, rulesets=self.rulesets)
             value_manifest["created_at"] = notification.now()
-            if review_pages(value_manifest, components):
+            review_manifest, review_components = value_manifest, components
+            if 'parts' in value_manifest:
+                from .conversion_parts import resolve
+                review_manifest, review_components = resolve(self, value_manifest)
+            if review_targets(review_manifest, review_components):
                 value_manifest["approval_workflow_id"] = value
             pending = notification.stage_locked("conversion", value)
             notification.stage_conversion_head_locked(value_manifest["source_ref"], value)
@@ -101,9 +111,10 @@ class PlanStore:
         stream = files.verify_original(self.store, original_path(self.sources, reference["source_id"], reference["source_version"]), current)
         return catalog, current, stream
 
-    def conversion(self, body, authorize):
+    def conversion(self, body: ConversionCommand, authorize, *, part=False):
         """변환 문자를 원본 판본·위치와 연결한다. OCR 의미 정확도를 승인하지 않는다."""
-        value = body.model_dump(exclude={"profile"})
+        # 호출자의 입력과 반환 manifest를 분리하며 기존 모델 직렬화의 값 복사 경계를 유지한다.
+        value = deepcopy(body)
         units = value["units"]
         if len({unit["unit_id"] for unit in units}) != len(units):
             raise ValueError("Conversion unit IDs must be distinct")
@@ -134,7 +145,9 @@ class PlanStore:
                 "complete": value["complete"], "unread_ranges": value["unread_ranges"], "warnings": value["warnings"],
                 "coverage": "reported_units_only", "original_coverage": "not_verified",
                 "semantic_validation": "not_run", "units": [{k: v for k, v in unit.items() if k != "content"} for unit in units]}
-            return self._publish_locked("conversions", value["request_id"], value, manifest, components, authorize)
+            if part:
+                manifest.update(conversion_request_id=value['conversion_request_id'], part_index=value['part_index'])
+            return self._publish_locked("conversion_parts" if part else "conversions", value["request_id"], value, manifest, components, authorize)
 
     def _capture_locked(self, body, *, validate_context=None):
         """현재 원문과 필수 맥락의 실제 판본을 고정하고 원본 전체를 임의로 자르지 않는다."""
@@ -210,9 +223,9 @@ class PlanStore:
                 raise ValueError("Select exact reported conversion locations")
         return "\n\n".join(selected)
 
-    def create(self, body, authorize):
+    def create(self, body: PlanCommand, authorize):
         """출처·범위·문서별 목적과 맥락을 불변 계획으로 만든다."""
-        value = body.model_dump(exclude={"profile"})
+        value = deepcopy(body)
         outputs = value["outputs"]
         for locations in [value["locations"], *[output["locations"] for output in outputs]]:
             if len({canonical_json_hash(location) for location in locations}) != len(locations):

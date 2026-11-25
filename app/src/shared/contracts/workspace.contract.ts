@@ -386,6 +386,7 @@ export const workspaceRequestSchema = z.discriminatedUnion('operation', [
     operation: z.literal('search'),
     input: z.strictObject({
       query: z.string().min(1).max(200),
+      group_sources: z.boolean().optional(),
       limit: z.number().int().min(1).max(50).optional(),
     }),
   }),

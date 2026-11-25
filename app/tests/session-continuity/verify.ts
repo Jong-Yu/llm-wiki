@@ -25,10 +25,13 @@ async function until(source: string): Promise<void> {
 /** "기존 지식 대조" 구역을 찾는 식입니다. */
 const comparisonSection =
   "[...document.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='기존 지식 대조')";
+/** 실행 중 작업 구역의 접근 가능한 중단 행동만 셉니다. */
+const runningActions =
+  "[...document.querySelectorAll('section[aria-labelledby]')].find(x=>document.getElementById(x.getAttribute('aria-labelledby'))?.textContent==='돌고 있는 작업')?.querySelectorAll('button[aria-label^=\"이 작업 중단 · \"]')";
 /** 표시된 사용자 행동을 클릭합니다. */
 async function click(text: string): Promise<void> {
   await js(
-    `(() => { const b=[...document.querySelectorAll('button,a')].find(x=>x.textContent.trim()===${JSON.stringify(text)} && x.getBoundingClientRect().width>0); if(!b||b.disabled) throw new Error('Unavailable action'); b.click(); })()`,
+    `(() => { const b=[...document.querySelectorAll('button,a')].find(x=>(x.getAttribute('aria-label') ?? x.textContent.trim())===${JSON.stringify(text)} && x.getBoundingClientRect().width>0); if(!b||b.disabled) throw new Error('Unavailable action'); b.click(); })()`,
   );
 }
 /** 다중 상태·한도·이동·중단·연결 변경 경계를 검증합니다. */
@@ -49,7 +52,11 @@ async function verify(directory: string): Promise<void> {
       pathToFileURL(join(directory, 'renderer/index.html')).href + '#/sessions',
     );
     await until(
-      "document.querySelectorAll('#app-content li').length===2 && document.body.innerText.includes('AI 세션 2') && document.body.innerText.includes('잔여 70%')",
+      `${runningActions}?.length===2 && document.body.innerText.includes('잔여 70%')`,
+    );
+    assert.deepEqual(
+      await js(`[...${runningActions}].map(x=>x.getAttribute('aria-label'))`),
+      ['이 작업 중단 · 문서 분석', '이 작업 중단 · AI 질문'],
     );
     assert.equal(await js('window.__continuity.starts'), 0);
     assert.equal(
@@ -104,8 +111,10 @@ async function verify(directory: string): Promise<void> {
     console.log(
       'PASS latest/previous comparison evidence, exclusion, partial failure, coverage and explicit rerun/stop preserve history',
     );
-    await click('중단');
-    await until("document.body.innerText.includes('AI 세션 1 ›')");
+    await click('이 작업 중단 · 문서 분석');
+    await until(
+      `${runningActions}?.length===1 && ${runningActions}[0].getAttribute('aria-label')==='이 작업 중단 · AI 질문'`,
+    );
     assert.deepEqual(await js('window.__continuity.stopped'), ['a'.repeat(32)]);
     assert.equal(
       await js('window.__continuity.activities[0].kind'),
@@ -114,7 +123,7 @@ async function verify(directory: string): Promise<void> {
     console.log(
       'PASS selected cancellation preserves the other running session',
     );
-    await click('열기');
+    await click('열기 · AI 질문');
     await until(
       "location.hash.includes('conversationId='+'c'.repeat(32)) && location.hash.includes('questionRunId='+'b'.repeat(32))",
     );
@@ -156,7 +165,7 @@ async function verify(directory: string): Promise<void> {
       "window.__continuity.connected=true; window.dispatchEvent(new Event('wiki-connection-changed')); location.hash='/sessions'",
     );
     await until(
-      "document.querySelectorAll('#app-content li').length>=1 && document.body.innerText.includes('AI 세션 1 ›')",
+      `${runningActions}?.length===1 && ${runningActions}[0].getAttribute('aria-label')==='이 작업 중단 · AI 질문'`,
     );
     if (process.env.WIKI_CONTINUITY_CAPTURE)
       await writeFile(

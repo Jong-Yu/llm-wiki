@@ -10,6 +10,7 @@ import { registerRuntimeHandlers } from '@main/ipc/registerRuntimeHandlers';
 import { registerConnectionHandlers } from '@main/ipc/registerConnectionHandlers';
 import { parseSourceRegistrationResult } from '@contracts/sources.contract';
 import type { SourceRegistrationRecord } from '@contracts/sources.contract';
+import { parseConnectionResult } from '@contracts/connection.contract';
 
 /** 실행기가 생성한 격리 경로만 사용합니다. */
 function required(name: string): string {
@@ -169,7 +170,48 @@ async function verify(): Promise<void> {
   await input('input[name=serverUrl]', serverUrl);
   await js("document.querySelector('input[value=signup]').click()");
   await click('가입하고 시작');
+  await until("document.body.innerText.includes('워크스페이스 배정 대기')");
+  const waiting = parseConnectionResult(
+    await js('window.wiki.connection.getState()'),
+  );
+  assert(waiting.ok && waiting.data.status === 'connected');
+  assert.equal(waiting.data.selection, null);
+  assert.deepEqual(waiting.data.workspaces, []);
+  // 가입과 권한 부여를 분리한 제품 동작을 유지하고 새 임시 서버의 시험 계정만 배정합니다.
+  execFileSync(
+    join(project, '.venv/bin/python'),
+    [
+      '-c',
+      `from pathlib import Path
+import sys
+from core.modules.access.policy import AccessPolicy
+from core.tests.poc_access.fixtures import grant_test_membership_for_user
+root = Path(sys.argv[1]).resolve()
+assert root.parent == Path('/private/tmp') and root.name.startswith('wiki-navigation-ui-')
+server = root / 'server'
+policy = AccessPolicy(server / '.local/tenancy/access.json', server / 'data')
+grant_test_membership_for_user(policy, sys.argv[2])`,
+      root,
+      waiting.data.userId,
+    ],
+    { cwd: project, env: { ...process.env, PYTHONPATH: project } },
+  );
+  await js(
+    'document.querySelector(\'button[aria-label="워크스페이스 배정 다시 확인"]\').click()',
+  );
   await until(`!!document.querySelector(${JSON.stringify(active)})`);
+  const assigned = parseConnectionResult(
+    await js('window.wiki.connection.getState()'),
+  );
+  assert(assigned.ok && assigned.data.status === 'connected');
+  assert.equal(assigned.data.connectionId, waiting.data.connectionId);
+  assert.deepEqual(assigned.data.selection, {
+    tenant: 'sdv-platform',
+    profile: 'default',
+  });
+  pass(
+    'unassigned signup enters the isolated workspace only after explicit assignment refresh',
+  );
   const first = await registerSource();
   const second = await registerSource(first);
   execFileSync(
@@ -182,6 +224,85 @@ async function verify(): Promise<void> {
       first.item.sourceVersion,
     ],
     { cwd: project },
+  );
+  const task = await js(
+    `(async () => {const c=await window.wiki.connection.getState(); const s=c.data; return window.wiki.documentTasks.create({connectionId:s.connectionId,expectedScope:{userId:s.userId,tenant:s.selection.tenant,profileId:s.selection.profile,policyRevision:s.policyRevision,accessRevision:s.accessRevision},item:${JSON.stringify(second.item)},targetDocument:'navigation-current.md'});})()`,
+  );
+  assert(
+    task &&
+      typeof task === 'object' &&
+      'ok' in task &&
+      task.ok &&
+      'data' in task,
+  );
+  // fixture는 화면 밖에서 생성했으므로 실제 화면 재진입으로 빈 목록 조회를 갱신합니다.
+  await go('/settings');
+  await until(visibleIncludes('서버'));
+  await go('/documents');
+  await until(
+    `!!document.querySelector(${JSON.stringify(active + ' input[aria-label="문서 검색"]')})`,
+  );
+  await input(active + ' input[aria-label="문서 검색"]', '이동 검증 원본');
+  await js(
+    `document.querySelector(${JSON.stringify(active + ' form[role="search"]')}).requestSubmit()`,
+  );
+  await until(
+    `!!document.querySelector(${JSON.stringify(active + ' a[aria-label*="진행 상세"][href*="taskId="]')})`,
+  );
+  const listWidth = await js(
+    `document.querySelector(${JSON.stringify(active)}).getBoundingClientRect().width`,
+  );
+  await js(
+    `document.querySelector(${JSON.stringify(active + ' a[aria-label*="진행 상세"][href*="taskId="]')}).click()`,
+  );
+  await until("location.hash.startsWith('#/documents?taskId=')");
+  await until(visibleIncludes('문자 변환'));
+  assert.equal(
+    await js(
+      `document.querySelector(${JSON.stringify(active)}).getBoundingClientRect().width`,
+    ),
+    listWidth,
+  );
+  assert.equal(await js("!!document.querySelector('dialog[open]')"), false);
+  await click('문서 목록');
+  await until("location.hash === '#/documents'");
+  assert.equal(
+    await js(
+      `document.querySelector(${JSON.stringify(active + ' input[aria-label="문서 검색"]')}).value`,
+    ),
+    '이동 검증 원본',
+  );
+  await until(
+    `document.activeElement?.getAttribute('aria-label')?.includes('진행 상세')`,
+  );
+  const observed = await js(
+    `(async()=>{const c=await window.wiki.connection.getState();const s=c.data;return window.wiki.documentTasks.list({connectionId:s.connectionId,expectedScope:{userId:s.userId,tenant:s.selection.tenant,profileId:s.selection.profile,policyRevision:s.policyRevision,accessRevision:s.accessRevision}});})()`,
+  );
+  assert(
+    observed &&
+      typeof observed === 'object' &&
+      'ok' in observed &&
+      observed.ok &&
+      'data' in observed,
+  );
+  assert.equal(
+    await js(
+      `(async()=>{const c=await window.wiki.connection.getState();const s=c.data;const r=await window.wiki.documentTasks.list({connectionId:s.connectionId,expectedScope:{userId:s.userId,tenant:s.selection.tenant,profileId:s.selection.profile,policyRevision:s.policyRevision,accessRevision:s.accessRevision}});return r.data.items.every(t=>t.conversions.length===0 && t.registration.state==='not_started');})()`,
+    ),
+    true,
+  );
+  pass(
+    'document status opens a full progress page; return preserves search and focus without executing',
+  );
+  await go('/tasks');
+  await until("location.hash === '#/documents'");
+  await go('/settings');
+  await new Promise<void>((resolve: () => void): void => {
+    setTimeout(resolve, 100);
+  });
+  assert.equal(await js('location.hash'), '#/settings');
+  pass(
+    'legacy task list redirects once to documents and stays inactive after leaving',
   );
   const docA = '/document?path=navigation-a.md';
   const docB = '/document?path=navigation-b.md';

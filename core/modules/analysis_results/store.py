@@ -60,18 +60,28 @@ class ResultStore:
             notifications.deliver_locked(pending)
 
     def write_wiki(self, job_id, *, tenant, user_id, run_id, expected_job_revision,
-                   bundle_id, bundle_revision, request_id, document, content, expected_revision, authorize,
-                   execution=None, diagnostics=None, save=True):
+                   bundle_id, bundle_revision, request_id, document, expected_revision, authorize,
+                   content=None, content_ref=None, execution=None, diagnostics=None, save=True):
         """위키 본문 저장의 시작점. 결과 딕셔너리를 반환하고 거부 사유는 예외로 알린다.
 
         document는 상대 문서 경로, content는 저장할 전체 본문이다.
+        보존 등록의 content_ref는 같은 고정 입력의 구성·지문으로 전체 본문을
+        서버에서 읽으며 content와 함께 제출하지 않는다. 요청 지문에는 참조만 남긴다.
         expected_revision은 본문을 작성할 때 읽었던 버전이며 신규 생성에만 None을 쓴다.
         bundle_id/bundle_revision은 참고한 고정 입력을 가리킨다.
         authorize는 최신 권한을 확인할 '함수'이며 저장 직전에도 다시 호출한다.
         나머지 작업·실행·요청 ID의 의미는 이 파일 맨 위 설명을 참고한다.
         """
         # 실행 정보는 선택값이다. 생략한 옛 호출의 payload/hash가 달라지지 않게 키 자체를 추가하지 않는다.
-        value = {"content": content}
+        if (content is None) == (content_ref is None):
+            raise ResultError("invalid_submission")
+        if content_ref is not None:
+            validation.content_reference(content_ref)
+            value = {"content_ref": content_ref}
+        else:
+            if type(content) is not str:
+                raise ResultError("invalid_submission")
+            value = {"content": content}
         if execution is not None:
             value["execution"] = execution
         self._report_options(value, diagnostics, save)
@@ -266,8 +276,17 @@ class ResultStore:
         ensure_proposal_job_draft(self.store, job, actor, payload, rulesets=self.rulesets)
         manifest, _, components = bundles.load_locked(self.inputs, job, payload["bundle_id"], payload["bundle_revision"])
         from core.modules.analysis_jobs.registration import registration
+        content = payload.get("content")
+        if "content_ref" in payload:
+            reference = payload["content_ref"]
+            validation.content_reference(reference)
+            descriptor = manifest["components"].get("data/registration.md", {})
+            if (stage != "prepare_wiki" or registration(job) is None
+                    or reference["sha256"] != descriptor.get("sha256")):
+                raise ResultError("preservation_content_mismatch")
+            content = components.get("data/registration.md")
         if stage == "prepare_wiki" and registration(job) is not None:
-            if payload["content"] != components.get("data/registration.md"):
+            if content != components.get("data/registration.md") or type(content) is not str:
                 raise ResultError("preservation_content_mismatch")
         # 위키 작성용 입력으로 그래프를 저장하거나, 다른 문서를 대상으로 바꾸는 것을 막는다.
         if manifest["stage"] != stage or manifest["target_document"] != document:
@@ -279,7 +298,7 @@ class ResultStore:
         rule_checks.run(report, "R-A01", lambda: self.rulesets.validate_reference(job["tenant"], manifest["ruleset_ref"]))
         report["basis"] = {key: payload[key] for key in ("job_id", "run_id", "bundle_id", "bundle_revision", "document")}
         report["basis"].update(ruleset_ref=manifest["ruleset_ref"], source_revision=payload["expected_revision"],
-                               submission_sha256=canonical_json_hash(payload.get("submission", payload.get("content"))),
+                               submission_sha256=canonical_json_hash(payload.get("submission", content)),
                                schema_version=payload.get("submission", {}).get("schema_version"),
                                analysis_basis_revision=manifest.get("analysis_basis_revision"))
         rule_checks.start(report, "R-A04")
@@ -367,7 +386,7 @@ class ResultStore:
             rule_checks.start(report, "R-A05")
             # before_commit()처럼 여기서 실행하지 않고 함수 자체를 넘긴다.
             # WikiStore가 잠금을 보유한 정확한 시점에 이 함수를 실행해야 하기 때문이다.
-            result = self.store.save(document, payload["content"], expected_revision=source_revision,
+            result = self.store.save(document, content, expected_revision=source_revision,
                                      before_commit=before_commit, actor=actor,
                                      origin={"kind": "ai", "tool": "analysis", "job_id": job["job_id"], "run_id": job["run_id"]},
                                      reason="preserve_source" if registration(job) is not None else "analysis_wiki")

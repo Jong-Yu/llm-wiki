@@ -19,6 +19,7 @@ import type {
 import {
   isDocumentPath,
   parseDocumentContentResult,
+  parseLinkedDocuments,
   sourceFormatSchema,
 } from '@contracts/documents.contract';
 import type { ReadQueryCache } from '@renderer/shared/lib/readQueries';
@@ -312,14 +313,47 @@ async function enrichRow(
   snippet: string | null,
   scope: LibraryScope,
 ): Promise<LibraryRow> {
-  if (item.kind === 'source')
+  if (item.kind === 'source') {
+    const linked = item.linkedDocuments ?? [];
+    if (linked.length === 0)
+      return {
+        item,
+        snippet,
+        extraction: 'missing',
+        extractionMessage: null,
+        relationCount: null,
+      };
+    const results = await Promise.all(
+      linked.map((wiki: (typeof linked)[number]): Promise<LibraryRow> =>
+        enrichRow(wiki, null, scope),
+      ),
+    );
+    const extraction = results.some(
+      (row: LibraryRow): boolean => row.extraction === 'unknown',
+    )
+      ? 'unknown'
+      : results.some((row: LibraryRow): boolean => row.extraction === 'stale')
+        ? 'stale'
+        : results.some(
+              (row: LibraryRow): boolean => row.extraction === 'missing',
+            )
+          ? 'missing'
+          : 'ready';
     return {
       item,
       snippet,
-      extraction: 'missing',
-      extractionMessage: '등록 원본 · 분석 전',
-      relationCount: null,
+      extraction,
+      extractionMessage: null,
+      relationCount:
+        extraction === 'ready'
+          ? results.reduce(
+              (sum: number, row: LibraryRow): number =>
+                sum + (row.relationCount ?? 0),
+              0,
+            )
+          : null,
     };
+  }
   try {
     const result = await knowledgeGateway.read({
       connectionId: scope.connectionId,
@@ -417,7 +451,7 @@ export async function queryDocumentLibrary(
             : {}),
         },
         operation: 'search',
-        input: { query: request.query, limit: 50 },
+        input: { query: request.query, limit: 50, group_sources: true },
       });
       if (!response.ok)
         return {
@@ -462,6 +496,7 @@ export async function queryDocumentLibrary(
           format: match.format,
           registrationRevision: match.registration_revision,
           linkedDocumentCount: match.documents.length,
+          linkedDocuments: parseLinkedDocuments(match.documents),
           analysisStatus: 'not_started',
         }),
       );
@@ -490,6 +525,7 @@ export async function queryDocumentLibrary(
         connectionId: scope.connectionId,
         cursor: request.cursor,
         limit: 20,
+        groupSources: true,
       });
       if (!response.ok)
         return {

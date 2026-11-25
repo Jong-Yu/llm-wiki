@@ -40,6 +40,7 @@ def execution_configuration(adapter, preflight, *, input_view, semantic_check, r
     """선택된 제공자/버전/모델/실행 설정을 묶는다. 기본 모델의 실제 해석은 보증하지 않는다."""
     from .draft_validation import configuration
     from .rule_selection import rules_view_configuration
+    from .segmented_input import configuration as segmented_configuration
     selected_rules = rules_view_configuration(rules_view)
     info = preflight if isinstance(preflight, dict) else {}
     value = {"version": 1, "adapter": type(adapter).__module__ + "." + type(adapter).__qualname__,
@@ -47,7 +48,7 @@ def execution_configuration(adapter, preflight, *, input_view, semantic_check, r
              "cli": getattr(adapter, "cli", None), "requested_model": getattr(adapter, "model", None),
              "timeout_seconds": getattr(adapter, "timeout_seconds", None),
              "input_view": input_view, "semantic_check": semantic_check,
-             "draft_validation": configuration()}
+             "draft_validation": configuration(), "segmented_analysis": segmented_configuration()}
     if input_view != "full":
         from .input_view import reporting_configuration
         value["input_view_reporting"] = reporting_configuration(input_view)

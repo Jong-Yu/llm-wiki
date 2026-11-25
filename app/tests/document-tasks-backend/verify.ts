@@ -13,6 +13,9 @@ import { AnalysisService } from '@main/backend/AnalysisService';
 import { writeProcessJournal } from '@main/backend/processRecovery';
 import { verifyImportProcessing } from './import-processing';
 import { verifyNotificationDelivery } from './notification-delivery';
+import { verifyPageCorrections } from './page-corrections';
+import { verifyPageOcr } from './page-ocr';
+import { verifyRegistrationContent } from './registration-content';
 import {
   verifyNotifications,
   verifyMissingRegistration,
@@ -915,6 +918,12 @@ try {
     ...session().expectedScope,
   });
   await verifyNotificationDelivery();
+  await verifyPageCorrections(
+    context,
+    services('page-corrections').recovery,
+    root,
+  );
+  await verifyPageOcr(context, root, python);
   await verifyNotifications(
     context,
     connection,
@@ -931,7 +940,8 @@ try {
     reconciled.data.analysis,
     first,
   );
-  console.log('15 backend and processing workflow checks passed');
+  await verifyRegistrationContent(root, python, cipher, fetchOriginal);
+  console.log('Backend and processing workflow checks passed');
 } finally {
   globalThis.fetch = fetchOriginal;
 }

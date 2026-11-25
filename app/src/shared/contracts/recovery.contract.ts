@@ -14,6 +14,7 @@ export const recoveryKindSchema = z.enum([
   'pending-source-conversion',
   'pending-analysis',
   'document-tasks',
+  'registration-drafts',
   'notification-delivery',
   'notification-outbox',
   'notification-approvals',

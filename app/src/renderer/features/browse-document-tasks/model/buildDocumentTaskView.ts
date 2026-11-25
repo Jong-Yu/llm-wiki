@@ -5,13 +5,14 @@ import type {
 } from '@contracts/documentTasks.contract';
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
 import { conversionNeedsTextReview } from '@contracts/sourceConversion.contract';
+import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
 import type {
   DocumentTaskResult,
+  DocumentTaskStage,
   DocumentTaskState,
-  DocumentTaskStep,
-  DocumentTaskStepState,
   DocumentTaskView,
 } from './documentTask.types';
+import { buildDocumentProgress } from './documentTaskProgress';
 
 /** 상위 페이지가 같은 작업의 처리 세션을 조합할 때 전달하는 읽기 전용 입력입니다. */
 export type DocumentTaskProcessingView = {
@@ -38,6 +39,28 @@ type DocumentTaskViewOptions = {
 };
 type ConversionView = SourceConversionRun | DocumentConversionAttempt;
 
+/** 내용 보존과 AI 입력 한도를 구별하며 같은 입력의 반복 실행을 제안하지 않습니다. */
+function inputSizeLimited(code: unknown): boolean {
+  return (
+    typeof code === 'string' &&
+    [
+      'input_limit',
+      'input_component_limit',
+      'analysis_prompt_limit',
+      'ai_input_limit',
+    ].includes(code)
+  );
+}
+
+/** 이미 저장된 결과를 유지하는 크기 한도 안내를 공통으로 사용합니다. */
+function inputLimitGuidance(): DocumentTaskView['explanation'] {
+  return {
+    title: '분석할 수 있는 크기를 넘었습니다',
+    body: '원본과 변환한 내용은 보관되어 있습니다. 현재 AI가 한 번에 읽을 수 있는 크기를 넘어 분석을 완료하지 못했습니다.',
+    next: '필요한 범위의 원본으로 교체할 수 있습니다. 기존 원본과 결과는 유지됩니다.',
+  };
+}
+
 /** 기존 기기 요약과 서버 보고의 문자 확인 경고를 같은 표시 기준으로 읽습니다. */
 function textReviewScopes(conversion: ConversionView | null): string[] {
   if (conversion?.state !== 'partial' || conversion.receiptState !== 'saved')
@@ -56,7 +79,7 @@ function textReviewScopes(conversion: ConversionView | null): string[] {
       report.unread_ranges.map((range: string): string => {
         const scope = range.slice(0, range.indexOf(':'));
         return scope
-          .replace(/^page (\d+)$/, '$1쪽')
+          .replace(/^page (\d+)$/, '$1페이지')
           .replace(/^frame (\d+)$/, '$1번째 프레임');
       }),
     ),
@@ -78,7 +101,7 @@ function textReviewUnits(
         return [];
       const label = scopes.find(
         (scope: string): boolean =>
-          scope === `${location.start}쪽` ||
+          scope === `${location.start}페이지` ||
           scope === `${location.start}번째 프레임`,
       );
       return label && unit.content ? [{ label, content: unit.content }] : [];
@@ -142,9 +165,34 @@ function matchingJob(
     : null;
 }
 
+/** 같은 접수에서 채택한 내용은 다시 확인시키지 않되 다른 변환 보고는 해소하지 않습니다. */
+function registrationUsesCurrentText(
+  task: DocumentTask,
+  job: AnalysisJob | null,
+  conversion: ConversionView | null,
+): boolean {
+  const accepted = matchingJob(task, job);
+  if (
+    !accepted?.registration ||
+    accepted.request_id !== task.registration.requestId ||
+    accepted.targets.length !== 1 ||
+    accepted.targets[0]?.document !== task.targetDocument
+  )
+    return false;
+  const reference = conversion?.reference;
+  return (
+    !reference ||
+    (accepted.registration.conversion_ref?.conversion_id ===
+      reference.conversionId &&
+      accepted.registration.conversion_ref.conversion_revision ===
+        reference.conversionRevision)
+  );
+}
+
 /** 부분 결과는 저장 영수증·첫 본문 참조로 확인하며 추출 완료와 구별합니다. */
 function savedResults(
-  task: DocumentTask,
+  title: string,
+  targetDocument: string | null,
   detail: AnalysisDetail | null,
 ): DocumentTaskResult[] {
   const saved = new Map<string, DocumentTaskResult>();
@@ -152,7 +200,7 @@ function savedResults(
   if (first)
     saved.set(first.document, {
       document: first.document,
-      title: task.item.title,
+      title,
       ontology: false,
       current: false,
     });
@@ -163,10 +211,7 @@ function savedResults(
     const previous = saved.get(receipt.document);
     saved.set(receipt.document, {
       document: receipt.document,
-      title:
-        receipt.document === task.targetDocument
-          ? task.item.title
-          : receipt.document,
+      title: receipt.document === targetDocument ? title : receipt.document,
       ontology:
         previous?.ontology === true || receipt.stage === 'extract_ontology',
       current: item.current_output?.status === 'current',
@@ -192,13 +237,49 @@ function conversionProgress(
   if (progress.stage === 'submit') return '변환 결과 보관 중';
   const unit =
     format === 'pdf'
-      ? '쪽'
+      ? '페이지'
       : format === 'pptx' || format === 'ppt'
         ? '슬라이드'
         : '단위';
   return progress.total == null
     ? `${progress.completed}${unit} 처리 기록`
     : `${progress.completed} / ${progress.total}${unit} 처리 기록`;
+}
+
+/** 서버 작업 상태는 기기의 작업 색인이 없어도 같은 기준으로 표시합니다. */
+function analysisState(
+  detail: AnalysisDetail | null,
+  job: AnalysisJob,
+  running: boolean,
+): DocumentTaskState {
+  if (
+    job.result_summary.status === 'pending_reconcile' ||
+    (detail?.receiptErrors.length ?? 0) > 0
+  )
+    return 'unconfirmed';
+  if (
+    detail?.local.status === 'running' ||
+    job.lease_status === 'active' ||
+    running
+  )
+    return 'running';
+  if (job.result_summary.status === 'complete') return 'complete';
+  if (
+    job.state === 'cancelled' ||
+    detail?.local.status === 'stopped' ||
+    job.reported_status === 'stopped'
+  )
+    return 'stopped';
+  if (job.result_summary.status === 'partial') return 'partial';
+  if (
+    detail?.local.status === 'failed' ||
+    job.reported_status === 'failed' ||
+    job.reported_status === 'blocked' ||
+    job.blockers.length > 0 ||
+    job.result_summary.status === 'rejected'
+  )
+    return 'failed';
+  return 'ready';
 }
 
 /** 실행 보고보다 저장 미확정·영수증을 먼저 보되 새 실행 중에는 이전 실패를 되살리지 않습니다. */
@@ -211,36 +292,7 @@ function taskState(
   readFailed: boolean,
 ): DocumentTaskState {
   if (readFailed || processing?.scopeInvalid) return 'unconfirmed';
-  if (job) {
-    if (
-      job.result_summary.status === 'pending_reconcile' ||
-      (detail?.receiptErrors.length ?? 0) > 0
-    )
-      return 'unconfirmed';
-    if (
-      detail?.local.status === 'running' ||
-      job.lease_status === 'active' ||
-      processing?.phase === 'running'
-    )
-      return 'running';
-    if (job.result_summary.status === 'complete') return 'complete';
-    if (
-      job.state === 'cancelled' ||
-      detail?.local.status === 'stopped' ||
-      job.reported_status === 'stopped'
-    )
-      return 'stopped';
-    if (job.result_summary.status === 'partial') return 'partial';
-    if (
-      detail?.local.status === 'failed' ||
-      job.reported_status === 'failed' ||
-      job.reported_status === 'blocked' ||
-      job.blockers.length > 0 ||
-      job.result_summary.status === 'rejected'
-    )
-      return 'failed';
-    return 'ready';
-  }
+  if (job) return analysisState(detail, job, processing?.phase === 'running');
   if (task.analysisSummary && task.registration.state === 'linked') {
     const summary = task.analysisSummary;
     if (summary.resultStatus === 'pending_reconcile') return 'unconfirmed';
@@ -304,7 +356,7 @@ function failureMessage(conversion: ConversionView | null): string | null {
     );
   if (workerFailed)
     return '변환 프로그램이 중단되어 나머지 원본을 읽지 못했습니다. 이 기록에는 구체적인 중단 원인이 남아 있지 않습니다.';
-  return conversion?.message || null;
+  return null;
 }
 
 /** 현재 상태와 보존된 단계에 맞춰 실행 전·실패·미확정 설명을 작성합니다. */
@@ -315,7 +367,20 @@ function explanation(
   detail: AnalysisDetail | null,
   conversion: ConversionView | null,
   processing: DocumentTaskProcessingView | null,
+  activeStep: DocumentTaskStage,
 ): DocumentTaskView['explanation'] {
+  if (
+    state === 'unconfirmed' &&
+    conversion &&
+    'canResumeUpload' in conversion &&
+    conversion.canResumeUpload &&
+    processing?.canRetryConversion
+  )
+    return {
+      title: '변환 결과 저장을 이어갈 수 있습니다',
+      body: '변환한 내용은 이 기기에 보관되어 있습니다. 서버에 저장되지 않은 부분부터 이어서 보냅니다.',
+      next: '저장 계속을 선택하면 같은 요청의 결과를 먼저 확인하고 남은 내용을 보관합니다.',
+    };
   if (state === 'unconfirmed')
     return {
       title: '처리 결과를 확인해야 합니다',
@@ -324,15 +389,15 @@ function explanation(
     };
   if (state === 'complete')
     return {
-      title: '문서와 추출 결과가 저장됐습니다',
-      body: '추출한 관계는 검토 전 상태입니다. 저장 완료가 내용의 정확성이나 전문가 승인을 뜻하지 않습니다.',
-      next: '보존된 문서와 관계를 열어 확인할 수 있습니다.',
+      title: '등록 완료',
+      body: 'Wiki 문서와 온톨로지 저장을 확인했습니다.',
+      next: '저장된 문서를 열어 확인할 수 있습니다.',
     };
   if (state === 'review')
     return {
       title: '변환된 문자를 확인해 주세요',
       body: '변환 문자는 보관됐습니다. 문자 인식의 신뢰도가 낮은 구간이 있어 원본과 대조해야 합니다.',
-      next: '문자 검토와 승인에서 경고 쪽을 대조하고 사용 여부를 확인해 주세요. 모든 쪽 확인과 최종 승인이 서버에 저장된 뒤 이어갈 수 있습니다.',
+      next: '원본과 등록할 내용을 대조하고 필요한 내용을 수정해 주세요.',
     };
   if (state === 'stopped')
     return {
@@ -360,7 +425,7 @@ function explanation(
           ? processing.message
           : (failureMessage(conversion) ??
             '본문을 완전히 읽지 못했습니다. 등록한 원본은 보관되어 있습니다.'),
-      next: '다시 변환은 원본의 처음부터 시작합니다. 읽지 못한 부분이 남아 있으면 관계 추출을 진행하지 않습니다.',
+      next: '다시 변환하면 원본의 처음부터 읽습니다. 보관한 원본과 이전 결과는 유지됩니다.',
     };
   if (state === 'partial' || state === 'failed')
     return {
@@ -377,7 +442,7 @@ function explanation(
   if (state === 'ready')
     return {
       title: '문서 처리를 실행하기 전입니다',
-      body: '등록한 원본은 보관되어 있습니다. 자동 실행 대기열에 등록된 상태는 아닙니다.',
+      body: '등록한 원본은 보관되어 있습니다.',
       next: converted
         ? '실행 조건을 확인하고 실행을 선택하면 이 작업을 시작합니다.'
         : '본문 준비를 시작하면 원본에서 문자를 읽습니다.',
@@ -392,9 +457,11 @@ function explanation(
             ? 'Wiki 문서를 준비하고 있습니다'
             : '관계를 추출하고 있습니다',
     body:
-      processing?.message ??
-      detail?.local.message ??
-      '작업 목록과 이 문서에서 같은 작업을 다시 열 수 있습니다.',
+      activeStep === 'convert'
+        ? '원본에서 등록할 내용을 읽고 있습니다.'
+        : activeStep === 'wiki'
+          ? '준비된 내용으로 Wiki 문서를 만들고 있습니다.'
+          : '저장된 Wiki 문서에서 개념과 관계를 구성하고 있습니다.',
     next: '다른 화면으로 이동해도 작업은 이어집니다. 앱을 완전히 종료하면 이 기기의 실행은 중단될 수 있습니다.',
   };
 }
@@ -415,7 +482,7 @@ export function buildDocumentTaskView(
     matchingConversion(task, options.conversion ?? null) ??
     matchingConversion(task, processing?.conversion ?? null) ??
     matchingConversion(task, task.conversions.at(-1) ?? null);
-  const state = taskState(
+  const observedState = taskState(
     task,
     detail,
     job,
@@ -423,7 +490,7 @@ export function buildDocumentTaskView(
     processing,
     options.readFailed === true || scopeInvalid,
   );
-  const results = savedResults(task, detail);
+  const results = savedResults(task.item.title, task.targetDocument, detail);
   const plainText = task.item.format === 'md' || task.item.format === 'txt';
   const converted =
     plainText ||
@@ -431,96 +498,51 @@ export function buildDocumentTaskView(
     (conversion?.state === 'complete' && conversion.receiptState === 'saved');
   const progress = conversionProgress(conversion, task.item.format);
   const reviewScopes =
-    scopeInvalid || processing?.phase === 'conversion_failed'
+    scopeInvalid ||
+    processing?.phase === 'conversion_failed' ||
+    registrationUsesCurrentText(task, job, conversion)
       ? []
       : textReviewScopes(conversion);
-  const current: DocumentTaskStepState =
-    state === 'complete'
-      ? 'complete'
-      : state === 'running'
-        ? 'current'
-        : state === 'partial'
-          ? 'failed'
-          : state;
-  const allSaved = job?.result_summary.status === 'complete';
+  const stageView = buildDocumentProgress({
+    state: observedState,
+    detail,
+    job,
+    targets: [task.targetDocument],
+    inputReady: converted,
+    conversionKnown: true,
+    conversion,
+    format: task.item.format,
+  });
+  const { state } = stageView;
+  const inputLimited =
+    state !== 'complete' &&
+    (inputSizeLimited(task.registration.errorCode) ||
+      inputSizeLimited(detail?.local.failureCode));
   const ontologyRequested = job?.outputs.includes('ontology') ?? true;
   const cachedOnly =
     !job &&
     task.analysisSummary !== null &&
     task.registration.state === 'linked';
-  const savedOntology = results.some(
-    (result: DocumentTaskResult): boolean => result.ontology && result.current,
-  );
-  const steps: DocumentTaskStep[] = [
-    { title: '원본 보관', state: 'complete', note: '등록한 원본 보관됨' },
-    {
-      title: '문자 변환',
-      state: converted ? 'complete' : current,
-      note: plainText
-        ? '원문 문자 그대로 사용'
-        : reviewScopes.length > 0
-          ? converted
-            ? '변환 문자 사용 · 원본 대조 필요'
-            : '변환 문자 보관 · 원본 대조 필요'
-          : converted
-            ? '본문 읽기 완료'
-            : (progress ?? '처리량 기록 없음'),
-    },
-    {
-      title: 'Wiki 저장',
-      state: results.length > 0 ? 'complete' : converted ? current : 'waiting',
-      note:
-        results.length > 0
-          ? '문서 보존됨'
-          : state === 'unconfirmed'
-            ? '저장 여부 확인 필요'
-            : '저장 완료 전',
-    },
-    {
-      title: '관계 추출',
-      state: !ontologyRequested
-        ? 'waiting'
-        : allSaved && savedOntology
-          ? 'complete'
-          : results.length > 0
-            ? current
-            : 'waiting',
-      note: !ontologyRequested
-        ? '요청하지 않은 단계'
-        : savedOntology
-          ? '추출 완료 · 검토 전'
-          : state === 'unconfirmed' && results.length > 0
-            ? '저장 결과 확인 필요'
-            : '미완료 단계',
-    },
-  ];
-  const phase = !converted
-    ? '문자 변환'
-    : results.length === 0
-      ? 'Wiki 저장'
-      : '관계 추출';
-  const statuses: Record<DocumentTaskState, string> = {
-    ready: '실행 전',
-    running: `${phase} 중`,
-    failed: `${phase} 실패`,
-    partial: '일부 완료 · 조치 필요',
-    review: '문자 확인 필요',
-    unconfirmed: '결과 확인 필요',
-    complete:
-      reviewScopes.length > 0 ? '처리 완료 · 문자 확인 필요' : '처리 완료',
-    stopped: '실행 중단',
-  };
   let primaryAction: DocumentTaskView['primaryAction'] = null;
-  if (!scopeInvalid) {
+  if (!scopeInvalid && !inputLimited) {
     if (state === 'unconfirmed')
-      primaryAction = { id: 'refresh', label: '결과 확인' };
+      primaryAction =
+        options.canWrite !== false &&
+        !task.registration.jobId &&
+        task.registration.state !== 'unconfirmed' &&
+        conversion &&
+        'canResumeUpload' in conversion &&
+        conversion.canResumeUpload &&
+        processing?.canRetryConversion
+          ? { id: 'retry-conversion', label: '저장 계속' }
+          : { id: 'refresh', label: '결과 확인' };
     else if (
       options.canWrite !== false &&
       !task.registration.jobId &&
       !detail
     ) {
       if (state === 'running' && conversion?.state === 'running')
-        primaryAction = { id: 'stop-conversion', label: '이 기기 변환 중단' };
+        primaryAction = { id: 'stop-conversion', label: '문자 변환 중단' };
       else if (
         state !== 'review' &&
         (processing?.canRetryConversion ||
@@ -532,33 +554,47 @@ export function buildDocumentTaskView(
       else if (['ready', 'failed'].includes(state) && processing?.canPrepare)
         primaryAction = {
           id: 'prepare',
-          label: converted ? '분석 접수 준비' : '본문 준비 시작',
+          label: converted ? 'Wiki 생성 시작' : '문자 변환 시작',
         };
     }
   }
+  if (
+    !scopeInvalid &&
+    !inputLimited &&
+    options.canWrite !== false &&
+    processing?.canExecute &&
+    job &&
+    job.state !== 'cancelled' &&
+    !['running', 'complete', 'unconfirmed'].includes(state)
+  )
+    primaryAction = {
+      id: 'execute',
+      label:
+        stageView.activeStep === 'ontology'
+          ? '온톨로지 재개'
+          : 'Wiki 생성 재개',
+    };
   const warnings =
     conversion && 'reportSummary' in conversion
       ? (conversion.reportSummary?.warnings ?? [])
       : (conversion?.report?.warnings ?? []);
   return {
     id: task.taskId,
+    inputLimited,
+    detailPath: documentTaskPath(task.taskId),
     title: task.item.title,
     fileName: `${task.item.format.toUpperCase()} 원본`,
     sourceId: task.source.sourceId,
     sourceVersion: task.source.sourceVersion,
     updatedAt: task.updatedAt,
     attemptCount: task.conversions.length,
-    state,
-    status: cachedOnly
-      ? `마지막 확인 · ${statuses[state]}`
-      : allSaved && state === 'running'
-        ? '저장 완료 · 후속 작업 중'
-        : statuses[state],
+    ...stageView,
+    status: cachedOnly ? `마지막 확인 · ${stageView.status}` : stageView.status,
     progress: !converted ? progress : null,
     jobId: detail?.job.job_id ?? task.registration.jobId,
-    steps,
-    explanation:
-      state === 'complete' && !ontologyRequested
+    explanation: inputLimited
+      ? inputLimitGuidance()
+      : state === 'complete' && !ontologyRequested
         ? {
             title: 'Wiki 문서가 저장됐습니다',
             body: '이번 작업은 문서 저장까지 요청했습니다.',
@@ -571,6 +607,7 @@ export function buildDocumentTaskView(
             detail,
             conversion,
             processing,
+            stageView.activeStep,
           ),
     results,
     hasPreviousResults:
@@ -606,5 +643,79 @@ export function buildDocumentTaskView(
         ],
       }),
     ),
+  };
+}
+
+/** 다른 기기의 서버 작업도 같은 상세로 읽으며 없는 변환 시도는 만들지 않습니다. */
+export function buildAnalysisProgressView(
+  detail: AnalysisDetail,
+  canWrite: boolean = false,
+): DocumentTaskView {
+  const job = detail.job;
+  const targets = job.targets.map(
+    (target: AnalysisJob['targets'][number]): string => target.document,
+  );
+  const target = targets[0] ?? null;
+  const title = job.registration?.title ?? target ?? '문서 처리';
+  const results = savedResults(title, target, detail);
+  const progress = buildDocumentProgress({
+    state: analysisState(detail, job, false),
+    detail,
+    job,
+    targets,
+    inputReady: true,
+    conversionKnown: job.conversion?.complete === true,
+    conversion: null,
+    format: '',
+  });
+  const inputLimited =
+    progress.state !== 'complete' && inputSizeLimited(detail.local.failureCode);
+  const guidance = inputLimited
+    ? inputLimitGuidance()
+    : explanation(
+        progress.state,
+        true,
+        results,
+        detail,
+        null,
+        null,
+        progress.activeStep,
+      );
+  return {
+    id: job.job_id,
+    inputLimited,
+    detailPath: `/documents?${new URLSearchParams({ jobId: job.job_id })}`,
+    title,
+    fileName: '저장된 입력',
+    sourceId: job.source_ref.source_id,
+    sourceVersion: job.source_ref.source_version,
+    updatedAt: job.created_at,
+    attemptCount: 0,
+    jobId: job.job_id,
+    ...progress,
+    progress: null,
+    explanation: {
+      ...guidance,
+      next:
+        progress.state === 'running'
+          ? '문서 목록에서 같은 작업의 진행과 저장 결과를 다시 확인할 수 있습니다.'
+          : canWrite && progress.state === 'ready'
+            ? '등록 계속을 선택하면 다음 단계를 시작합니다.'
+            : guidance.next,
+    },
+    results,
+    hasPreviousResults: job.result_summary.results.some(
+      (result: AnalysisJob['result_summary']['results'][number]): boolean =>
+        result.saved === true && result.current_run === false,
+    ),
+    attempts: [],
+    warnings: [],
+    textReviewScopes: [],
+    textReviewUnits: [],
+    // 쓰기 권한만으로 실행 준비를 추정하지 않습니다. 조회는 항상 새 실행과 분리합니다.
+    primaryAction:
+      progress.state === 'unconfirmed'
+        ? { id: 'refresh', label: '결과 확인' }
+        : null,
   };
 }

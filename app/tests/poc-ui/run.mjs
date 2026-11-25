@@ -1,3 +1,4 @@
+import { waitForReady, stopProcess } from '../testRuntime.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, resolve, join } from 'node:path';
@@ -22,22 +23,9 @@ server.stderr.on('data', (data) => {
   serverError += data.toString();
 });
 try {
-  const url = await new Promise((accept, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error('Isolated server startup timeout')),
-      15000,
-    );
-    server.stdout.on('data', (bytes) => {
-      const match = /READY (http:\/\/127\.0\.0\.1:\d+)/.exec(bytes.toString());
-      if (match) {
-        clearTimeout(timeout);
-        accept(match[1]);
-      }
-    });
-    server.once('exit', () => {
-      clearTimeout(timeout);
-      reject(new Error(serverError || 'Isolated server stopped'));
-    });
+  const url = await waitForReady(server, {
+    timeoutMessage: () => 'Isolated server startup timeout',
+    stoppedMessage: () => serverError || 'Isolated server stopped',
   });
   await build({
     configFile: false,
@@ -79,9 +67,6 @@ try {
       throw new Error(`Electron contract checks failed (${phase}: ${code})`);
   }
 } finally {
-  server.kill('SIGTERM');
-  await new Promise((done) =>
-    server.exitCode !== null ? done() : server.once('exit', done),
-  );
+  await stopProcess(server);
   await rm(temporary, { recursive: true, force: true });
 }

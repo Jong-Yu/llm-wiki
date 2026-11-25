@@ -69,15 +69,46 @@ class CreateConversion(Profile):
     request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     source_ref: SourceRef
     method: Literal["verbatim", "pdf_text", "ocr", "xlsx_values", "docx_text", "pptx_text"]
-    units: list[ConversionUnit] = Field(min_length=1, max_length=1000)
+    units: list[ConversionUnit] = Field(max_length=1000)
     complete: bool
     unread_ranges: list[str] = Field(default_factory=list, max_length=100)
     warnings: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def failed_attempt(self):
+        """문자가 전혀 없는 보고는 명시 실패 시도로만 보관하며 성공으로 받지 않는다."""
+        if not self.units and (self.complete or not self.unread_ranges or not any(
+                'conversion_attempt_no_text' in value for value in self.warnings)):
+            raise ValueError('An empty conversion must retain its failed attempt and unread reason.')
+        return self
 
 
 class ConversionRef(Model):
     conversion_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     conversion_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CreateConversionPart(CreateConversion):
+    """부분 보고는 원래 요청과 순서를 고정하며 자체로 전체 변환 완료를 뜻하지 않는다."""
+    units: list[ConversionUnit] = Field(min_length=1, max_length=1000)
+    conversion_request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    part_index: int = Field(ge=0, le=63)
+
+
+class ConversionPartRef(Model):
+    part_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    part_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CompleteConversionParts(Profile):
+    """확정한 모든 부분 참조를 순서대로 고정한 뒤에만 한 변환 보고로 게시한다."""
+    request_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    source_ref: SourceRef
+    method: Literal["verbatim", "pdf_text", "ocr", "xlsx_values", "docx_text", "pptx_text"]
+    complete: bool
+    unread_ranges: list[str] = Field(default_factory=list, max_length=100)
+    warnings: list[str] = Field(default_factory=list, max_length=100)
+    parts: list[ConversionPartRef] = Field(min_length=1, max_length=64)
 
 
 class ContextDocument(Model):

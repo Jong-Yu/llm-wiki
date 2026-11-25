@@ -11,9 +11,15 @@ import type { AiProvider } from '@contracts/runtime.contract';
 
 export type PersonalAi = { provider: AiProvider; cli: string; model: string };
 
-/** 'default'가 아닌 모델만 --ai-model로 넘기며, 모든 AI 실행이 이 인자를 공유합니다. */
-export function aiModelArguments(ai: PersonalAi): string[] {
-  return ai.model === DEFAULT_AI_MODEL ? [] : ['--ai-model', ai.model];
+/** 모든 개인 실행에 제공자·실행 파일을 전달하며 기본 모델은 명시 옵션에서 제외합니다. */
+export function aiArguments(ai: PersonalAi): string[] {
+  return [
+    '--ai-provider',
+    ai.provider,
+    '--ai-cli',
+    ai.cli,
+    ...(ai.model === DEFAULT_AI_MODEL ? [] : ['--ai-model', ai.model]),
+  ];
 }
 
 interface AiDiscoveryOptions {

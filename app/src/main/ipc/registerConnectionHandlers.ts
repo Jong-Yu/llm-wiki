@@ -1,7 +1,18 @@
+import type { ConnectionBridge } from '@contracts/connection.contract';
+import type { DocumentsBridge } from '@contracts/documents.contract';
+import type { SourcesBridge } from '@contracts/sources.contract';
+import type { ArtifactsBridge } from '@contracts/artifacts.contract';
+import type { KnowledgeComparisonsBridge } from '@contracts/knowledgeComparisons.contract';
+import type { AiSessionsBridge } from '@contracts/aiSessions.contract';
+import type { AnalysisBridge } from '@contracts/analysis.contract';
+import type { WorkspaceBridge } from '@contracts/workspace.contract';
+import type { KnowledgeBridge } from '@contracts/knowledge.contract';
 import { createNativeNotificationDelivery } from '@main/windows/notificationDelivery';
 import { NotificationService } from '@main/backend/NotificationService';
 import { loadNotificationDevice } from '@main/backend/notificationDevice';
 import { registerNotificationHandlers } from './registerNotificationHandlers';
+import { RegistrationDraftService } from '@main/backend/RegistrationDraftService';
+import { registerRegistrationDraftHandlers } from './registerRegistrationDraftHandlers';
 import type { AnalysisContext } from '@main/backend/ConnectionService';
 import type { DocumentTask } from '@contracts/documentTasks.contract';
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
@@ -10,6 +21,8 @@ import { MarkdownExportService } from '@main/backend/MarkdownExportService';
 import { registerFileExportHandlers } from './registerFileExportHandlers';
 import { registerAttachmentHandlers } from './registerAttachmentHandlers';
 import { AttachmentReader } from '@main/backend/AttachmentReader';
+import { SourceVisualPreviewService } from '@main/backend/SourceVisualPreviewService';
+import { registerSourceVisualPreviewHandlers } from './registerSourceVisualPreviewHandlers';
 import {
   KNOWLEDGE_COMPARISON_CHANNELS,
   knowledgeComparisonListSchema,
@@ -41,7 +54,7 @@ import { AnalysisProposalsApi } from '@main/backend/AnalysisProposalsApi';
 import { registerQuestionRunHandlers } from './registerQuestionRunHandlers';
 import { registerAnalysisProposalHandlers } from './registerAnalysisProposalHandlers';
 import { registerSourceConversionHandlers } from './sourceConversionIpc';
-import { app, ipcMain } from 'electron';
+import { app } from 'electron';
 import {
   createConnectionProtection,
   createConnectionCipher,
@@ -52,6 +65,7 @@ import { registerResultDraftHandlers } from './registerResultDraftHandlers';
 import { AnalysisService } from '@main/backend/AnalysisService';
 import { DocumentTaskService } from '@main/backend/DocumentTaskService';
 import { SourceConversionService } from '@main/backend/SourceConversionService';
+import { SourcePageOcrService } from '@main/backend/SourcePageOcrService';
 import { registerDocumentTaskHandlers } from './registerDocumentTaskHandlers';
 import type { SourceConversionReadRequest } from '@contracts/sourceConversion.contract';
 import type {
@@ -83,7 +97,7 @@ import type {
   AnalysisDetailResult,
   AnalysisPageResult,
 } from '@contracts/analysis.contract';
-import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
+import type { BrowserWindow } from 'electron';
 import {
   CONNECTION_CHANNELS,
   parseConnectRequest,
@@ -103,7 +117,8 @@ import type {
   SourcePreviewResult,
 } from '@contracts/documents.contract';
 import { ConnectionService } from '@main/backend/ConnectionService';
-import { isAppSender } from './isAppSender';
+import { createIpcRegistrar } from './registerIpcHandlers';
+import type { IpcMethods } from './registerIpcHandlers';
 import { WorkspaceApiService } from '@main/backend/WorkspaceApiService';
 import {
   WORKSPACE_CHANNELS,
@@ -129,24 +144,18 @@ import type {
   SourceDownloadResult,
 } from '@contracts/sources.contract';
 
-type HandlerResult =
-  | KnowledgeComparisonPageResult
-  | KnowledgeComparisonDetailResult
-  | AiSessionsResult
-  | ConnectionResult
-  | DocumentListResult
-  | DocumentContentResult
-  | SourcePreviewResult
-  | ChooseSourceFileResult
-  | SourceRegistrationResult
-  | SourceVersionsResult
-  | SourceDownloadResult
-  | DocumentKnowledgeResult
-  | WorkspaceResult
-  | ChooseArtifactFileResult
-  | ArtifactUploadResult
-  | ArtifactDownloadResult;
-type AnalysisHandlerResult = AnalysisDetailResult | AnalysisPageResult;
+type RegisteredMethods = IpcMethods<
+  ConnectionBridge,
+  typeof CONNECTION_CHANNELS
+> &
+  IpcMethods<DocumentsBridge, typeof DOCUMENT_CHANNELS> &
+  IpcMethods<SourcesBridge, typeof SOURCE_CHANNELS> &
+  IpcMethods<ArtifactsBridge, typeof ARTIFACTS_CHANNELS> &
+  IpcMethods<KnowledgeComparisonsBridge, typeof KNOWLEDGE_COMPARISON_CHANNELS> &
+  IpcMethods<AiSessionsBridge, typeof AI_SESSIONS_CHANNELS> &
+  IpcMethods<AnalysisBridge, typeof ANALYSIS_CHANNELS> &
+  IpcMethods<WorkspaceBridge, typeof WORKSPACE_CHANNELS> &
+  IpcMethods<KnowledgeBridge, typeof KNOWLEDGE_CHANNELS>;
 
 export type ConnectionShutdown = (() => Promise<void>) & {
   activeCount: () => number;
@@ -183,6 +192,21 @@ export async function registerConnectionHandlers(
     ),
   );
   registerRecoveryHandlers(getWindow, rendererLocation, recovery);
+  // 초안은 로그아웃으로 삭제하지 않고 같은 사용자의 재인증 후에만 다시 엽니다.
+  registerRegistrationDraftHandlers(
+    getWindow,
+    rendererLocation,
+    new RegistrationDraftService(
+      new RecoveryService(
+        service,
+        new ProtectedRecoveryStore(
+          join(app.getPath('userData'), 'registration-drafts'),
+          createConnectionCipher(),
+          4096,
+        ),
+      ),
+    ),
+  );
   const workspace = new WorkspaceApiService(service);
   const artifacts = new ArtifactService(service);
   registerTemplateHandlers(
@@ -212,6 +236,9 @@ export async function registerConnectionHandlers(
       join(app.getPath('userData'), 'notification-device.json'),
     ),
     recovery,
+    new SourcePageOcrService(service, {
+      workRoot: join(app.getPath('userData'), 'source-page-ocr'),
+    }),
   );
   analysis.connectExecutionGuard(
     (
@@ -229,6 +256,16 @@ export async function registerConnectionHandlers(
     ): Promise<void> => notifications.observeConversion(context, task, run),
   );
   registerNotificationHandlers(getWindow, rendererLocation, notifications);
+  const sourceVisualPreviews = new SourceVisualPreviewService(
+    service,
+    notifications,
+    { workRoot: join(app.getPath('userData'), 'source-previews') },
+  );
+  registerSourceVisualPreviewHandlers(
+    getWindow,
+    rendererLocation,
+    sourceVisualPreviews,
+  );
   const notificationDelivery = createNativeNotificationDelivery(
     service,
     notifications,
@@ -287,52 +324,24 @@ export async function registerConnectionHandlers(
     rendererLocation,
     new ResultDraftService(service, recovery),
   );
-  /** 공통 호출자·인자 개수 검사 뒤에 작업별 입력 검사를 연결합니다. */
-  const register = (
-    channel: string,
-    count: number,
+  const registrar = createIpcRegistrar(getWindow, rendererLocation, {
+    invalidRequest: '앱 요청의 입력을 확인해 주세요.',
+    unexpected: {
+      code: 'invalid_request',
+      message: '앱 요청의 입력을 확인해 주세요.',
+    },
+  });
+  /** 채널마다 공개 bridge의 인자 수와 결과 타입을 확인합니다. */
+  const register = <Channel extends keyof RegisteredMethods>(
+    channel: Channel,
+    count: Parameters<RegisteredMethods[Channel]>['length'],
     operation: (
       value: unknown,
     ) =>
-      | HandlerResult
-      | AnalysisHandlerResult
-      | Promise<HandlerResult | AnalysisHandlerResult>,
+      | Awaited<ReturnType<RegisteredMethods[Channel]>>
+      | Promise<Awaited<ReturnType<RegisteredMethods[Channel]>>>,
   ): void => {
-    ipcMain.handle(
-      channel,
-      async (
-        event: IpcMainInvokeEvent,
-        ...args: unknown[]
-      ): Promise<HandlerResult | AnalysisHandlerResult> => {
-        if (!isAppSender(event, getWindow, rendererLocation))
-          return {
-            ok: false,
-            error: {
-              code: 'forbidden',
-              message: '허용되지 않은 앱 요청입니다.',
-            },
-          };
-        if (args.length !== count)
-          return {
-            ok: false,
-            error: {
-              code: 'invalid_request',
-              message: '앱 요청의 입력을 확인해 주세요.',
-            },
-          };
-        try {
-          return await operation(args[0]);
-        } catch {
-          return {
-            ok: false,
-            error: {
-              code: 'invalid_request',
-              message: '앱 요청의 입력을 확인해 주세요.',
-            },
-          };
-        }
-      },
-    );
+    registrar.register(channel, count, operation);
   };
   register(
     CONNECTION_CHANNELS.authenticate,
@@ -534,6 +543,8 @@ export async function registerConnectionHandlers(
       notificationDelivery.dispose();
       service.disconnect();
       await Promise.all([
+        notifications.stop(),
+        sourceVisualPreviews.stop(),
         analysis.stop(),
         questions.stop(),
         stopConversions(),

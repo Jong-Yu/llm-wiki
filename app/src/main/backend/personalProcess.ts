@@ -13,6 +13,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { AI_NETWORK_ENVIRONMENT } from '../settings/aiNetworkEnvironment';
+import type { AiActivity } from '@contracts/aiSessions.contract';
 
 export type PersonalRuntime = { projectRoot: string; python: string };
 export type PrivateExecution = {
@@ -21,6 +22,25 @@ export type PrivateExecution = {
   workDirectory: string;
   cleanupAuth: () => Promise<void>;
 };
+
+type ActivityRun<Context> = {
+  context: Context;
+  activity: AiActivity;
+  stopping: boolean;
+};
+
+/** 현재 연결의 공개 활동만 복사하며 프로세스·인증 정보와 실행 상태는 소유 서비스에 남깁니다. */
+export function runningActivities<Context>(
+  runs: Iterable<ActivityRun<Context>>,
+  isCurrent: (context: Context) => boolean,
+): AiActivity[] {
+  return [...runs]
+    .filter((run: ActivityRun<Context>): boolean => isCurrent(run.context))
+    .map((run: ActivityRun<Context>): AiActivity => ({
+      ...run.activity,
+      status: run.stopping ? 'stopping' : 'running',
+    }));
+}
 
 /** 저장 설정이 적용된 공통 환경에서 개인 실행기 경로를 같은 우선순위로 고릅니다. */
 export function personalRuntimePaths(): PersonalRuntime {

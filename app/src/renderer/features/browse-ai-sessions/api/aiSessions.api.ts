@@ -74,6 +74,19 @@ export function throwIfScopeError(value: unknown): void {
   );
 }
 
+/** 성공 자료를 그대로 반환하고 접근 거부는 일반 업무 오류와 구분해 전달합니다. */
+export function unwrapSessionResult<T>(
+  result:
+    | { ok: true; data: T }
+    | { ok: false; error: { message: string; code?: string; status?: number } },
+): T {
+  if (!result.ok) {
+    throwIfScopeError(result.error);
+    throw new Error(result.error.message);
+  }
+  return result.data;
+}
+
 /** 공개 연결 상태에서 현재 인증 주체와 관점을 고정합니다. */
 export async function readSessionScope(): Promise<QuestionSession> {
   const result = await connectionGateway
@@ -82,11 +95,7 @@ export async function readSessionScope(): Promise<QuestionSession> {
       throwIfScopeError(cause);
       throw cause;
     });
-  if (!result.ok) {
-    throwIfScopeError(result.error);
-    throw new Error(result.error.message);
-  }
-  const state = result.data;
+  const state = unwrapSessionResult(result);
   if (state.status !== 'connected' || !state.selection)
     throw new SessionScopeError('작업 공간에 연결한 뒤 다시 확인해 주세요.');
   const membership = state.workspaces.find(

@@ -1,3 +1,4 @@
+import { sameAccessRevision } from '@contracts/connection.contract';
 import type {
   ConnectionResult,
   WorkspaceMembership,
@@ -8,6 +9,7 @@ import type {
   ChooseSourceFileResult,
   SourceRegistrationRequest,
   SourceRegistrationResult,
+  SourceVersions,
 } from '@contracts/sources.contract';
 import { connectionGateway } from '@renderer/platform/connection';
 import { documentsGateway } from '@renderer/platform/documents';
@@ -53,13 +55,80 @@ function scopeFromConnection(result: ConnectionResult): ImportScope | null {
     ...(connection.accessRevision
       ? { accessRevision: connection.accessRevision }
       : {}),
-    canRegister: workspace.permissions.includes('source_write'),
+    canRegister: ['write', 'source_write', 'ontology_write'].every(
+      (permission: string): boolean =>
+        workspace.permissions.includes(permission),
+    ),
     canPrepare: ['write', 'source_write', 'ontology_write'].every(
       (permission: string): boolean =>
         workspace.permissions.includes(permission),
     ),
     canExtract: workspace.permissions.includes('ontology_write'),
   };
+}
+
+export type ImportReplacement = {
+  sourceId: string;
+  sourceVersion: string;
+  expectedRegistrationRevision: string;
+  title: string;
+};
+export type ImportReplacementResult =
+  | { ok: true; data: ImportReplacement }
+  | { ok: false; message: string };
+
+/** 교체할 판본이 현재 판본인지 조회하고 서버의 CAS 기준만 고정합니다. */
+export async function readImportReplacement(
+  scope: ImportScope,
+  sourceId: string,
+  sourceVersion: string,
+): Promise<ImportReplacementResult> {
+  if (!/^[a-f0-9]{32}$/.test(sourceId) || !/^[a-f0-9]{32}$/.test(sourceVersion))
+    return { ok: false, message: '교체할 문서 주소를 확인해 주세요.' };
+  if (!(await confirmImportScope(scope)))
+    return { ok: false, message: '현재 작업 공간을 다시 확인해 주세요.' };
+  try {
+    const result = await sourcesGateway.versions({
+      connectionId: scope.connectionId,
+      sourceId,
+    });
+    if (!result.ok) return { ok: false, message: result.error.message };
+    const data: SourceVersions = result.data;
+    if (
+      !(await confirmImportScope(scope)) ||
+      data.connectionId !== scope.connectionId ||
+      data.sourceId !== sourceId ||
+      data.access.userId !== scope.userId ||
+      data.access.tenant !== scope.tenant ||
+      data.access.profileId !== scope.profileId ||
+      !sameAccessRevision(data.access, scope)
+    )
+      return {
+        ok: false,
+        message:
+          '문서의 작업 범위가 바뀌었습니다. 문서 목록에서 다시 열어 주세요.',
+      };
+    if (data.currentVersion !== sourceVersion)
+      return {
+        ok: false,
+        message:
+          '이미 새 파일이 등록되었습니다. 문서 목록에서 최신 진행 상태를 확인해 주세요.',
+      };
+    return {
+      ok: true,
+      data: {
+        sourceId,
+        sourceVersion,
+        expectedRegistrationRevision: data.registrationRevision,
+        title: data.title,
+      },
+    };
+  } catch {
+    return {
+      ok: false,
+      message: '교체할 원본을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+    };
+  }
 }
 
 /** 전체 사용자·연결·정책 기준으로 초안의 수명을 격리합니다. */
