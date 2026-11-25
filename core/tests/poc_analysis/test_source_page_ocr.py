@@ -111,7 +111,8 @@ class PageClientTests(unittest.IsolatedAsyncioTestCase):
                            source_sha256=sha256(b'original').hexdigest(), registration_revision='d' * 64)
         self.catalog = {'source_id': self.source['source_id'], 'current_version': self.source['source_version'],
                         'registration_revision': self.source['registration_revision'],
-                        'versions': [{**self.source, 'format': 'pdf', 'size_bytes': 8}]}
+                        'versions': [{**self.source, 'format': 'pdf', 'size_bytes': 8}],
+                        'access': {'user_id': 'fixture'}}
         self.options = dict(base_url='http://127.0.0.1:8766', tenant='test', token='synthetic',
                             source_ref=self.source, work_dir=self.directory / 'work', http=object())
 
