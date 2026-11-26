@@ -1,5 +1,13 @@
 # 실행 환경 작업 기록
 
+## 2026-11-26 — 현재 변경 통합 0.6.4 Windows 포터블 공개
+
+- 사용자의 현재 변경 포함 릴리즈 요청에 따라 기존 수정·신규85경로를 `abb2ec2`에 담고, 검증에서 재현한 쪽 그림 렌더의 실행권 갱신·취소·Windows 경로/UTF-8 출력을 `7e5288e13e954e54dac7d62f35c16bf4ebc96b68`에서 보완했다. `main`·`v0.6.4`와 [Windows 포터블0.6.4](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.4-portable)을 게시했다. PDF/PPT 변환·AI 후보 쪽 이미지 전달·문서 작업 진단과 기존 문서/역할 지침 정리를 함께 포함했다.
+- 운영 서버는 기존0.6.3을 유지했다. 최종 릴리즈의 서버측302소스가 운영 후보와 같고 후보492파일·서버/감시자/터널 신원을 확인했다. 로컬·공개 API/MCP/VOC6경로는 예상 무인증401이었으며 검증 전후 자료·정책·규약·주소1498파일의 집합/바이트 변경0이었다. 서버 재시작·운영 로그인·정책 변경·사용자 자료 쓰기는 하지 않았다.
+- Node24 전체 앱 빌드의 타입·lint·format·194토큰/3테마 검사, 제품 문서 작업 모델17·UI11묶음, 변경된 시안 타입4개, 릴리즈70검사를 통과했다. Python 집중100검사와 확장 회귀152검사를 통과했고 Windows 파일 잠금1건은 건너뛰었다. 독립 검토의 Windows 출력/경로·취소 보존3검사도 통과했다. 과거 문서 흐름·알림 시안2검사의 실패는 기준 `2d1f076`에서도 재현해 제품 필수 검사와 구별했다. 초기 Node16·Chrome/LibreOffice sandbox 및 Windows 모의 fixture 실패와 해소는 앱·Python 요약에 보존했다.
+- 격리 고정 소스의 빌드 입력589개·개인 실행 소스358개·런타임2994파일을 대조했다. PE0.6.4·아이콘·새 진단 UI·이미지 모듈·포터블 업데이트 차단·비밀/개인 경로 제외를 확인했고 Python/OCR 의존성2636파일은 검증된0.6.3과 동일하다. ZIP은253,749,813바이트, SHA256 `ba8bed384737be44925231e38313955f8abf341b50557c78bc44e030193f9e24`이다.
+- 공개 ZIP/SHA의 인증 없는 전체 다운로드와 GitHub digest를 대조했다. 기존7릴리즈/14자산과 latest `app-0.4.1-portable`를 보존했고 설치형 업데이트 피드는 변경하지 않았다. 근거는 `.local/releases/0.6.4-current/local-verification-release.json`, `remote-verification.json`, `server-verification.json`, `windows-build-summary.json`이다. Windows 실기·두PC·이번 릴리즈의 실제 AI 호출·서명/공증·Mac 설치 교체는 미검증이다.
+
 ## 2026-11-26 — 오류 보고 0.6.3 서버와 Windows 포터블 배포
 
 - 사용자 배포 승인으로 VOC 제품/테스트·버전32파일을 `ecc5703fa5946f4bb83b9f21e95f4b6ef482c45e`에 고정하고 `main`·`v0.6.3`과 [Windows 포터블0.6.3](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.3-portable)을 게시했다. 작업 중이던60경로를 제품 소스에 섞지 않았고 해당 지문을 보존했다. 문서는 이번 기능·배포 기록만 별도 반영했다.
