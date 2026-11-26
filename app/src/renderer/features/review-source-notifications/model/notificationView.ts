@@ -96,12 +96,18 @@ export function notificationEventLabel(kind: string): string {
 export function contentText(
   detail: NotificationDetail,
   location: NotificationLocation,
+  overrides?: Readonly<Record<string, string>>,
 ): string | null {
   const key = notificationLocationKey(location);
+  if (!location.whole_document && overrides?.[key] !== undefined)
+    return overrides[key];
   const reference = detail.workflow.pages.find(
     (entry: ReviewPage): boolean => notificationLocationKey(entry) === key,
   )?.correction_ref;
-  if (!reference) return originalContentText(detail, location);
+  if (!reference)
+    return location.whole_document
+      ? selectedDocumentText(detail, overrides)
+      : originalContentText(detail, location);
   const matches = detail.corrections.filter(
     (entry: NotificationDetail['corrections'][number]): boolean =>
       notificationLocationKey(entry) === key &&
@@ -112,6 +118,56 @@ export function contentText(
   return matches.length === 1 ? (matches[0]?.content ?? null) : null;
 }
 
+/** 전체 입력의 시작값에 현재 선택된 구간 보정을 포함하며 누락된 보정은 숨기지 않습니다. */
+function selectedDocumentText(
+  detail: NotificationDetail,
+  overrides?: Readonly<Record<string, string>>,
+): string | null {
+  if (!detail.conversion) return null;
+  const locations = new Map<string, NotificationLocation>();
+  for (const unit of detail.conversion.manifest.units) {
+    const location: NotificationLocation =
+      unit.location.kind === 'pages' &&
+      unit.location.start === unit.location.end &&
+      unit.location.start
+        ? { page: unit.location.start }
+        : { unit_id: unit.unit_id };
+    // 같은 페이지에 여러 단위가 있어도 page 조회가 합친 문자열은 한 번만 넣습니다.
+    locations.set(notificationLocationKey(location), location);
+  }
+  for (const page of detail.workflow.pages) {
+    const key = notificationLocationKey(page);
+    if (
+      page.whole_document ||
+      (!page.correction_ref && overrides?.[key] === undefined)
+    )
+      continue;
+    if (locations.has(key)) continue;
+    // 원보고에 없던 페이지 입력도 보존하며, 알 수 없는 단위 보정을 버리지 않습니다.
+    if (page.page === undefined) return null;
+    locations.set(key, { page: page.page });
+  }
+  const selected = [...locations.values()];
+  // 서버의 유효 입력과 같이 PDF 누락 페이지는 실제 페이지 번호 사이에 끼웁니다.
+  if (
+    selected.every(
+      (location: NotificationLocation): boolean => location.page !== undefined,
+    )
+  )
+    selected.sort(
+      (left: NotificationLocation, right: NotificationLocation): number =>
+        (left.page ?? 0) - (right.page ?? 0),
+    );
+  const contents = selected.map(
+    (location: NotificationLocation): string | null =>
+      contentText(detail, location, overrides),
+  );
+  return contents.length > 0 &&
+    contents.every((value: string | null): value is string => value !== null)
+    ? contents.join('\n\n')
+    : null;
+}
+
 /** 원래 보고의 빈 문자열과 실제로 없는 변환 단위를 구분합니다. */
 export function originalContentText(
   detail: NotificationDetail,
@@ -119,14 +175,15 @@ export function originalContentText(
 ): string | null {
   const conversion = detail.conversion;
   if (!conversion) return null;
-  if (location.whole_document) return null;
   const units = conversion.manifest.units.filter(
     (unit: ConversionUnit): boolean =>
-      location.unit_id !== undefined
-        ? unit.unit_id === location.unit_id
-        : unit.location.kind === 'pages' &&
-          unit.location.start === location.page &&
-          unit.location.end === location.page,
+      location.whole_document
+        ? true
+        : location.unit_id !== undefined
+          ? unit.unit_id === location.unit_id
+          : unit.location.kind === 'pages' &&
+            unit.location.start === location.page &&
+            unit.location.end === location.page,
   );
   if (!units.length) return null;
   const contents = units.map(

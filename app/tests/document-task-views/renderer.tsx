@@ -12,6 +12,7 @@ import type {
 import {
   DocumentTaskDetail,
   DocumentTaskDetailLoading,
+  DocumentTaskHistory,
   DocumentTaskList,
   buildDocumentTaskView,
   buildAnalysisProgressView,
@@ -71,6 +72,45 @@ const longTitle = fixtureTask();
 longTitle.taskId = '8'.repeat(32);
 longTitle.item.title =
   '등록 문서의 긴 제목과 여러 조건이 함께 들어간 아키텍처 검토 자료 '.repeat(5);
+const history = fixtureTask();
+history.taskId = '9'.repeat(32);
+const previousAttempt = history.conversions[0];
+if (!previousAttempt) throw new Error('History fixture missing');
+previousAttempt.diagnosticCodes = ['conversion_memory_failed'];
+const latestAttempt = structuredClone(previousAttempt);
+latestAttempt.requestId = '1'.repeat(32);
+latestAttempt.state = 'complete';
+latestAttempt.diagnosticCodes = [];
+latestAttempt.message = '원본의 문자를 읽고 변환 결과를 보관했습니다.';
+latestAttempt.startedAt = '2026-11-23T02:00:00Z';
+latestAttempt.reportSummary = {
+  complete: true,
+  unreadRanges: [],
+  warnings: [],
+};
+history.conversions.push(latestAttempt);
+const emptyHistory = fixtureTask();
+emptyHistory.taskId = '0'.repeat(32);
+emptyHistory.conversions = [];
+const longAttempt = longTitle.conversions[0];
+if (!longAttempt) throw new Error('Long history fixture missing');
+longAttempt.message =
+  '긴 처리 기록과 입력 파일의 위치를 확인해야 하는 상세 설명 '.repeat(15) +
+  'a'.repeat(180);
+longAttempt.diagnosticCodes = ['unrecognized_error'];
+const needsReview = fixtureTask();
+needsReview.taskId = 'b'.repeat(32);
+const reviewAttempt = needsReview.conversions[0];
+if (!reviewAttempt) throw new Error('Review fixture missing');
+const reviewCode =
+  'ocr_low_or_missing_confidence_text_retained_manual_review_required';
+reviewAttempt.state = 'partial';
+reviewAttempt.diagnosticCodes = [reviewCode];
+reviewAttempt.reportSummary = {
+  complete: false,
+  unreadRanges: [`page 6: ${reviewCode}`],
+  warnings: [reviewCode],
+};
 const variants = [
   ...tasks,
   buildDocumentTaskView(converting),
@@ -78,6 +118,9 @@ const variants = [
   buildDocumentTaskView(ontology, { analysis: ontologyDetail }),
   buildDocumentTaskView(completed, { analysis: completedDetail }),
   buildDocumentTaskView(longTitle),
+  buildDocumentTaskView(history),
+  buildDocumentTaskView(emptyHistory),
+  buildDocumentTaskView(needsReview),
 ];
 const remote = buildAnalysisProgressView(ontologyDetail);
 
@@ -207,12 +250,13 @@ function Fixture(): JSX.Element {
   const returnTo = workflowReturnTo(location.state) ?? '/documents';
   return (
     <main>
-      <output data-action-count>{actions.length}</output>
+      <output hidden data-action-count>
+        {actions.length}
+      </output>
       {parameters.has('remoteCheck') ? (
         <RemoteFixture key={parameters.get('remoteCheck')} />
       ) : parameters.has('loading') ? (
         <DocumentTaskDetailLoading
-          backPath="/documents"
           error={
             parameters.has('error') ? '서버 응답을 확인하지 못했습니다.' : null
           }
@@ -225,7 +269,28 @@ function Fixture(): JSX.Element {
             )
           }
         />
-      ) : location.pathname === '/source' ||
+      ) : task &&
+        location.pathname === '/documents' &&
+        parameters.get('view') === 'history' ? (
+        <DocumentTaskHistory
+          task={task}
+          progressPath={task.detailPath}
+          textReviewPath={`/documents?${new URLSearchParams({ workflowId: 'c'.repeat(32), returnTask: task.id })}`}
+          error={
+            parameters.has('error') ? '서버 응답을 확인하지 못했습니다.' : null
+          }
+          busy={parameters.has('busy')}
+          onAction={(action: DocumentTaskAction): void =>
+            setActions(
+              (previous: DocumentTaskAction[]): DocumentTaskAction[] => [
+                ...previous,
+                action,
+              ],
+            )
+          }
+        />
+      ) : parameters.has('workflowId') ||
+        location.pathname === '/source' ||
         location.pathname === '/document' ||
         location.pathname === '/ontology' ||
         location.pathname === '/jobs' ||
@@ -240,7 +305,6 @@ function Fixture(): JSX.Element {
                 ? '서버 응답을 확인하지 못했습니다.'
                 : null
             }
-            backPath={returnTo}
             currentViewPath={`${location.pathname}${location.search}`}
             onAction={(action: DocumentTaskAction): void =>
               setActions(

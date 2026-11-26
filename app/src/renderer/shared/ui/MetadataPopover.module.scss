@@ -52,12 +52,18 @@
 }
 .popoverRoot {
   position: relative;
+  min-width: 0;
+}
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .popover {
-  position: absolute;
+  position: fixed;
+  visibility: hidden;
   z-index: 20;
-  top: calc(100% + 8px);
-  left: 0;
   box-sizing: border-box;
   width: min(400px, calc(100vw - 48px));
   max-height: min(420px, 60vh);
@@ -67,6 +73,11 @@
   border-radius: var(--wiki-radius-8);
   background: var(--wiki-color-surface-canvas);
   box-shadow: var(--wiki-shadow-overlay);
+  color: var(--wiki-color-text-primary);
+  font: 13px/20px var(--wiki-font-family-ui);
+  &[data-control='true'] {
+    width: 288px;
+  }
   dl {
     display: grid;
     grid-template-columns: 76px minmax(0, 1fr);
@@ -80,4 +91,12 @@
     margin: 0;
     min-width: 0;
   }
+}
+.chip[data-control='true'] {
+  max-width: min(220px, calc(100vw - 140px));
+  min-height: var(--wiki-component-control-height);
+  padding: 7px 12px;
+  border-radius: var(--wiki-component-control-radius);
+  line-height: var(--wiki-component-control-line-height);
+  white-space: nowrap;
 }

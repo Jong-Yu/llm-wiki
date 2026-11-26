@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'vite';
@@ -10,6 +10,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, '../..');
 const temporary = await mkdtemp('/private/tmp/wiki-document-task-ui-');
 let browser;
+let historyCapture;
+if (process.env.WIKI_TASK_HISTORY_CAPTURE_DIR) {
+  await mkdir(process.env.WIKI_TASK_HISTORY_CAPTURE_DIR, { recursive: true });
+  historyCapture = await mkdtemp(
+    resolve(process.env.WIKI_TASK_HISTORY_CAPTURE_DIR, 'after-'),
+  );
+  console.log(`History captures: ${historyCapture}`);
+}
 try {
   const built = await build({
     configFile: false,
@@ -69,7 +77,10 @@ try {
     page.getByRole('button', { name: '다시 변환', exact: true }),
   ).toBeVisible();
   await expect(page.locator('[data-action-count]')).toHaveText('0');
-  await page.getByRole('link', { name: '문서 목록', exact: true }).click();
+  await expect(
+    page.getByRole('link', { name: '문서 목록', exact: true }),
+  ).toHaveCount(0);
+  await page.goBack();
   assert.equal(page.url(), listUrl);
   await expect(
     page.getByRole('button', { name: /^조치 필요/ }),
@@ -137,7 +148,10 @@ try {
       assert.doesNotMatch(await focus.innerText(), /\d+%/);
     }
     if (id === '6' && process.env.WIKI_TASK_VIEW_SCREENSHOT) {
-      await page.screenshot({ path: process.env.WIKI_TASK_VIEW_SCREENSHOT });
+      await page.screenshot({
+        path: process.env.WIKI_TASK_VIEW_SCREENSHOT,
+        animations: 'disabled',
+      });
     }
   }
   assert.ok(bounds.every(Boolean));
@@ -193,7 +207,7 @@ try {
     .click();
   await page.getByRole('link', { name: '작업으로 돌아가기' }).click();
   assert.equal(page.url(), serverUrl);
-  await page.getByRole('link', { name: '실행 기록', exact: true }).click();
+  await page.getByRole('button', { name: '실행 기록', exact: true }).click();
   await page.getByRole('link', { name: '작업으로 돌아가기' }).click();
   assert.equal(page.url(), serverUrl);
   await expect(page.locator('[data-action-count]')).toHaveText(
@@ -377,6 +391,174 @@ try {
   assert.deepEqual(errors, []);
   console.log(
     'PASS real RemoteDocumentProgress: synchronous double click inspects once and executes once; completion/polling never rerun',
+  );
+
+  await page.clock.resume();
+  const historyUrl = `${pathToFileURL(file).href}#/documents?taskId=${'a'.repeat(32)}&view=history`;
+  await page.goto(historyUrl);
+  await expect(page.locator('[data-task-history]')).toBeVisible();
+  await expect(page.getByText('등록 진행으로 돌아가기')).toHaveCount(0);
+  await expect(page.getByRole('table')).toContainText('실패');
+  await expect(page.getByRole('table')).not.toContainText('· failed');
+  const beforeHistoryActions = Number(
+    await page.locator('[data-action-count]').innerText(),
+  );
+  await page
+    .getByRole('button', { name: '실행 기록 새로고침', exact: true })
+    .focus();
+  await expect(page.getByRole('tooltip')).toHaveText('실행 기록 새로고침');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-action-count]')).toHaveText(
+    String(beforeHistoryActions + 1),
+  );
+  await page.getByRole('button', { name: '다시 변환', exact: true }).click();
+  await expect(page.locator('[data-action-count]')).toHaveText(
+    String(beforeHistoryActions + 2),
+  );
+  await page.getByRole('button', { name: '원본 보기', exact: true }).click();
+  await expect(page).toHaveURL(/#\/source\?/);
+  await page
+    .getByRole('link', { name: '작업으로 돌아가기', exact: true })
+    .click();
+  assert.equal(page.url(), historyUrl);
+  await expect(page.locator('[data-action-count]')).toHaveText(
+    String(beforeHistoryActions + 2),
+  );
+  await page
+    .getByRole('button', { name: '등록 진행 열기', exact: true })
+    .click();
+  await expect(page.locator('[data-task-detail]')).toBeVisible();
+  await expect(page.locator('[data-action-count]')).toHaveText(
+    String(beforeHistoryActions + 2),
+  );
+  await page.goto(`${historyUrl}&busy=1&error=1`);
+  await expect(
+    page.getByRole('button', { name: '다시 변환', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: '실행 기록 새로고침', exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByRole('alert')).toContainText('마지막으로 확인한 내용');
+  await expect(page.locator('[data-attempt-row]')).toHaveCount(1);
+  await page.goto(
+    `${pathToFileURL(file).href}#/documents?taskId=${'2'.repeat(32)}&view=history`,
+  );
+  await expect(
+    page.getByRole('button', { name: '결과 확인', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '다시 변환', exact: true }),
+  ).toHaveCount(0);
+  await page.goto(
+    `${pathToFileURL(file).href}#/documents?taskId=${'0'.repeat(32)}&view=history`,
+  );
+  await expect(
+    page.getByText('이 기기에 보관된 문자 변환 이력이 없습니다.'),
+  ).toBeVisible();
+  await expect(page.locator('[data-attempt-row]')).toHaveCount(0);
+  const reviewHistoryUrl = `${pathToFileURL(file).href}#/documents?taskId=${'b'.repeat(32)}&view=history`;
+  await page.goto(reviewHistoryUrl);
+  const beforeReview = await page.locator('[data-action-count]').innerText();
+  await page
+    .getByRole('link', { name: '등록할 내용 확인', exact: true })
+    .click();
+  await expect(page).toHaveURL(/workflowId=c{32}&returnTask=b{32}/);
+  await page
+    .getByRole('link', { name: '작업으로 돌아가기', exact: true })
+    .click();
+  assert.equal(page.url(), reviewHistoryUrl);
+  await expect(page.locator('[data-action-count]')).toHaveText(beforeReview);
+  console.log(
+    'PASS actual execution history: localized states, explicit actions, query-only uncertainty, busy/error preservation, empty history, keyboard tooltip and navigation',
+  );
+
+  for (const theme of ['light', 'dark']) {
+    for (const width of [1280, 720, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate((value) => {
+        document.documentElement.dataset.wikiTheme = value;
+      }, theme);
+      for (const id of ['a', '8', '9']) {
+        await page.goto(
+          `${pathToFileURL(file).href}#/documents?taskId=${id.repeat(32)}&view=history`,
+        );
+        await expect(page.locator('[data-task-history]')).toBeVisible();
+        await expect(page.locator('[data-attempt-row]')).toHaveCount(
+          id === '9' ? 2 : 1,
+        );
+        if (id === '9') {
+          await expect(page.getByRole('table')).toContainText('메모리');
+          await expect(page.getByRole('table')).toContainText('완료');
+        }
+        assert.equal(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth > innerWidth,
+          ),
+          false,
+          `history overflow ${id} ${theme} ${width}`,
+        );
+        assert.equal(
+          await page
+            .locator('[data-task-history]')
+            .evaluate((element) => element.scrollWidth > element.clientWidth),
+          false,
+          `history content overflow ${id} ${theme} ${width}`,
+        );
+        if (width === 320) {
+          const mark = await page
+            .locator('ol[aria-label="문서 등록 단계"] li > span')
+            .first()
+            .boundingBox();
+          assert.ok(
+            mark && Math.abs(mark.width - mark.height) <= 1,
+            'stage marker remains circular',
+          );
+          const rowTitle = await page
+            .locator('[data-attempt-row] th')
+            .first()
+            .boundingBox();
+          const bodyCell = await page
+            .locator('[data-attempt-row] td[data-label="처리 내용"] > div')
+            .first()
+            .boundingBox();
+          assert.ok(
+            rowTitle && rowTitle.width > 200,
+            'mobile row heading uses the record width',
+          );
+          assert.ok(
+            bodyCell && bodyCell.width > 150,
+            'all message paragraphs use the content column',
+          );
+        }
+        if (
+          historyCapture &&
+          ((id === 'a' && theme === 'light' && width !== 720) ||
+            (id === '9' && width === 1280) ||
+            (id === '8' && theme === 'dark' && width === 320))
+        ) {
+          await page.mouse.move(0, 890);
+          await page.evaluate(() => {
+            if (document.activeElement instanceof HTMLElement)
+              document.activeElement.blur();
+          });
+          await expect(page.getByRole('tooltip')).toHaveCount(0);
+          await page.screenshot({
+            path: resolve(
+              historyCapture,
+              `history-${id}-${theme}-${width}.png`,
+            ),
+            fullPage: true,
+            animations: 'disabled',
+          });
+        }
+      }
+    }
+  }
+  assert.deepEqual(errors, []);
+  console.log(
+    'PASS history real component light/dark at 1280/720/320: long title/message and multiple attempts remain readable without page or section overflow',
   );
 } finally {
   await browser?.close();

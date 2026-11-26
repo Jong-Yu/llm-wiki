@@ -67,7 +67,7 @@
   overflow-wrap: anywhere;
 }
 .page button {
-  white-space: normal;
+  white-space: nowrap;
 }
 .page button:focus-visible,
 .page a:focus-visible,
@@ -91,6 +91,9 @@
 }
 .heading > div {
   min-width: 0;
+}
+.contentPage .heading > div {
+  flex: 1;
 }
 .heading p,
 .muted,
@@ -155,9 +158,21 @@
   min-width: 0;
 }
 .notification h2 {
-  font-size: 16px;
-  line-height: 24px;
-  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 20px;
+}
+.notificationTitle {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notificationTitle:focus-visible {
+  outline: 2px solid var(--wiki-color-action-primary);
+  outline-offset: 2px;
+}
+.titleTooltip {
+  width: 100%;
 }
 .notificationMeta {
   display: flex;
@@ -178,7 +193,7 @@
 }
 .notificationActions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   justify-self: end;
 }
@@ -467,10 +482,10 @@
   justify-content: flex-end;
   gap: 4px;
   font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
 }
 .contentStatus {
-  height: 64px;
-  overflow: auto;
+  min-height: 64px;
   padding: 12px 0;
   color: var(--wiki-color-text-secondary);
 }
@@ -492,8 +507,6 @@
   border-left: 1px solid var(--wiki-color-border-default);
 }
 .contentPane .paneHeading {
-  height: 48px;
-  overflow: auto;
   min-height: 48px;
   padding: 8px 16px;
 }
@@ -545,6 +558,31 @@
   gap: 8px;
   min-width: 160px;
 }
+.pagePicker label {
+  display: grid;
+  gap: 6px;
+}
+.pagePicker,
+.pagePicker * {
+  box-sizing: border-box;
+}
+.pickerHeading,
+.pickerJump {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pickerHeading {
+  justify-content: space-between;
+}
+.pickerJump input {
+  min-width: 0;
+  flex: 1;
+}
+.pickerJump > span,
+.pickerJump > button {
+  flex: 0 0 auto;
+}
 .pagePicker select,
 .targetField input {
   width: 100%;
@@ -595,6 +633,7 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
   min-height: 40px;
   color: var(--wiki-color-text-secondary);
   font-size: 12px;

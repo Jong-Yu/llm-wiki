@@ -13,6 +13,7 @@ import type { DocumentTaskDetailResult } from '@contracts/documentTasks.contract
 import {
   DocumentTaskDetail,
   DocumentTaskDetailLoading,
+  DocumentTaskHistory,
   buildDocumentTaskView,
 } from '@renderer/features/browse-document-tasks';
 import type { DocumentTaskAction } from '@renderer/features/browse-document-tasks';
@@ -255,54 +256,33 @@ function TaskDetail({ scope, taskId, history }: TaskDetailProps): JSX.Element {
     readFailed: error !== null,
     canWrite: scope.canPrepare,
   });
-  if (history)
-    return (
-      <WorkspacePage title="실행 기록">
-        <Link to={documentTaskPath(taskId)}>등록 진행으로 돌아가기</Link>
-        <h2>{view.title}</h2>
-        <ol>
-          {view.attempts.map(
-            (attempt: (typeof view.attempts)[number]): JSX.Element => (
-              <li key={attempt.id}>
-                <strong>{attempt.title}</strong>
-                <p>
-                  {attempt.startedAt
-                    ? new Date(attempt.startedAt).toLocaleString('ko-KR')
-                    : ''}{' '}
-                  · {attempt.state}
-                </p>
-                <p>{attempt.message}</p>
-              </li>
-            ),
-          )}
-        </ol>
-        {view.jobId && (
-          <Link
-            to={`/jobs?${new URLSearchParams({ jobId: view.jobId, view: 'history' })}`}
-            state={{ workflowReturnTo: documentTaskPath(taskId) }}
-          >
-            AI 실행 기록
-          </Link>
-        )}
-      </WorkspacePage>
-    );
   const currentConversion = snapshot?.conversion ?? data.conversion;
   const conversionReference = conversionNeedsContentReview(
     currentConversion?.report,
   )
     ? currentConversion?.reference
     : null;
+  const textReviewPath = conversionReference
+    ? `${notificationWorkflowPath(conversionReference.conversionId)}&returnTask=${encodeURIComponent(taskId)}`
+    : undefined;
+  if (history)
+    return (
+      <DocumentTaskHistory
+        task={view}
+        progressPath={documentTaskPath(taskId)}
+        textReviewPath={textReviewPath}
+        busy={busy || snapshot?.busy}
+        error={error}
+        onAction={act}
+      />
+    );
   return (
     <DocumentTaskDetail
       task={view}
       busy={busy || snapshot?.busy}
       error={error}
       onAction={act}
-      textReviewPath={
-        conversionReference
-          ? `${notificationWorkflowPath(conversionReference.conversionId)}&returnTask=${encodeURIComponent(taskId)}`
-          : undefined
-      }
+      textReviewPath={textReviewPath}
       historyPath={`/documents?${new URLSearchParams({ taskId, view: 'history' })}`}
     />
   );

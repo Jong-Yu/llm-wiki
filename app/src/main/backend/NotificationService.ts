@@ -334,6 +334,9 @@ export class NotificationService {
           title: task.item.title,
           device_id: this.#device.deviceId,
           device_name: this.#device.deviceName,
+          ...(run.diagnosticCodes.length
+            ? { diagnostic_codes: run.diagnosticCodes }
+            : {}),
         };
     const existing = (
       await readProcessJournal(this.#recovery, context, 'notification-outbox')

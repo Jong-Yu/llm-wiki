@@ -110,7 +110,7 @@ export function workspaceBreadcrumb(
     case '/register':
       return [documents, { label: '문서 등록' }];
     case '/documents/trash':
-      return [documents, { label: '휴지통' }];
+      return [{ label: '휴지통' }];
     case '/document':
       return [
         documents,

@@ -137,3 +137,4 @@ class ReportedEvent(Profile):
     title: str = Field(min_length=1, max_length=200)
     device_id: str = Field(pattern=r'^[a-f0-9]{32}$')
     device_name: str = Field(min_length=1, max_length=80)
+    diagnostic_codes: list[Annotated[str, Field(pattern=r'^[a-zA-Z0-9_.-]{1,128}$')]] | None = Field(None, max_length=100)

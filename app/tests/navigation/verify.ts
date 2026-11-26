@@ -264,7 +264,13 @@ grant_test_membership_for_user(policy, sys.argv[2])`,
     listWidth,
   );
   assert.equal(await js("!!document.querySelector('dialog[open]')"), false);
-  await click('문서 목록');
+  assert.equal(
+    await js(
+      `Array.from(document.querySelectorAll(${JSON.stringify(active + ' a,' + active + ' button')})).some(e => ['문서 목록', '등록 진행으로 돌아가기'].includes(e.textContent.trim()))`,
+    ),
+    false,
+  );
+  await js('document.querySelector(\'button[aria-label="뒤로가기"]\').click()');
   await until("location.hash === '#/documents'");
   assert.equal(
     await js(
@@ -328,7 +334,17 @@ grant_test_membership_for_user(policy, sys.argv[2])`,
     '휴지통',
   );
   await capture('document-trash');
-  await js('document.querySelector(\'button[aria-label="뒤로가기"]\').click()');
+  assert.equal(
+    await js(
+      'document.querySelector(\'nav[aria-label="현재 위치"]\')?.textContent',
+    ),
+    '휴지통',
+  );
+  assert.equal(
+    await js('!!document.querySelector(\'button[aria-label="뒤로가기"]\')'),
+    false,
+  );
+  await js('document.querySelector(\'aside a[aria-label="문서"]\').click()');
   await until("location.hash === '#/documents'");
   assert.equal(
     await js(

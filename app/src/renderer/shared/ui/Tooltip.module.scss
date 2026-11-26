@@ -1,0 +1,21 @@
+.anchor {
+  display: inline-flex;
+  min-width: 0;
+}
+.tooltip {
+  position: fixed;
+  z-index: 100;
+  visibility: hidden;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--wiki-color-border-control);
+  border-radius: var(--wiki-component-control-radius);
+  color: var(--wiki-color-text-primary);
+  background: var(--wiki-color-surface-canvas);
+  box-shadow: var(--wiki-shadow-overlay);
+  font: 12px/18px var(--wiki-font-family-ui);
+  overflow-wrap: anywhere;
+}

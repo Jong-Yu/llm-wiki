@@ -1,0 +1,9 @@
+.button[data-icon-size] {
+  width: var(--wiki-component-control-height);
+  height: var(--wiki-component-control-height);
+  padding: 0;
+}
+.button[data-icon-size='small'] {
+  width: var(--wiki-component-control-height-small);
+  height: var(--wiki-component-control-height-small);
+}

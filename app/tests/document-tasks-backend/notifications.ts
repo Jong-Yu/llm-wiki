@@ -627,6 +627,10 @@ export async function verifyNotifications(
     );
     assert.equal(events.length, 2);
     assert.deepEqual(events[0]?.body, events[1]?.body);
+    assert.deepEqual(
+      events[0]?.body.diagnostic_codes,
+      failure.diagnosticCodes.length ? failure.diagnosticCodes : undefined,
+    );
     staleEventRequest = hex('a');
     await writeProcessJournal(
       recovery,

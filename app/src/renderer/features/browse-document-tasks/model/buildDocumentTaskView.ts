@@ -6,6 +6,8 @@ import type {
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
 import { conversionNeedsTextReview } from '@contracts/sourceConversion.contract';
 import { documentTaskPath } from '@renderer/shared/lib/workflowNavigation';
+import { conversionFailureExplanation } from '@renderer/shared/lib/sourceConversionFailure';
+import type { SourceConversionFailureExplanation } from '@renderer/shared/lib/sourceConversionFailure';
 import type {
   DocumentTaskResult,
   DocumentTaskStage,
@@ -343,7 +345,9 @@ function taskState(
 }
 
 /** 사용자 설명에는 알려진 실패만 번역하고 원래 오류 코드는 처리 기록에 보존합니다. */
-function failureMessage(conversion: ConversionView | null): string | null {
+function failureExplanation(
+  conversion: ConversionView | null,
+): SourceConversionFailureExplanation | null {
   const codes = conversion?.diagnosticCodes ?? [];
   const unread =
     conversion && 'reportSummary' in conversion
@@ -354,9 +358,9 @@ function failureMessage(conversion: ConversionView | null): string | null {
     unread?.some((value: string): boolean =>
       value.endsWith('source: worker_failed'),
     );
-  if (workerFailed)
-    return '변환 프로그램이 중단되어 나머지 원본을 읽지 못했습니다. 이 기록에는 구체적인 중단 원인이 남아 있지 않습니다.';
-  return null;
+  return conversionFailureExplanation(
+    workerFailed ? [...codes, 'worker_failed'] : codes,
+  );
 }
 
 /** 현재 상태와 보존된 단계에 맞춰 실행 전·실패·미확정 설명을 작성합니다. */
@@ -423,9 +427,11 @@ function explanation(
         processing?.phase === 'conversion_failed' &&
         textReviewScopes(conversion).length > 0
           ? processing.message
-          : (failureMessage(conversion) ??
-            '본문을 완전히 읽지 못했습니다. 등록한 원본은 보관되어 있습니다.'),
-      next: '다시 변환하면 원본의 처음부터 읽습니다. 보관한 원본과 이전 결과는 유지됩니다.',
+          : (failureExplanation(conversion)?.body ??
+            '본문을 완전히 읽지 못했습니다. 이 기록에서는 구체적인 중단 원인을 확인하지 못했습니다. 등록한 원본은 보관되어 있습니다.'),
+      next:
+        failureExplanation(conversion)?.next ??
+        '실행 기록과 이 기기의 준비 상태를 먼저 확인해 주세요. 다시 변환하면 원본의 처음부터 읽으며 이전 결과는 유지됩니다.',
     };
   if (state === 'partial' || state === 'failed')
     return {

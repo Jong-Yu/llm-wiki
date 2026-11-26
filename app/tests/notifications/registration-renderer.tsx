@@ -7,6 +7,7 @@ import { AppShell } from '@renderer/app/AppShell';
 import { RetainedWorkspace } from '@renderer/app/RetainedWorkspace';
 import { NotificationsPage } from '@renderer/pages/notifications/NotificationsPage';
 import { NotificationWorkflow } from '@renderer/features/review-source-notifications';
+import { DocumentProgressPage } from '@renderer/pages/documents/DocumentProgressPage';
 import { ReadQueriesProvider } from '@renderer/shared/lib/readQueries';
 import '@renderer/shared/theme/tokens.css';
 import '@renderer/shared/theme/controls.scss';
@@ -30,15 +31,19 @@ function renderRoutes(location: Location): JSX.Element {
       <Route
         path="/documents"
         element={
-          <NotificationWorkflow
-            scope={{ ...scope }}
-            workflowId={workflowId}
-            backPath="/library"
-            initialTargetDocument={
-              new URLSearchParams(location.search).get('initialTarget') ??
-              undefined
-            }
-          />
+          !new URLSearchParams(location.search).has('initialTarget') ? (
+            <DocumentProgressPage />
+          ) : (
+            <NotificationWorkflow
+              scope={{ ...scope }}
+              workflowId={workflowId}
+              backPath="/library"
+              initialTargetDocument={
+                new URLSearchParams(location.search).get('initialTarget') ??
+                undefined
+              }
+            />
+          )
         }
       />
       <Route path="*" element={<p>격리된 문서 목록</p>} />

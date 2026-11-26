@@ -906,6 +906,110 @@ export function installNotifications(): void {
       }
       persist();
     },
+    partialWholeDocument: (): void => {
+      state.detail.workflow.pages = [
+        { whole_document: true, state: 'pending', input_required: true },
+      ];
+      state.detail.sourcePageCount = null;
+      if (state.detail.conversion) {
+        state.detail.conversion.manifest.units = [
+          {
+            unit_id: 'slide-one',
+            location: { kind: 'slides', start: 1, end: 1 },
+          },
+          {
+            unit_id: 'slide-two',
+            location: { kind: 'slides', start: 2, end: 2 },
+          },
+        ];
+        state.detail.conversion.manifest.complete = false;
+        state.detail.conversion.manifest.warnings = [
+          'picture_content_not_read',
+        ];
+        state.detail.conversion.components = {
+          'slide-one': '첫 슬라이드에 보관한 본문',
+          'slide-two': '둘째 슬라이드에 보관한 본문',
+        };
+      }
+      persist();
+    },
+    conversionFailed: (): void => {
+      state.detail.workflow.state = 'failed';
+      state.detail.workflow.pages = [];
+      state.detail.conversion = null;
+      state.detail.events.push({
+        event_id: 'f'.repeat(32),
+        kind: 'failed',
+        created_at: now,
+        actor,
+        details: { diagnostic_codes: ['conversion_memory_failed'] },
+      });
+      persist();
+    },
+    laterAnalysisFailed: (): void => {
+      state.detail.workflow.state = 'failed';
+      state.detail.workflow.pages = [{ whole_document: true, state: 'usable' }];
+      state.detail.events.push({
+        event_id: 'f'.repeat(32),
+        kind: 'failed',
+        created_at: now,
+        actor,
+      });
+      persist();
+    },
+    legacyUnitDraft: (mixed: boolean): void => {
+      const request: RegistrationDraftGetRequest = {
+        connectionId: 'fixture',
+        expectedScope: {
+          userId: 'fixture-user',
+          tenant: 'fixture',
+          profileId: 'default',
+          policyRevision: fixtureRevision,
+        },
+        workflowId,
+        sourceRef: state.detail.workflow.source_ref,
+        conversionRef: state.detail.workflow.conversion_ref,
+      };
+      state.drafts[draftKey(request)] = {
+        data: {
+          draft: {
+            basisRevision: state.detail.workflow.revision,
+            basisContents: {},
+            contents: {
+              'unit:slide-one': '사용자가 보완한 첫 슬라이드',
+              ...(mixed ? { whole_document: '이전에 작성한 전체 초안' } : {}),
+            },
+            blankUnits: [],
+            targetDocument: state.detail.workflow.target_document ?? '',
+            submission: null,
+          },
+          revision: '1'.repeat(64),
+          savedAt: now,
+          cleared: null,
+          cleanupWarningCount: 0,
+        },
+        requestId: '0'.repeat(32),
+        request: '{}',
+      };
+      persist();
+    },
+    addUnitToSavedDraft: (): void => {
+      for (const entry of Object.values(state.drafts)) {
+        if (entry.data.draft)
+          entry.data.draft.contents['unit:slide-one'] =
+            '고정 제출과 별도로 남은 구간 초안';
+      }
+      persist();
+    },
+    longTitle: (): void => {
+      const title =
+        '매우 긴 파일 이름으로 등록한 시스템 요구사항과 변경 이력 및 검토 기록 '.repeat(
+          6,
+        );
+      state.detail.workflow.title = title;
+      if (state.items[0]) state.items[0].title = title;
+      persist();
+    },
     ocrMode: (value: FixtureState['ocrMode']): void => {
       state.ocrMode = value;
       persist();

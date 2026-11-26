@@ -19,6 +19,7 @@ from core.modules.notifications.store import LOW, NotificationStore
 from core.modules.sources.store import SourceStore
 from core.runtime.application import create_application
 from core.tests.poc_access.fixtures import grant_test_membership_for_user
+from core.tests.poc_analysis.test_presentation_conversion import package as presentation_package
 from tools.initialize_server import initialize_new_server
 
 root = Path(sys.argv[1])
@@ -42,6 +43,8 @@ def fixture(name, *, units, unread, complete=False, format='pdf', multipart=Fals
         for _ in range(3):
             writer.add_blank_page(width=300, height=300)
         writer.write(stream)
+    elif format == 'pptx':
+        stream.write(presentation_package(image=True))
     else:
         stream.write(b'Original synthetic text.\nSecond line.\n')
     stream.seek(0)
@@ -51,7 +54,8 @@ def fixture(name, *, units, unread, complete=False, format='pdf', multipart=Fals
     catalog = sources.get_source(registered['receipt']['source_id'])
     reference = {key: catalog['versions'][-1][key] for key in ('source_id', 'source_version', 'source_sha256')}
     reference['registration_revision'] = catalog['registration_revision']
-    common = dict(source_ref=reference, method='ocr' if format == 'pdf' else 'verbatim', complete=complete,
+    method = {'pdf': 'ocr', 'pptx': 'pptx_text'}.get(format, 'verbatim')
+    common = dict(source_ref=reference, method=method, complete=complete,
         unread_ranges=unread, warnings=['Synthetic retained conversion warning.'])
     if multipart:
         conversion_request = uuid4().hex
@@ -69,7 +73,8 @@ def fixture(name, *, units, unread, complete=False, format='pdf', multipart=Fals
     if complete:
         notifications.create(CreateWorkflow(request_id=uuid4().hex, source_ref=reference,
             conversion_ref=conversion_ref, title=name, target_document=name + '.md'), lambda: actor)
-    return dict(workflow_id=report['manifest']['id'], source_ref=reference, conversion_ref=conversion_ref)
+    return dict(workflow_id=report['manifest']['id'], source_ref=reference, conversion_ref=conversion_ref,
+                source_size_bytes=catalog['versions'][-1]['size_bytes'])
 
 
 def page(number, content):
@@ -85,6 +90,10 @@ fixtures = dict(
         page(2, '"' * (2 * 1024 * 1024))], unread=[f'page 1: {LOW}']),
     text=fixture('text', format='txt', complete=True, unread=[], units=[
         dict(unit_id='lines', location=dict(kind='lines', start=1, end=2), content='Original synthetic text.\nSecond line.\n')]),
+    presentation=fixture('presentation', format='pptx', units=[
+        dict(unit_id='slide_1', location=dict(kind='slides', start=1, end=1), content='첫 슬라이드의 보존된 본문.'),
+        dict(unit_id='slide_2', location=dict(kind='slides', start=2, end=2), content='둘째 슬라이드의 보존된 본문.')],
+        unread=['slide 1: picture_content_not_read']),
 )
 with (root / 'fixture.json').open('x', encoding='utf-8') as stream:
     json.dump(dict(token=user['token'], access=actor, fixtures=fixtures), stream)

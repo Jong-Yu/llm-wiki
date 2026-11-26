@@ -11,6 +11,8 @@ import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
 import { formatTimestamp } from '@renderer/shared/lib/formatTimestamp';
 import { Button } from '@renderer/shared/ui/Button';
 import { Icon } from '@renderer/shared/ui/Icon';
+import { IconButton } from '@renderer/shared/ui/IconButton';
+import { Tooltip } from '@renderer/shared/ui/Tooltip';
 import { StatusNotice } from '@renderer/shared/ui/StatusNotice';
 import { notificationsApi } from '../api/notifications.api';
 import {
@@ -230,9 +232,10 @@ export function NotificationList({
           <p>작업 공간의 문자 검토 요청과 처리 결과를 확인합니다.</p>
         </div>
         <div className={styles.actions}>
-          <Button
+          <IconButton
             size="small"
-            variant="secondary"
+            icon="check-check"
+            label="표시된 알림 읽음"
             disabled={
               busy ||
               !data?.items.some(
@@ -242,19 +245,16 @@ export function NotificationList({
             onClick={(): void => {
               if (data) void markRead(data.items);
             }}
-          >
-            표시된 알림 읽음
-          </Button>
-          <Button
+          />
+          <IconButton
             size="small"
-            variant="secondary"
+            icon="refresh-cw"
+            label="새로고침"
             disabled={busy}
             onClick={(): void => {
               void load();
             }}
-          >
-            새로고침
-          </Button>
+          />
         </div>
       </div>
       <div className={styles.filters} role="group" aria-label="알림 필터">
@@ -290,11 +290,12 @@ export function NotificationList({
             </Button>
           );
         })}
+        <IconButton
+          icon="circle-help"
+          label="알림 필터 설명"
+          description="읽지 않음은 아직 읽음 처리하지 않은 알림입니다. 내용 확인 필요는 등록할 문자의 검토가 남은 문서이며, 알림을 읽어도 유지됩니다."
+        />
       </div>
-      <p className={styles.filterHelp}>
-        읽지 않음은 아직 읽음 처리하지 않은 알림입니다. 내용 확인 필요는 등록할
-        문자의 검토가 남은 문서이며, 알림을 읽어도 유지됩니다.
-      </p>
       {error && (
         <StatusNotice tone="error" title="알림 상태를 확인하지 못했습니다">
           {error}
@@ -345,7 +346,19 @@ export function NotificationList({
                 />
               </span>
               <div className={styles.notificationBody}>
-                <h2>{item.title}</h2>
+                <h2>
+                  <Tooltip label={item.title} className={styles.titleTooltip}>
+                    {(descriptionId: string | undefined): JSX.Element => (
+                      <span
+                        tabIndex={0}
+                        className={styles.notificationTitle}
+                        aria-describedby={descriptionId}
+                      >
+                        {item.title}
+                      </span>
+                    )}
+                  </Tooltip>
+                </h2>
                 <div className={styles.notificationMeta}>
                   <span>{notificationEventLabel(item.kind)}</span>
                   {item.warning_count > 0 && (
@@ -379,18 +392,15 @@ export function NotificationList({
                 >
                   {item.state === 'review' ? '내용 확인' : '문서 보기'}
                 </Button>
-                <Button
+                <IconButton
                   size="small"
-                  variant="surface"
+                  icon="trash-2"
                   disabled={busy}
-                  aria-label={`${item.title} 알림 삭제`}
+                  label={`${item.title} 알림 삭제`}
                   onClick={(): void => {
                     void dismiss(item);
                   }}
-                >
-                  <Icon name="trash-2" size={16} />
-                  삭제
-                </Button>
+                />
               </div>
             </article>
           ))}
@@ -407,9 +417,6 @@ export function NotificationList({
           이전 알림 더 보기
         </Button>
       )}
-      <p className={styles.receipt}>
-        알림을 삭제해도 문서와 진행 중인 작업은 유지됩니다.
-      </p>
     </section>
   );
 }

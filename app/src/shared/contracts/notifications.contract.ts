@@ -271,6 +271,14 @@ export const notificationDetailDataSchema = z.object({
         kind: z.string(),
         created_at: timestamp,
         actor: z.object({ user_id: text, tenant: text, profile_id: text }),
+        details: z
+          .object({
+            diagnostic_codes: z
+              .array(z.string().regex(/^[a-zA-Z0-9_.-]{1,128}$/))
+              .max(100)
+              .optional(),
+          })
+          .optional(),
       }),
     )
     .max(10000),

@@ -1,4 +1,5 @@
 export { DocumentTaskList } from './ui/DocumentTaskList';
+export { DocumentTaskHistory } from './ui/DocumentTaskHistory';
 export { documentTaskApi } from './api/documentTasks.api';
 export {
   DocumentTaskDetail,

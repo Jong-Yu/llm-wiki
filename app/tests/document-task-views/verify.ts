@@ -4,6 +4,7 @@ import {
   buildDocumentTaskView,
   buildAnalysisProgressView,
 } from '@renderer/features/browse-document-tasks/model/buildDocumentTaskView';
+import { conversionFailureExplanation } from '@renderer/shared/lib/sourceConversionFailure';
 import { documentTaskNeedsAttention } from '@renderer/features/browse-document-tasks/model/documentTask.types';
 import {
   fixtureAnalysis,
@@ -498,3 +499,54 @@ console.log(
 const limitThenComplete = structuredClone(completeDetail);
 limitThenComplete.local.failureCode = 'input_limit';
 assert.equal(buildAnalysisProgressView(limitThenComplete).inputLimited, false);
+
+// 명시된 코드보다 막연한 worker_failed가 원인을 덮지 않고 알려지지 않은 실패는 추정하지 않습니다.
+const memoryFailure = fixtureTask();
+const memoryAttempt = memoryFailure.conversions[0];
+if (!memoryAttempt) throw new Error('Failure fixture missing');
+memoryAttempt.diagnosticCodes = ['worker_failed', 'conversion_memory_failed'];
+const memoryView = buildDocumentTaskView(memoryFailure);
+assert.match(memoryView.explanation.body, /메모리/);
+assert.match(memoryView.explanation.next, /여유 메모리/);
+memoryAttempt.diagnosticCodes = ['source_download_failed'];
+assert.match(
+  buildDocumentTaskView(memoryFailure).explanation.next,
+  /서버 연결/,
+);
+memoryAttempt.diagnosticCodes = ['unknown_future_failure'];
+memoryAttempt.reportSummary = null;
+assert.match(
+  buildDocumentTaskView(memoryFailure).explanation.body,
+  /구체적인 중단 원인을 확인하지 못/,
+);
+assert.equal(conversionFailureExplanation(['unknown_future_failure']), null);
+assert.equal(conversionFailureExplanation([]), null);
+assert.match(
+  conversionFailureExplanation(['conversion_output_limit'])?.next ?? '',
+  /반복 변환/,
+);
+assert.match(
+  conversionFailureExplanation(['dependency_missing_tesseract'])?.next ?? '',
+  /실행 준비/,
+);
+assert.match(
+  conversionFailureExplanation(['worker_failed'])?.body ?? '',
+  /구체적인 중단 원인/,
+);
+console.log(
+  'PASS conversion failure reason and next step follow recorded codes without inventing an unknown cause',
+);
+
+assert.match(
+  conversionFailureExplanation(['conversion_checkpoint_locked'])?.body ?? '',
+  /접근 거부 또는 파일 잠금/,
+);
+assert.match(
+  conversionFailureExplanation(['report_save_unconfirmed', 'worker_failed'])
+    ?.body ?? '',
+  /실패로 확정할 수 없습니다/,
+);
+assert.match(
+  conversionFailureExplanation(['conversion_start_failed'])?.body ?? '',
+  /시작하지 못/,
+);

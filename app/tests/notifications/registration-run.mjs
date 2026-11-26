@@ -70,7 +70,7 @@ const detail = `/documents?workflowId=${'1'.repeat(32)}`;
 const list = () => page.getByRole('region', { name: '알림', exact: true });
 const work = () =>
   page.getByRole('region', { name: '문서 내용 확인', exact: true });
-const action = (name) => work().getByRole('button', { name, exact: true });
+const action = (name) => page.getByRole('button', { name, exact: true });
 function pass(name) {
   checks.push(name);
   console.log('PASS', name);
@@ -216,6 +216,43 @@ try {
   ).toBeVisible();
   await layout('notification-list');
   await audit('notification-list');
+  const iconDeleteButton = list().getByRole('button', {
+    name: '합성 시스템 아키텍처 알림 삭제',
+    exact: true,
+  });
+  assert.equal((await iconDeleteButton.textContent()).trim(), '');
+  await iconDeleteButton.focus();
+  await expect(
+    page.getByRole('tooltip', {
+      name: '합성 시스템 아키텍처 알림 삭제',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await control('longTitle');
+  await list().getByRole('button', { name: '새로고침', exact: true }).click();
+  const longTitle = list()
+    .locator('[data-notification-row] h2 span[tabindex="0"]')
+    .first();
+  await expect(longTitle).toContainText('매우 긴 파일 이름');
+  assert.equal(
+    await list()
+      .locator('[data-notification-row]')
+      .first()
+      .evaluate((e) => e.getBoundingClientRect().height),
+    rowHeight,
+  );
+  await longTitle.focus();
+  await expect(page.getByRole('tooltip')).toContainText('매우 긴 파일 이름');
+  await page.keyboard.press('Escape');
+  await layout('notification-long-title');
+  await reset('/notifications');
+  await expect(list().locator('[data-notification-row]')).toHaveCount(5);
+  pass(
+    '알림 삭제는 아이콘 전용 / 키보드 설명·Escape / 긴 문서명에도 행·행동 위치 유지',
+  );
+
   const filterPositions = () =>
     filters.getByRole('button').evaluateAll((buttons) =>
       buttons.map((button) => {
@@ -280,16 +317,71 @@ try {
   ).toBeVisible();
   await expect(editor()).toBeVisible();
   await action('2페이지').click();
-  await expect(work().getByText('30개 확인 대상')).toBeVisible();
-  await work().getByRole('combobox', { name: '탐색 범위' }).selectOption('all');
-  await expect(work().getByText('170개 내용 구간')).toBeVisible();
-  await work()
+  await expect(page.getByText('30개 확인 대상')).toBeVisible();
+  await page.getByRole('combobox', { name: '탐색 범위' }).selectOption('all');
+  await expect(page.getByText('170개 내용 구간')).toBeVisible();
+  await page
     .getByRole('combobox', { name: '탐색 범위' })
     .selectOption('review');
   await page.keyboard.press('Escape');
   pass(
     '읽기만으로 실행하지 않음 / 페이지 30개는 선택 팝업 한곳 / 별도 승인 없음',
   );
+  for (const width of [1280, 720, 320]) {
+    for (const height of [900, 300]) {
+      await page.setViewportSize({ width, height });
+      const before = await page.evaluate(() => ({
+        width: document.documentElement.scrollWidth,
+        height: document.documentElement.scrollHeight,
+      }));
+      await action('2페이지').click();
+      const picker = page.getByRole('group', {
+        name: '페이지 선택',
+        exact: true,
+      });
+      await expect(picker).toBeVisible();
+      await settle();
+      const rect = await picker.boundingBox();
+      assert.ok(
+        rect.x >= 11 &&
+          rect.y >= 11 &&
+          rect.x + rect.width <= width - 11 &&
+          rect.y + rect.height <= height - 11,
+        JSON.stringify({ width, height, rect }),
+      );
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          width: document.documentElement.scrollWidth,
+          height: document.documentElement.scrollHeight,
+        })),
+        before,
+      );
+      await expect(
+        picker.getByRole('spinbutton', { name: '이동할 위치' }),
+      ).toBeVisible();
+      await expect(
+        picker.getByRole('spinbutton', { name: '이동할 위치' }),
+      ).toBeFocused();
+      await expect(
+        picker.getByRole('combobox', { name: '탐색 범위' }),
+      ).toHaveCount(1);
+      if (height === 900) {
+        const file = `registration-picker-${width}.png`;
+        await page.screenshot({ path: resolve(destination, file) });
+        screenshots.push(file);
+      }
+      await page.keyboard.press('Escape');
+      await expect(picker).toHaveCount(0);
+      await expect(action('2페이지')).toBeFocused();
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(action('이전 확인 페이지')).toHaveText('');
+  await expect(action('다음 확인 페이지')).toHaveText('');
+  pass(
+    '페이지 선택창 3너비·낮은 창 경계 안 배치 / 문서 스크롤 크기 유지 / 닫기 초점 / chevron 탐색',
+  );
+
   await editor().fill('첫 페이지에 사용자가 입력한 수정 내용');
   await action('다음 확인 페이지').click();
   await editor(7).fill('다음 페이지의 독립적인 수정 내용');
@@ -511,6 +603,144 @@ try {
   );
   pass('PDF 이외 문단은 원래 unit_id로 수정·등록');
 
+  await reset(detail, () => control('partialWholeDocument'));
+  const partialEditor = work().getByRole('textbox', {
+    name: '문서 전체 등록할 내용',
+  });
+  await expect(partialEditor).toHaveValue(
+    '첫 슬라이드에 보관한 본문\n\n둘째 슬라이드에 보관한 본문',
+  );
+  await action('문서 전체').click();
+  await page.getByRole('combobox', { name: '탐색 범위' }).selectOption('all');
+  await page.getByRole('spinbutton', { name: '이동할 위치' }).fill('1');
+  await action('이동').click();
+  await expect(
+    work().getByRole('textbox', { name: '1슬라이드 등록할 내용' }),
+  ).toHaveAttribute('readonly', '');
+  await expect(
+    work().getByText(
+      '구간별 내용은 참고용입니다. 수정은 문서 전체에서 이어가세요.',
+    ),
+  ).toBeVisible();
+  await action('1슬라이드').click();
+  await page
+    .getByRole('combobox', { name: '탐색 범위' })
+    .selectOption('review');
+  await page.keyboard.press('Escape');
+  await expect(
+    work()
+      .getByRole('status')
+      .filter({ hasText: '그림의 내용을 문자로 읽지 못했습니다' }),
+  ).toBeVisible();
+  await action('이 내용으로 등록 계속').click();
+  assert.equal((await snapshot()).calls.approve ?? 0, 0);
+  await expect(work().getByText(/문서 전체의 내용을 입력하거나/)).toBeVisible();
+  await partialEditor.fill(
+    '첫 슬라이드에 보관한 본문\n\n둘째 슬라이드에 보관한 본문\n그림에서 확인한 보완 설명',
+  );
+  await action('이 내용으로 등록 계속').click();
+  await continued();
+  pass(
+    '문서 전체 경고에도 보관된 부분 본문 표시 / 누락 경고 유지 / 수동 보완 전 확정 금지',
+  );
+
+  await reset(detail, async () => {
+    await control('partialWholeDocument');
+    await control('legacyUnitDraft', false);
+  });
+  await expect(partialEditor).toHaveValue(
+    '사용자가 보완한 첫 슬라이드\n\n둘째 슬라이드에 보관한 본문',
+  );
+  await partialEditor.fill(`${await partialEditor.inputValue()}\n그림 보완`);
+  await action('이 내용으로 등록 계속').click();
+  await continued();
+  let saved = (await snapshot()).detail.corrections;
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].whole_document, true);
+  assert.match(saved[0].content, /사용자가 보완한 첫 슬라이드/);
+  pass('이전 구간 초안을 전체 입력에 합친 뒤 단일 전체 보정으로 저장');
+
+  await reset(detail, async () => {
+    await control('partialWholeDocument');
+    await control('legacyUnitDraft', true);
+  });
+  await expect(partialEditor).toHaveValue('이전에 작성한 전체 초안');
+  await expect(action('이 내용으로 등록 계속')).toBeDisabled();
+  await expect(
+    work().getByText(/전체와 개별 구간의 초안이 함께/),
+  ).toBeVisible();
+  await partialEditor.fill(
+    '이전에 작성한 전체 초안\n사용자가 보완한 첫 슬라이드',
+  );
+  await action('문서 전체').click();
+  await page.getByRole('spinbutton', { name: '이동할 위치' }).fill('1');
+  await action('이동').click();
+  await expect(
+    work().getByRole('textbox', { name: '1슬라이드 등록할 내용' }),
+  ).toHaveValue('사용자가 보완한 첫 슬라이드');
+  await action('이 구간의 초안 취소').click();
+  await action('이 내용으로 등록 계속').click();
+  await continued();
+  saved = (await snapshot()).detail.corrections;
+  assert.equal(saved.length, 1);
+  assert.match(saved[0].content, /사용자가 보완한 첫 슬라이드/);
+  pass('이전 전체·구간 초안 공존은 모두 복원하고 명시 정리 전 저장 차단');
+
+  await reset(detail, () => control('partialWholeDocument'));
+  await partialEditor.fill('이미 제출한 전체 내용');
+  await control('fail', 'correct');
+  await action('이 내용으로 등록 계속').click();
+  await expect(action('저장 결과 확인')).toBeVisible();
+  await control('addUnitToSavedDraft');
+  await open(detail);
+  await expect(
+    work().getByText(/이전에 제출한 문서 전체 내용으로/),
+  ).toBeVisible();
+  await action('문서 전체').click();
+  await page.getByRole('spinbutton', { name: '이동할 위치' }).fill('1');
+  await action('이동').click();
+  await expect(action('이 구간의 초안 취소')).toBeDisabled();
+  await expect(
+    work().getByRole('textbox', { name: '1슬라이드 등록할 내용' }),
+  ).toHaveValue('고정 제출과 별도로 남은 구간 초안');
+  await action('제출한 전체 내용으로 등록 계속').click();
+  await continued();
+  const fixedState = await snapshot();
+  assert.equal(new Set(fixedState.requests.correct).size, 1);
+  assert.equal(
+    fixedState.detail.corrections[0].content,
+    '이미 제출한 전체 내용',
+  );
+  assert.equal(
+    Object.values(fixedState.drafts)[0].data.draft.contents['unit:slide-one'],
+    '고정 제출과 별도로 남은 구간 초안',
+  );
+  pass(
+    '고정 제출은 구간 취소 차단 / 최초 요청으로 재개 / 별도 구간 초안 완료 뒤 보존',
+  );
+
+  await reset(detail, async () => {
+    await control('partialWholeDocument');
+    await control('laterAnalysisFailed');
+  });
+  await expect(work().getByText(/구체적인 실패 원인이 없습니다/)).toBeVisible();
+  await expect(
+    work().getByText(/그림의 내용을 문자로 읽지 못했습니다/),
+  ).toHaveCount(0);
+  pass('후속 분석 실패를 지난 변환 경고로 오인하지 않음');
+
+  await reset(detail, () => control('conversionFailed'));
+  await expect(work().getByText(/메모리 또는 실행 자원이 부족/)).toBeVisible();
+  await expect(
+    work().getByText('등록할 내용을 불러오고 있습니다…'),
+  ).toHaveCount(0);
+  await expect(work().getByText(/표시할 변환 내용이 없습니다/)).toBeVisible();
+  await expect(action('이 내용으로 등록 계속')).toHaveCount(0);
+  assert.equal((await snapshot()).calls.continue ?? 0, 0);
+  pass(
+    '변환 보고 없는 실패는 실제 원인과 빈 상태 표시 / 무한 로딩·무근거 재실행 없음',
+  );
+
   await reset(detail, () => control('wholeDocument'));
   await available();
   await work()
@@ -533,9 +763,9 @@ try {
   const firstSource = await firstOriginal.getAttribute('src');
   await wholeEditor.fill('원본 여러 페이지를 대조하며 작성하는 전체 문서 초안');
   await action('원본 1 / 170페이지').click();
-  await work().getByRole('spinbutton', { name: '이동할 위치' }).fill('100.5');
+  await page.getByRole('spinbutton', { name: '이동할 위치' }).fill('100.5');
   await expect(action('이동')).toBeDisabled();
-  await work().getByRole('spinbutton', { name: '이동할 위치' }).fill('100');
+  await page.getByRole('spinbutton', { name: '이동할 위치' }).fill('100');
   await action('이동').click();
   const original100 = work().getByRole('img', {
     name: '등록한 PDF의 100페이지 원본',

@@ -5,6 +5,7 @@ import type { SourceConversionScope } from '@contracts/sourceConversion.contract
 import type { SourceFormat } from '@contracts/documents.contract';
 import type { SourceVisualPreviewResult } from '@contracts/sourceVisualPreviews.contract';
 import { Button } from '@renderer/shared/ui/Button';
+import { IconButton } from '@renderer/shared/ui/IconButton';
 import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
 import { sourceVisualPreviewsApi } from '../api/notifications.api';
 import {
@@ -192,31 +193,28 @@ export function OriginalContent({
             원본 열기
           </Link>
         )}
-        <Button
-          variant="surface"
+        <IconButton
+          icon="maximize-2"
+          label={zoom ? '너비 맞춤' : '원본 확대'}
           size="small"
           disabled={!image}
           aria-pressed={zoom}
           onClick={(): void => {
             setZoom(!zoom);
           }}
-        >
-          {zoom ? '너비 맞춤' : '원본 확대'}
-        </Button>
+        />
       </div>
       <div className={previewStyles.toolbar}>
         <span>{unit}</span>
-        <Button
-          variant="surface"
+        <IconButton
+          icon="chevron-left"
           size="small"
-          aria-label={`이전 ${unit}`}
+          label={`이전 ${unit}`}
           disabled={page <= 1 || !image}
           onClick={(): void => {
             move(page - 1);
           }}
-        >
-          이전
-        </Button>
+        />
         <input
           aria-label={`원본 ${unit} 번호`}
           type="number"
@@ -239,17 +237,15 @@ export function OriginalContent({
           }}
         />
         <span className={previewStyles.count}>/ {count || '—'}</span>
-        <Button
-          variant="surface"
+        <IconButton
+          icon="chevron-right"
           size="small"
-          aria-label={`다음 ${unit}`}
+          label={`다음 ${unit}`}
           disabled={!count || page >= count || !image}
           onClick={(): void => {
             move(page + 1);
           }}
-        >
-          다음
-        </Button>
+        />
       </div>
       <p className={previewStyles.notice}>
         {office

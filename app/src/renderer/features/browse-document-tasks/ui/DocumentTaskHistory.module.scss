@@ -1,0 +1,295 @@
+.root {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1024px;
+  min-width: 0;
+  margin-inline: auto;
+  padding: var(--wiki-space-24);
+  display: grid;
+  gap: var(--wiki-space-32);
+  color: var(--wiki-color-text-primary);
+  font: var(--wiki-font-size-13) / var(--wiki-component-control-line-height)
+    var(--wiki-font-family-ui);
+  overflow-wrap: anywhere;
+  container-type: inline-size;
+}
+
+.header,
+.statusLine,
+.next {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--wiki-space-16);
+}
+
+.header {
+  flex-wrap: wrap;
+}
+.title {
+  flex: 1 1 320px;
+  min-width: 0;
+  h1 {
+    margin: 0;
+    font-size: var(--wiki-font-size-20);
+    font-weight: var(--wiki-font-weight-semibold);
+    line-height: 28px;
+    word-break: keep-all;
+  }
+  p {
+    margin: var(--wiki-space-8) 0 0;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.tools {
+  display: flex;
+  gap: var(--wiki-space-4);
+  flex-wrap: wrap;
+}
+.summary {
+  min-width: 0;
+  padding-block: var(--wiki-space-24);
+  border-block: 1px solid var(--wiki-color-border-default);
+}
+.statusLine {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.status,
+.attemptStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wiki-space-8);
+  font-weight: var(--wiki-font-weight-semibold);
+  svg {
+    flex-shrink: 0;
+  }
+}
+.status {
+  margin: 0;
+  font-size: var(--wiki-font-size-14);
+}
+.status[data-state='failed'],
+.attemptStatus[data-tone='danger'] {
+  color: var(--wiki-color-status-danger);
+}
+.status:is(
+  [data-state='partial'],
+  [data-state='review'],
+  [data-state='unconfirmed'],
+  [data-state='stopped']
+),
+.attemptStatus[data-tone='warning'] {
+  color: var(--wiki-color-status-warning);
+}
+.status[data-state='complete'],
+.attemptStatus[data-tone='success'] {
+  color: var(--wiki-color-status-success);
+}
+.status[data-state='running'],
+.attemptStatus[data-tone='active'] {
+  color: var(--wiki-color-action-primary);
+}
+.updated {
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+  font-variant-numeric: tabular-nums;
+}
+.description {
+  margin: var(--wiki-space-12) 0 0;
+}
+.error {
+  margin: var(--wiki-space-12) 0 0;
+  color: var(--wiki-color-status-danger);
+}
+.stages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--wiki-space-16);
+  list-style: none;
+  padding: 0;
+  margin: var(--wiki-space-24) 0;
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--wiki-space-8);
+    min-width: 0;
+  }
+  strong {
+    display: block;
+    font-weight: var(--wiki-font-weight-medium);
+  }
+  div > span {
+    display: block;
+    color: var(--wiki-color-text-secondary);
+    font-size: var(--wiki-font-size-12);
+  }
+  li[data-state='complete'] .stepMark {
+    color: var(--wiki-color-status-success);
+    background: var(--wiki-color-status-success-surface);
+    border-color: transparent;
+  }
+  li:is([data-state='failed'], [data-state='stopped'], [data-state='review'])
+    .stepMark {
+    color: var(--wiki-color-status-warning);
+    border-color: currentColor;
+  }
+  li:is([data-state='current'], [data-state='unconfirmed']) .stepMark {
+    color: var(--wiki-color-action-primary);
+    border-color: currentColor;
+  }
+}
+.stepMark {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--wiki-radius-circle);
+  border: 1px solid var(--wiki-color-border-control);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.next {
+  align-items: center;
+  p {
+    margin: 0;
+    color: var(--wiki-color-text-secondary);
+  }
+  > button,
+  > a {
+    flex-shrink: 0;
+  }
+}
+.sectionHeading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--wiki-space-8);
+  margin-bottom: var(--wiki-space-16);
+  h2 {
+    margin: 0;
+    font-size: var(--wiki-font-size-14);
+    font-weight: var(--wiki-font-weight-semibold);
+  }
+  span {
+    color: var(--wiki-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  text-align: left;
+  th,
+  td {
+    padding: var(--wiki-space-16) var(--wiki-space-12);
+    vertical-align: top;
+  }
+  th:first-child,
+  td:first-child {
+    padding-left: 0;
+  }
+  th:last-child,
+  td:last-child {
+    padding-right: 0;
+  }
+  thead th {
+    padding-block: var(--wiki-space-8);
+    font-size: var(--wiki-font-size-12);
+    color: var(--wiki-color-text-secondary);
+    font-weight: var(--wiki-font-weight-medium);
+  }
+  th:first-child {
+    width: 17%;
+  }
+  th:nth-child(2) {
+    width: 16%;
+  }
+  th:nth-child(3) {
+    width: 21%;
+  }
+  tbody tr {
+    border-block: 1px solid var(--wiki-color-border-default);
+  }
+  tbody th {
+    font-weight: var(--wiki-font-weight-semibold);
+  }
+  p {
+    margin: 0;
+  }
+  time {
+    font-variant-numeric: tabular-nums;
+    color: var(--wiki-color-text-secondary);
+  }
+}
+.table .recordMessage {
+  margin-top: var(--wiki-space-8);
+}
+.table .diagnostics {
+  margin-top: var(--wiki-space-8);
+  color: var(--wiki-color-text-secondary);
+  font-size: var(--wiki-font-size-12);
+}
+.empty {
+  margin: 0;
+  padding-block: var(--wiki-space-24);
+  color: var(--wiki-color-text-secondary);
+  border-top: 1px solid var(--wiki-color-border-default);
+}
+
+@media (max-width: 720px) {
+  .root {
+    padding: var(--wiki-space-16);
+    gap: var(--wiki-space-24);
+  }
+}
+@container (max-width: 620px) {
+  .stages {
+    gap: var(--wiki-space-8);
+    li {
+      flex-direction: column;
+    }
+  }
+  .next {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .table {
+    display: block;
+    thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    tbody,
+    tr {
+      display: block;
+    }
+    tbody tr {
+      padding-block: var(--wiki-space-16);
+    }
+    tbody tr + tr {
+      border-top: 0;
+    }
+    tbody th:first-child {
+      display: block;
+      width: auto;
+      padding: 0 0 var(--wiki-space-8);
+    }
+    td {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: var(--wiki-space-8);
+      padding: var(--wiki-space-4) 0;
+      &::before {
+        content: attr(data-label);
+        color: var(--wiki-color-text-secondary);
+        font-size: var(--wiki-font-size-12);
+      }
+    }
+  }
+}

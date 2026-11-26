@@ -227,7 +227,10 @@ export class NotificationContentReader {
         '고정 원본과 변환 보고의 연결을 확인할 수 없습니다.',
       );
     const countKey = `${workflow.workflow_id}:${workflow.source_ref.registration_revision}`;
-    if (!this.#pageCounts.has(countKey)) {
+    // 서버 페이지 수 API는 PDF 전용이며, 형식을 주지 않는 구서버에서만 기존 조회로 확인합니다.
+    const canReadPageMetadata =
+      !data.source_format || data.source_format === 'pdf';
+    if (canReadPageMetadata && !this.#pageCounts.has(countKey)) {
       const source = workflow.source_ref;
       const query = new URLSearchParams({
         source_sha256: source.source_sha256,
@@ -260,7 +263,9 @@ export class NotificationContentReader {
       else if (metadata.error.status === 415 || metadata.error.status === 404)
         this.#pageCounts.set(countKey, null);
     }
-    data.sourcePageCount = this.#pageCounts.get(countKey) ?? null;
+    data.sourcePageCount = canReadPageMetadata
+      ? (this.#pageCounts.get(countKey) ?? null)
+      : null;
     const correctedPages = workflow.pages.filter(
       (page: NotificationWorkflow['pages'][number]): boolean =>
         !!page.correction_ref,

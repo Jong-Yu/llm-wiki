@@ -913,6 +913,9 @@ class NotificationStore:
     def reported_event(self, body, authorize):
         """Client failure reports remain labeled reports, never evidence of completion."""
         payload = body.model_dump(exclude={'profile'})
+        # 진단을 보내지 않던 기존 요청의 payload 지문과 재전송 영수증을 유지한다.
+        if payload.get('diagnostic_codes') is None:
+            payload.pop('diagnostic_codes', None)
         with self.sources._coordination_lock(create=True):
             self.actor = records.authorized(authorize, *self.scope[:2])
             self._source(payload['source_ref'])

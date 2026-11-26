@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { SourceConversionScope } from '@contracts/sourceConversion.contract';
 import { Button } from '@renderer/shared/ui/Button';
+import { IconButton } from '@renderer/shared/ui/IconButton';
 import { notificationsApi } from '../api/notifications.api';
 import {
   notificationAccessLost,
@@ -69,17 +70,16 @@ export function OriginalPage({
     <>
       <div className={styles.paneHeading}>
         <strong>원본 {page}페이지</strong>
-        <Button
-          variant="surface"
+        <IconButton
+          icon="maximize-2"
+          label={zoom ? '너비 맞춤' : '원본 확대'}
           size="small"
           disabled={!image || !!error}
           aria-pressed={zoom}
           onClick={(): void => {
             setZoom(!zoom);
           }}
-        >
-          {zoom ? '너비 맞춤' : '원본 확대'}
-        </Button>
+        />
       </div>
       <div
         className={styles.paperViewport}

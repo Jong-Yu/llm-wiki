@@ -8,7 +8,9 @@ import { isDocumentPath } from '@contracts/documents.contract';
 import { notificationLocation } from '@contracts/notifications.contract';
 import type { SourceConversionScope } from '@contracts/sourceConversion.contract';
 import { useRouteTitle } from '@renderer/shared/lib/routeTitle';
+import { conversionFailureExplanation } from '@renderer/shared/lib/sourceConversionFailure';
 import { Button } from '@renderer/shared/ui/Button';
+import { IconButton } from '@renderer/shared/ui/IconButton';
 import { MetadataPopover } from '@renderer/shared/ui/MetadataPopover';
 import {
   contentText,
@@ -99,6 +101,25 @@ function NotificationWorkflowContent({
     (): RegistrationUnit[] => (detail ? registrationUnits(detail) : []),
     [detail],
   );
+  const wholeUnit = units.find(
+    (unit: RegistrationUnit): boolean => !!unit.whole_document,
+  );
+  const pendingUnitKeys = units
+    .filter(
+      (unit: RegistrationUnit): boolean =>
+        !unit.whole_document &&
+        (Object.hasOwn(contents, unit.key) || blanks.includes(unit.key)),
+    )
+    .map((unit: RegistrationUnit): string => unit.key);
+  const wholeCorrection = detail?.workflow.pages.some(
+    (unit: NotificationDetail['workflow']['pages'][number]): boolean =>
+      !!unit.whole_document && !!unit.correction_ref,
+  );
+  const mixedDrafts =
+    !!wholeUnit &&
+    (Object.hasOwn(contents, wholeUnit.key) || !!wholeCorrection) &&
+    pendingUnitKeys.length > 0;
+  const fixedMixedDrafts = mixedDrafts && (submitted || resuming);
   const dirty = !!basis;
   useRouteTitle(`workflow:${workflowId}`, detail?.workflow.title ?? null);
 
@@ -130,6 +151,7 @@ function NotificationWorkflowContent({
   async function submit(values: ContentValues): Promise<void> {
     if (!detail) return;
     setInputError(null);
+    if (mixedDrafts && !fixedMixedDrafts) return;
     const selectedDrafts: ContentDraft[] = [];
     for (const unit of units) {
       const content =
@@ -180,7 +202,8 @@ function NotificationWorkflowContent({
     );
     if (jobId) {
       try {
-        await model.clearDraft('registered');
+        // 이전 버전의 고정 제출에 포함되지 않은 구간 초안은 완료 뒤에도 지우지 않습니다.
+        if (!fixedMixedDrafts) await model.clearDraft('registered');
       } catch {
         setInputError(
           '등록은 이어지고 있습니다. 이 기기의 초안 정리는 다시 확인해 주세요.',
@@ -200,6 +223,7 @@ function NotificationWorkflowContent({
     visible[0] ??
     units[0];
   const wholePreview = !!selected?.whole_document && !!detail?.sourcePageCount;
+  const referenceUnit = !!wholeUnit && !!selected && !selected.whole_document;
   const previewTotal = detail?.sourcePageCount ?? 0;
   const visualFormat = detail?.source_format;
   const visualPreview =
@@ -238,6 +262,39 @@ function NotificationWorkflowContent({
     supported;
   const targetDocument =
     workflow?.target_document ?? verifiedTarget ?? target.trim();
+  const lastFailure =
+    workflow && ['failed', 'stopped'].includes(workflow.state)
+      ? detail?.events.findLast(
+          (event: NotificationDetail['events'][number]): boolean =>
+            event.kind === 'failed' || event.kind === 'stopped',
+        )
+      : undefined;
+  const conversionIssue = conversionFailureExplanation([
+    ...(reviewing ? (detail?.conversion?.manifest.warnings ?? []) : []),
+    ...(lastFailure?.details?.diagnostic_codes ?? []),
+  ]);
+  const missingContent = !!detail && units.length === 0;
+  const contentIssue = conversionIssue
+    ? `${conversionIssue.body} ${conversionIssue.next}`
+    : missingContent
+      ? '보관된 변환 내용이 없습니다. 이 기록에는 구체적인 원인이 남아 있지 않습니다. 원본과 실행 기록을 확인해 주세요.'
+      : workflow?.state === 'failed'
+        ? '문서 등록이 중단됐지만 이 기록에는 구체적인 실패 원인이 없습니다. 보관된 내용은 유지했습니다. 실행 기록을 확인해 주세요.'
+        : workflow?.state === 'stopped'
+          ? '문서 등록이 중단된 상태입니다. 보관된 내용을 확인하고 등록을 이어갈 수 있습니다.'
+          : reviewing &&
+              detail?.conversion?.manifest.warnings.includes(
+                'picture_content_not_read',
+              )
+            ? '그림의 내용을 문자로 읽지 못했습니다. 변환된 문자는 아래에 표시했습니다. 원본과 대조해 누락된 내용을 보완해 주세요.'
+            : reviewing && detail?.conversion?.manifest.complete === false
+              ? '원본의 일부만 문자로 변환됐습니다. 보관된 내용을 원본과 대조해 누락된 부분을 보완해 주세요.'
+              : null;
+  const lastPosition = units.reduce(
+    (last: number, unit: RegistrationUnit): number =>
+      Math.max(last, unit.page ?? unit.position),
+    0,
+  );
   const canContinue =
     scope.canPrepare &&
     draft.ready &&
@@ -245,27 +302,34 @@ function NotificationWorkflowContent({
     !uncertain &&
     !error &&
     !changed &&
+    (!mixedDrafts || fixedMixedDrafts) &&
     isDocumentPath(targetDocument) &&
     !!inspection?.ready &&
-    ((reviewing && supported) || resumable);
+    ((reviewing && supported) || (resumable && !missingContent));
   const status =
     inputError ??
     error ??
-    (workflow?.blocked_reason
-      ? '원본 또는 변환 내용이 바뀌었습니다. 입력은 보존되어 있습니다.'
-      : changed
-        ? '편집 중 다른 변경이 저장되었습니다. 초안을 보존했으니 최신 내용과 비교해 주세요.'
-        : phase === 'saving'
-          ? '수정한 내용을 저장하고 있습니다…'
-          : phase === 'confirming'
-            ? '등록할 내용을 확인하고 있습니다…'
-            : phase === 'continuing'
-              ? '문서 등록을 이어가고 있습니다…'
-              : reviewing
-                ? '필요한 부분을 수정해 주세요. 변환하지 못한 내용은 직접 입력할 수 있습니다.'
-                : workflow?.state === 'complete'
-                  ? '문서 등록이 완료되었습니다.'
-                  : '완료되지 않은 작업부터 문서 등록을 이어갑니다.');
+    (fixedMixedDrafts
+      ? '이전에 제출한 문서 전체 내용으로 등록을 이어갑니다. 개별 구간 초안은 제출 내용을 바꾸지 않으며 완료 뒤에도 이 기기에 보존합니다.'
+      : mixedDrafts
+        ? '문서 전체와 개별 구간의 초안이 함께 남아 있습니다. 전체 초안에 구간 수정을 반영한 뒤 각 구간의 초안을 취소해 주세요. 입력은 모두 보존했습니다.'
+        : workflow?.blocked_reason
+          ? '원본 또는 변환 내용이 바뀌었습니다. 입력은 보존되어 있습니다.'
+          : changed
+            ? '편집 중 다른 변경이 저장되었습니다. 초안을 보존했으니 최신 내용과 비교해 주세요.'
+            : phase === 'saving'
+              ? '수정한 내용을 저장하고 있습니다…'
+              : phase === 'confirming'
+                ? '등록할 내용을 확인하고 있습니다…'
+                : phase === 'continuing'
+                  ? '문서 등록을 이어가고 있습니다…'
+                  : reviewing
+                    ? (contentIssue ??
+                      '원본과 등록할 내용을 대조하고 필요한 부분을 수정해 주세요.')
+                    : workflow?.state === 'complete'
+                      ? '문서 등록이 완료되었습니다.'
+                      : (contentIssue ??
+                        '완료되지 않은 작업부터 문서 등록을 이어갑니다.'));
 
   /** 위치 선택은 화면만 바꾸고 실행이나 저장을 시작하지 않습니다. */
   function select(unit: RegistrationUnit | undefined): void {
@@ -273,6 +337,55 @@ function NotificationWorkflowContent({
       setSelection(unit.key);
       setPosition('');
     }
+  }
+
+  /** 전체 입력을 시작하기 전에는 남아 있는 구간 초안도 원래 위치에 합쳐 보여줍니다. */
+  function displayedContent(unit: RegistrationUnit): string {
+    if (Object.hasOwn(contents, unit.key)) return contents[unit.key] ?? '';
+    if (!detail) return '';
+    const overrides = { ...contents };
+    for (const key of blanks) overrides[key] = '';
+    return (
+      contentText(detail, unit, unit.whole_document ? overrides : undefined) ??
+      ''
+    );
+  }
+
+  /** 화면에 합친 구간 초안은 첫 전체 편집 때만 전체 초안으로 옮깁니다. */
+  function changeContent(value: string): void {
+    if (!selected || referenceUnit || !writable) return;
+    model.beginEdit(selected);
+    if (
+      selected.whole_document &&
+      !Object.hasOwn(contents, selected.key) &&
+      !wholeCorrection
+    ) {
+      const nextContents = { ...contents, [selected.key]: value };
+      for (const key of pendingUnitKeys) delete nextContents[key];
+      form.setValue('contents', nextContents, { shouldDirty: true });
+      form.setValue(
+        'blanks',
+        blanks.filter((key: string): boolean => !pendingUnitKeys.includes(key)),
+        { shouldDirty: true },
+      );
+    } else {
+      form.setValue(`contents.${selected.key}`, value, { shouldDirty: true });
+    }
+    setInputError(null);
+  }
+
+  /** 사용자가 전체 초안에 반영한 것을 확인한 뒤 해당 구간의 로컬 초안만 취소합니다. */
+  function discardUnitDraft(): void {
+    if (!selected || !referenceUnit || !mixedDrafts || !writable) return;
+    model.beginEdit(selected);
+    const nextContents = { ...contents };
+    delete nextContents[selected.key];
+    form.setValue('contents', nextContents, { shouldDirty: true });
+    form.setValue(
+      'blanks',
+      blanks.filter((key: string): boolean => key !== selected.key),
+      { shouldDirty: true },
+    );
   }
 
   return (
@@ -286,8 +399,9 @@ function NotificationWorkflowContent({
         <div>
           <h1>{workflow?.title ?? '문서 내용 확인'}</h1>
         </div>
-        <Button
-          variant="surface"
+        <IconButton
+          icon="refresh-cw"
+          label={uncertain ? '저장 결과 확인' : '상태 다시 확인'}
           size="small"
           disabled={!!phase}
           onClick={(): void => {
@@ -295,9 +409,7 @@ function NotificationWorkflowContent({
             void model.inspect();
             if (!draft.ready) draft.reload();
           }}
-        >
-          {uncertain ? '저장 결과 확인' : '상태 다시 확인'}
-        </Button>
+        />
       </div>
       <form
         className={styles.contentForm}
@@ -308,10 +420,10 @@ function NotificationWorkflowContent({
         <div className={styles.contentToolbar}>
           <h2>내용 확인</h2>
           <nav className={styles.contentNavigation} aria-label="문서 내용 탐색">
-            <Button
-              variant="surface"
-              size="small"
-              aria-label="이전 확인 페이지"
+            <IconButton
+              icon="chevron-left"
+              size="default"
+              label="이전 확인 페이지"
               disabled={
                 (wholePreview ? previewPage <= 1 : index <= 0) || !!phase
               }
@@ -319,11 +431,9 @@ function NotificationWorkflowContent({
                 if (wholePreview) setPreviewPage(previewPage - 1);
                 else select(visible[index - 1]);
               }}
-            >
-              이전
-            </Button>
+            />
             <MetadataPopover
-              icon="file-text"
+              control
               label={
                 wholePreview
                   ? `원본 ${previewPage} / ${previewTotal}페이지`
@@ -334,78 +444,96 @@ function NotificationWorkflowContent({
             >
               {(close: () => void): JSX.Element => (
                 <div className={styles.pagePicker}>
-                  <label>
-                    탐색 범위
-                    <select
-                      aria-label="탐색 범위"
-                      value={range}
-                      onChange={(
-                        event: ChangeEvent<HTMLSelectElement>,
-                      ): void => {
-                        setRange(
-                          event.target.value === 'all' ? 'all' : 'review',
-                        );
-                        setSelection(null);
-                      }}
-                    >
-                      <option value="review">확인 필요</option>
-                      <option value="all">전체</option>
-                    </select>
-                  </label>
+                  <div className={styles.pickerHeading}>
+                    <strong>위치 선택</strong>
+                    <IconButton
+                      icon="x"
+                      label="페이지 선택 닫기"
+                      onClick={close}
+                    />
+                  </div>
                   <label>
                     {selected?.page || wholePreview
                       ? '페이지 번호'
                       : '내용 순서'}
-                    <input
-                      type="number"
-                      min={1}
-                      aria-label="이동할 위치"
-                      value={position}
-                      placeholder={String(
-                        wholePreview
-                          ? previewPage
-                          : (selected?.page ?? selected?.position ?? 1),
-                      )}
-                      onChange={(event: ChangeEvent<HTMLInputElement>): void =>
-                        setPosition(event.target.value)
-                      }
-                    />
+                    <div className={styles.pickerJump}>
+                      <input
+                        type="number"
+                        min={1}
+                        max={wholePreview ? previewTotal : lastPosition}
+                        aria-label="이동할 위치"
+                        value={position}
+                        placeholder={String(
+                          wholePreview
+                            ? previewPage
+                            : (selected?.page ?? selected?.position ?? 1),
+                        )}
+                        onChange={(
+                          event: ChangeEvent<HTMLInputElement>,
+                        ): void => setPosition(event.target.value)}
+                      />
+                      <span>
+                        / {wholePreview ? previewTotal : lastPosition}
+                      </span>
+                      <Button
+                        size="small"
+                        disabled={
+                          !position ||
+                          (wholePreview
+                            ? !(
+                                Number.isInteger(Number(position)) &&
+                                Number(position) >= 1 &&
+                                Number(position) <= previewTotal
+                              )
+                            : !units.some(
+                                (unit: RegistrationUnit): boolean =>
+                                  (unit.page ?? unit.position) ===
+                                  Number(position),
+                              ))
+                        }
+                        onClick={(): void => {
+                          if (wholePreview) {
+                            setPreviewPage(Number(position));
+                            setPosition('');
+                            close();
+                            return;
+                          }
+                          const unit = units.find(
+                            (entry: RegistrationUnit): boolean =>
+                              (entry.page ?? entry.position) ===
+                              Number(position),
+                          );
+                          if (unit) {
+                            setRange('all');
+                            select(unit);
+                            close();
+                          }
+                        }}
+                      >
+                        이동
+                      </Button>
+                    </div>
                   </label>
-                  <Button
-                    size="small"
-                    disabled={
-                      !position ||
-                      (wholePreview
-                        ? !(
-                            Number.isInteger(Number(position)) &&
-                            Number(position) >= 1 &&
-                            Number(position) <= previewTotal
-                          )
-                        : !units.some(
-                            (unit: RegistrationUnit): boolean =>
-                              (unit.page ?? unit.position) === Number(position),
-                          ))
-                    }
-                    onClick={(): void => {
-                      if (wholePreview) {
-                        setPreviewPage(Number(position));
-                        setPosition('');
-                        close();
-                        return;
-                      }
-                      const unit = units.find(
-                        (entry: RegistrationUnit): boolean =>
-                          (entry.page ?? entry.position) === Number(position),
-                      );
-                      if (unit) {
-                        setRange('all');
-                        select(unit);
-                        close();
-                      }
-                    }}
-                  >
-                    이동
-                  </Button>
+                  {!wholePreview && units.length > 1 && (
+                    <label>
+                      탐색 범위
+                      <select
+                        aria-label="탐색 범위"
+                        value={range}
+                        onChange={(
+                          event: ChangeEvent<HTMLSelectElement>,
+                        ): void => {
+                          setRange(
+                            event.target.value === 'all' ? 'all' : 'review',
+                          );
+                          setSelection(null);
+                        }}
+                      >
+                        <option value="review">확인 필요</option>
+                        <option value="all">전체</option>
+                      </select>
+                    </label>
+                  )}
                   <span>
                     {wholePreview ? previewTotal : visible.length}개{' '}
                     {range === 'review' ? '확인 대상' : '내용 구간'}
@@ -413,10 +541,10 @@ function NotificationWorkflowContent({
                 </div>
               )}
             </MetadataPopover>
-            <Button
-              variant="surface"
-              size="small"
-              aria-label="다음 확인 페이지"
+            <IconButton
+              icon="chevron-right"
+              size="default"
+              label="다음 확인 페이지"
               disabled={
                 (wholePreview
                   ? previewPage >= previewTotal
@@ -426,9 +554,7 @@ function NotificationWorkflowContent({
                 if (wholePreview) setPreviewPage(previewPage + 1);
                 else select(visible[index + 1]);
               }}
-            >
-              다음
-            </Button>
+            />
           </nav>
         </div>
         <div
@@ -490,7 +616,9 @@ function NotificationWorkflowContent({
                   {selected && detail
                     ? (originalContentText(detail, selected) ??
                       '문자로 변환하지 못했습니다. 원본을 확인하고 등록할 내용을 입력해 주세요.')
-                    : '원본을 불러오고 있습니다…'}
+                    : detail
+                      ? '보관된 변환 내용이 없습니다. 원본 파일을 열어 확인할 수 있습니다.'
+                      : '원본을 불러오고 있습니다…'}
                 </pre>
               </>
             )}
@@ -498,50 +626,53 @@ function NotificationWorkflowContent({
           <section className={styles.contentPane} aria-label="등록할 내용">
             <div className={styles.paneHeading}>
               <label htmlFor="registration-content">등록할 내용</label>
-              <span className={styles.receipt}>{draft.status}</span>
+              {referenceUnit &&
+                mixedDrafts &&
+                pendingUnitKeys.includes(selected.key) && (
+                  <IconButton
+                    icon="rotate-ccw"
+                    label="이 구간의 초안 취소"
+                    disabled={!writable}
+                    onClick={discardUnitDraft}
+                  />
+                )}
+              <span className={styles.receipt}>
+                {draft.status === '수정한 내용은 이 기기에 자동 저장됩니다.'
+                  ? '자동 저장'
+                  : draft.status}
+              </span>
             </div>
             {detail && selected ? (
               <textarea
                 id="registration-content"
                 className={styles.contentEditor}
-                value={
-                  selected
-                    ? (contents[selected.key] ??
-                      (detail ? contentText(detail, selected) : '') ??
-                      '')
-                    : ''
-                }
+                value={displayedContent(selected)}
                 readOnly={
-                  !writable || !selected || blanks.includes(selected.key)
+                  !writable || referenceUnit || blanks.includes(selected.key)
                 }
                 aria-label={
                   selected ? `${selected.label} 등록할 내용` : '등록할 내용'
                 }
                 aria-describedby="registration-content-help"
+                placeholder="변환된 문자가 없습니다. 원본을 보며 등록할 내용을 입력해 주세요."
                 onChange={(): void => {}}
                 onInput={(event: InputEvent<HTMLTextAreaElement>): void => {
-                  if (selected) {
-                    model.beginEdit(selected);
-                    form.setValue(
-                      `contents.${selected.key}`,
-                      event.currentTarget.value,
-                      { shouldDirty: true },
-                    );
-                    setInputError(null);
-                  }
+                  changeContent(event.currentTarget.value);
                 }}
               />
             ) : (
               <div className={styles.contentEditor} role="status">
-                {error
-                  ? '문서 접근 상태를 다시 확인해 주세요.'
-                  : '등록할 내용을 불러오고 있습니다…'}
+                {detail
+                  ? '표시할 변환 내용이 없습니다. 위의 원인과 다음 행동을 확인해 주세요.'
+                  : error
+                    ? '문서 접근 상태를 다시 확인해 주세요.'
+                    : '등록할 내용을 불러오고 있습니다…'}
               </div>
             )}
           </section>
         </div>
         <div className={styles.contentOptions}>
-          {selected?.canBeBlank && (
+          {selected?.canBeBlank && !referenceUnit && (
             <label>
               <input
                 type="checkbox"
@@ -565,7 +696,11 @@ function NotificationWorkflowContent({
                 : '내용이 없는 구간입니다'}
             </label>
           )}
-          <span>그림·도표가 있다면 필요한 내용을 글로 입력해 주세요.</span>
+          <span>
+            {referenceUnit
+              ? '구간별 내용은 참고용입니다. 수정은 문서 전체에서 이어가세요.'
+              : '그림·도표가 있다면 필요한 내용을 글로 입력해 주세요.'}
+          </span>
         </div>
         <div className={styles.contentFooter}>
           <div>
@@ -618,12 +753,14 @@ function NotificationWorkflowContent({
                 수정 취소
               </Button>
             )}
-            {reviewing || resumable ? (
+            {(reviewing || resumable) && !missingContent ? (
               <Button type="submit" disabled={!canContinue}>
-                이 내용으로 등록 계속
+                {fixedMixedDrafts
+                  ? '제출한 전체 내용으로 등록 계속'
+                  : '이 내용으로 등록 계속'}
               </Button>
             ) : (
-              workflow && <Link to={backPath}>문서 진행 상태 보기</Link>
+              missingContent && <Link to={backPath}>실행 상태 확인</Link>
             )}
           </div>
         </div>

@@ -1,8 +1,9 @@
 import type { JSX, ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { formatTimestamp } from '@renderer/shared/lib/formatTimestamp';
 import { Button } from '@renderer/shared/ui/Button';
 import { Icon } from '@renderer/shared/ui/Icon';
+import { IconButton } from '@renderer/shared/ui/IconButton';
 import buttonStyles from '@renderer/shared/ui/Button.module.scss';
 import type {
   DocumentTaskAction,
@@ -18,7 +19,6 @@ export type DocumentTaskDetailProps = {
   error?: string | null;
   onAction: (action: DocumentTaskAction) => void;
   onBack?: () => void;
-  backPath?: string;
   historyPath?: string;
   currentViewPath?: string;
   executionContent?: ReactNode;
@@ -48,12 +48,12 @@ export function DocumentTaskDetail({
   error = null,
   onAction,
   onBack,
-  backPath = '/documents',
   historyPath,
   currentViewPath,
   executionContent,
   textReviewPath,
 }: DocumentTaskDetailProps): JSX.Element {
+  const navigate = useNavigate();
   const resultReturnState = {
     workflowReturnTo: currentViewPath ?? task.detailPath,
   };
@@ -76,14 +76,8 @@ export function DocumentTaskDetail({
       data-task-detail={task.id}
     >
       <div className={styles.progressHeader}>
-        {onBack ? (
-          <Button variant="surface" size="small" onClick={onBack}>
-            <Icon name="arrow-left" /> 문서 목록
-          </Button>
-        ) : (
-          <Link className={styles.textLink} to={backPath}>
-            <Icon name="arrow-left" /> 문서 목록
-          </Link>
+        {onBack && (
+          <IconButton icon="arrow-left" label="문서 목록" onClick={onBack} />
         )}
         <span data-completed-steps>{task.completionLabel}</span>
       </div>
@@ -227,10 +221,15 @@ export function DocumentTaskDetail({
           )}
         </div>
         <div className={styles.progressTools}>
-          <Link
-            className={styles.textLink}
-            to={`/register?${new URLSearchParams({ replaceSourceId: task.sourceId, version: task.sourceVersion })}`}
-            state={resultReturnState}
+          <IconButton
+            icon="upload"
+            label="파일 교체"
+            onClick={(): void => {
+              void navigate(
+                `/register?${new URLSearchParams({ replaceSourceId: task.sourceId, version: task.sourceVersion })}`,
+                { state: resultReturnState },
+              );
+            }}
             style={{
               visibility:
                 (task.activeStep === 'convert' || task.inputLimited) &&
@@ -248,26 +247,22 @@ export function DocumentTaskDetail({
               (task.activeStep !== 'convert' && !task.inputLimited) ||
               ['running', 'complete'].includes(task.state)
             }
-          >
-            파일 교체
-          </Link>
+          />
           {action?.id !== 'refresh' && (
-            <Button
-              variant="surface"
-              size="small"
+            <IconButton
+              icon="refresh-cw"
+              label="새로고침"
               disabled={busy}
               onClick={(): void => onAction('refresh')}
-            >
-              <Icon name="refresh-cw" /> 새로고침
-            </Button>
+            />
           )}
-          <Link
-            className={styles.textLink}
-            to={recordPath}
-            state={resultReturnState}
-          >
-            <Icon name="history" /> 실행 기록
-          </Link>
+          <IconButton
+            icon="history"
+            label="실행 기록"
+            onClick={(): void => {
+              void navigate(recordPath, { state: resultReturnState });
+            }}
+          />
         </div>
       </footer>
     </div>
@@ -276,7 +271,6 @@ export function DocumentTaskDetail({
 
 export type DocumentTaskDetailLoadingProps = {
   onBack?: () => void;
-  backPath?: string;
   error?: string | null;
   onRetry?: () => void;
 };
@@ -284,21 +278,14 @@ export type DocumentTaskDetailLoadingProps = {
 /** 최초 조회도 같은 영역을 유지하며 로딩 표시를 실제 처리 단계로 오인하지 않게 합니다. */
 export function DocumentTaskDetailLoading({
   onBack,
-  backPath = '/documents',
   error = null,
   onRetry,
 }: DocumentTaskDetailLoadingProps): JSX.Element {
   return (
     <div className={`${styles.root} ${styles.detail}`} data-task-loading>
       <div className={styles.progressHeader}>
-        {onBack ? (
-          <Button variant="surface" size="small" onClick={onBack}>
-            <Icon name="arrow-left" /> 문서 목록
-          </Button>
-        ) : (
-          <Link className={styles.textLink} to={backPath}>
-            <Icon name="arrow-left" /> 문서 목록
-          </Link>
+        {onBack && (
+          <IconButton icon="arrow-left" label="문서 목록" onClick={onBack} />
         )}
         <span aria-hidden="true" className={styles.loadingText}>
           단계 확인 중

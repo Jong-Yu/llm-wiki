@@ -10,7 +10,8 @@
 
 .toolbar input {
   width: 4.5rem;
-  min-height: 30px;
+  min-height: var(--wiki-component-control-height-small);
+  min-width: 0;
   text-align: center;
   border: 1px solid var(--wiki-color-border-default);
   border-radius: 4px;
@@ -20,15 +21,15 @@
 }
 
 .count {
-  min-width: 3rem;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
 .notice {
   margin: 0;
   padding: var(--wiki-space-8) var(--wiki-space-16);
-  height: 64px;
-  overflow: auto;
+  min-height: 64px;
+  overflow-wrap: anywhere;
   font-size: var(--wiki-font-size-12);
   line-height: 1.5;
   color: var(--wiki-color-text-secondary);

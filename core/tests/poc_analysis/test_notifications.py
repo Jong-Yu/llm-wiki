@@ -9,6 +9,7 @@ import unittest
 
 from core.api.v1.analysis_plans.schemas import CreateConversion
 from core.api.v1.notifications.schemas import Approve, Claim, CreateWorkflow, Execution, PageDecisions, ReadFlags, Dismiss, ReportedEvent
+from core.common.json_codec import canonical_json_hash
 from core.modules.analysis_jobs.contracts import JobConflictError, JobValidationError
 from core.modules.analysis_jobs.store import JobStore
 from core.modules.analysis_plans.store import PlanStore
@@ -305,6 +306,30 @@ class NotificationTest(unittest.TestCase):
         self.assertEqual(notice['origin'], 'client_reported')
         self.assertEqual(len(self.service().list()['items']), 1)
 
+    def test_failure_diagnostics_preserve_legacy_receipts_and_survive_new_reader(self):
+        """진단 없는 옛 요청 지문을 유지하고 새 사건의 안전한 코드만 다른 기기에서 읽는다."""
+        payload = ReportedEvent(request_id=uuid4().hex, source_ref=self.source, title='Conversion failed',
+                                kind='failed', device_id='1' * 32, device_name='A')
+        service = self.service()
+        service.reported_event(payload, self.auth)
+        with service.database() as db:
+            digest = db.execute('SELECT payload_hash FROM requests WHERE request_id=?',
+                                (payload.request_id,)).fetchone()['payload_hash']
+        self.assertEqual(digest, canonical_json_hash(payload.model_dump(exclude={'profile', 'diagnostic_codes'})))
+        self.assertTrue(self.service().reported_event(payload, self.auth)['replayed'])
+        with self.assertRaises(JobConflictError):
+            self.service().reported_event(payload.model_copy(update={'diagnostic_codes': ['worker_failed']}), self.auth)
+        codes = ['conversion_checkpoint_locked', 'worker_failed', 'future_converter_code']
+        updated = payload.model_copy(update={'request_id': uuid4().hex, 'diagnostic_codes': codes})
+        service.reported_event(updated, self.auth)
+        workflow_id = identity('reported', updated.request_id)
+        detail = self.service().detail(workflow_id)
+        self.assertIsNone(detail['conversion'])
+        self.assertEqual(detail['events'][-1]['details']['diagnostic_codes'], codes)
+        self.assertEqual(detail['workflow']['state'], 'failed')
+        self.assertTrue(self.service().reported_event(updated, self.auth)['replayed'])
+        self.assertEqual(len(self.service().detail(workflow_id)['events']), 1)
+
     def test_resolved_approval_filter_and_independent_event_change_watermarks(self):
         self.conversion()
         before = self.service().list()
@@ -586,6 +611,23 @@ class NotificationAPITest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forged.status_code, 422)
         denied = await self.http.get(self.base + '/notifications', headers={'Authorization': 'Bearer invalid'})
         self.assertEqual(denied.status_code, 401)
+
+    async def test_failure_diagnostic_codes_round_trip_and_reject_raw_error_text(self):
+        detail = await self.http.get(self.base + '/notification-workflows/' + self.workflow_id)
+        source = detail.json()['data']['workflow']['source_ref']
+        body = dict(request_id=uuid4().hex, source_ref=source, title='Synthetic local failure',
+                    kind='failed', device_id='1' * 32, device_name='A',
+                    diagnostic_codes=['conversion_worker_io_failed', 'worker_failed'])
+        result = await self.http.post(self.base + '/notification-events', json=body)
+        self.assertEqual(result.status_code, 200, result.text)
+        recorded_id = identity('reported', body['request_id'])
+        recorded = await self.http.get(self.base + '/notification-workflows/' + recorded_id)
+        self.assertEqual(recorded.status_code, 200, recorded.text)
+        self.assertEqual(recorded.json()['data']['events'][-1]['details']['diagnostic_codes'], body['diagnostic_codes'])
+        for codes in [['/private/secret/path'], ['raw error\nmessage'], ['x' * 129], ['worker_failed'] * 101]:
+            denied = await self.http.post(self.base + '/notification-events',
+                json=dict(body, request_id=uuid4().hex, diagnostic_codes=codes))
+            self.assertEqual(denied.status_code, 422, denied.text)
 
     async def test_dismiss_route_preserves_detail_and_rejects_foreign_actor(self):
         listed = await self.http.get(self.base + '/notifications')
