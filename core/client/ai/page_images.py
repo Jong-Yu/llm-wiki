@@ -8,7 +8,11 @@
 from hashlib import sha256
 from io import BytesIO
 import json
+import os
+from pathlib import Path
 import re
+import shutil
+import sys
 
 from core.runtime.client_platform import private_directory, write_new
 from core.client.transport import AnalysisClientError
@@ -22,6 +26,7 @@ MAX_TOTAL_BYTES = 6 * 1024 * 1024
 # Claude CLI는 stdin 10 MB 한도가 있다. base64(4/3배)와 JSON 문자열 표기를 더한 실제 크기로 남는 칸을 계산한다.
 STDIN_LIMIT = 10_000_000
 STDIN_MARGIN = 64 * 1024
+RENDER_TIMEOUT = 330
 _WARNING = re.compile(r"(pages?|slides?) ([0-9]+(?:,[0-9]+)*): (pdf|pptx)_diagram_relations_need_review")
 _ID = re.compile(r"[0-9a-f]{32}")
 
@@ -135,6 +140,57 @@ def render(original, kind, numbers, directory):
         return _render_pdf(pdf, kind, numbers, directory, omitted), omitted, "libreoffice_pdf+pdfium"
 
 
+async def render_owned(original, kind, numbers, directory):
+    """소유한 별도 프로세스에서 렌더하고 종료를 확인한 뒤 임시 폴더를 정리한다.
+
+    PDFium·LibreOffice가 오래 걸려도 실행권 heartbeat를 막지 않는다. 취소 시 기존 프로세스
+    그룹/Windows Job 회수가 먼저 끝나므로 호출자가 원본을 지워도 진행 중 렌더와 경쟁하지 않는다.
+    """
+    from .codex import _ENVIRONMENT, _execute
+    scratch = directory / "render-temp"
+    private_directory(scratch, exist_ok=False)
+    # Office는 Windows 표준 설치 위치와 사용자가 명시한 fontconfig도 사용한다.
+    names = (*_ENVIRONMENT, "PROGRAMFILES", "PROGRAMFILES(X86)", "FONTCONFIG_FILE")
+    environment = {name: os.environ[name] for name in names if name in os.environ}
+    environment.update(TMPDIR=str(scratch), TEMP=str(scratch), TMP=str(scratch))
+    request = {"original": str(original), "kind": kind, "numbers": numbers, "directory": str(directory)}
+    try:
+        code, output, _ = await _execute([sys.executable, "-B", "-m", "core.client.ai.page_images"],
+            directory=Path(__file__).resolve().parents[3], environment=environment,
+            prompt=json.dumps(request).encode("utf-8"), timeout=RENDER_TIMEOUT)
+        if code != 0:
+            raise AnalysisClientError("page_images_render_failed")
+        result = json.loads(output)
+        if "error" in result:
+            raise AnalysisClientError(result["error"])
+        for item in result["images"]:
+            item["path"] = Path(item["path"])
+        return result["images"], result["omitted"], result["method"]
+    finally:
+        # _execute는 취소/시간 초과에도 자식 회수를 마친 뒤 반환한다.
+        pending = sys.exception()
+        try:
+            shutil.rmtree(scratch)
+        except OSError as error:
+            if pending is None:
+                raise
+            # 파일 잠금 등 정리 실패가 취소를 일반 오류로 바꿔 글만 추출을 이어가게 하면 안 된다.
+            pending.add_note("page_images_render_temp_cleanup_failed:" + type(error).__name__)
+
+
+def _render_worker():
+    """부모가 고정한 렌더 요청 하나를 읽고 파일 경로·진단만 반환한다."""
+    request = json.loads(sys.stdin.buffer.read())
+    try:
+        images, omitted, method = render(Path(request["original"]), request["kind"], request["numbers"],
+                                         Path(request["directory"]))
+        result = {"images": [{**item, "path": str(item["path"])} for item in images],
+                  "omitted": omitted, "method": method}
+    except AnalysisClientError as error:
+        result = {"error": error.code}
+    sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+
+
 def fit(images, prompt):
     """개수·전체 크기·Claude stdin 한도에 맞는 앞쪽 그림만 고른다. (고른 그림, 빠진 쪽)을 돌려준다."""
     encoded_prompt = len(json.dumps(prompt, ensure_ascii=False).encode("utf-8"))
@@ -191,7 +247,7 @@ async def prepare(http, *, tenant, source_ref, conversion, directory, prompt, av
         endpoint = (str(http.base_url).rstrip("/") + f"/api/v1/tenants/{tenant}/sources/"
                     f"{source_ref['source_id']}/versions/{source_ref['source_version']}/file")
         original = await _download(http, endpoint, directory, source_ref, text=False)
-        rendered, omitted, method = render(original, kind, numbers[:MAX_IMAGES], directory)
+        rendered, omitted, method = await render_owned(original, kind, numbers[:MAX_IMAGES], directory)
         omitted += [{"location": _label(kind, n), "reason": "image_count_limit"} for n in numbers[MAX_IMAGES:]]
         chosen, skipped = fit(rendered, prompt)
         for image in rendered:
@@ -209,5 +265,15 @@ async def prepare(http, *, tenant, source_ref, conversion, directory, prompt, av
         audit.update(status="not_attached", reason="page_images_failed:" + type(error).__name__)
     finally:
         if original is not None:
-            original.unlink(missing_ok=True)
+            pending = sys.exception()
+            try:
+                original.unlink(missing_ok=True)
+            except OSError as error:
+                if pending is None:
+                    raise
+                pending.add_note("page_images_original_cleanup_failed:" + type(error).__name__)
     return [], audit
+
+
+if __name__ == "__main__":
+    _render_worker()

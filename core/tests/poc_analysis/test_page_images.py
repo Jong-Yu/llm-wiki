@@ -6,10 +6,13 @@
 import asyncio
 from contextlib import contextmanager
 from hashlib import sha256
-from io import BytesIO
+from io import BytesIO, TextIOWrapper
 import json
+import os
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
@@ -186,6 +189,18 @@ class RenderTests(unittest.TestCase):
         self.assertTrue(value.endswith("\nFIXED_INPUT_DATA\n{}"))
         self.assertIn('[{"image": 1, "location": "2쪽"}]', value)
 
+    def test_worker_output_is_utf8_with_non_utf8_console_encodings(self):
+        request = {"original": str(self.root / "source"), "kind": "pdf", "numbers": [2],
+                   "directory": str(self.out)}
+        for encoding in ("cp949", "cp1252"):
+            with self.subTest(encoding=encoding):
+                incoming = TextIOWrapper(BytesIO(json.dumps(request).encode("utf-8")), encoding=encoding)
+                outgoing = TextIOWrapper(BytesIO(), encoding=encoding)
+                with patch.object(sys, "stdin", incoming), patch.object(sys, "stdout", outgoing), patch.object(
+                        page_images, "render", return_value=([], [{"location": "2쪽"}], "pdfium")):
+                    page_images._render_worker()
+                self.assertEqual(json.loads(outgoing.buffer.getvalue())["omitted"], [{"location": "2쪽"}])
+
 
 class PrepareTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -235,6 +250,163 @@ class PrepareTests(unittest.IsolatedAsyncioTestCase):
                 available=unavailable)
         self.assertEqual((paths, audit["status"], audit["reason"]), ([], "not_attached", "cli_without_image_input"))
         self.assertEqual((self.requests, audit["candidates"]), ([], ["2쪽", "5쪽"]))
+
+
+class OwnedRenderTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp = PrepareTests.asyncSetUp
+    http = PrepareTests.http
+
+    async def test_worker_can_find_windows_office_outside_path_and_keeps_font_config(self):
+        from core.client import source_conversion_presentation as presentation
+        office = self.root / "Programs" / "LibreOffice" / "program" / "soffice.exe"
+        office.parent.mkdir(parents=True)
+        office.write_bytes(b"fixture")
+        directory = self.root / "environment"
+        private_directory(directory)
+
+        async def execute(arguments, **kwargs):
+            environment = kwargs["environment"]
+            self.assertEqual(environment["FONTCONFIG_FILE"], "custom-fonts.conf")
+            with patch.object(presentation, "os", SimpleNamespace(name="nt", environ=environment)), patch.object(
+                    presentation.shutil, "which", return_value=None), patch.object(
+                    Path, "is_file", lambda path: path == office):
+                self.assertEqual(presentation._libreoffice(), str(office))
+            return 0, b'{"images":[],"omitted":[],"method":"fixture"}', b""
+
+        for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
+            with self.subTest(variable=variable), patch.dict(os.environ, {
+                    variable: str(self.root / "Programs"), "FONTCONFIG_FILE": "custom-fonts.conf"}, clear=True), patch(
+                    "core.client.ai.codex._execute", execute):
+                await page_images.render_owned(self.root / "original", "slides", [1], directory)
+
+    @unittest.skipUnless(__import__("core.client.source_conversion_presentation", fromlist=["_libreoffice"])._libreoffice(),
+                         "LibreOffice is not installed")
+    async def test_real_office_worker_keeps_hidden_slides_and_cleans_temporary_files(self):
+        raw = slides_package(3, hidden={2})
+        source = {**self.source, "source_sha256": sha256(raw).hexdigest(), "size_bytes": len(raw)}
+        directory = self.root / "office"
+        async with self.http(raw) as http:
+            paths, audit = await page_images.prepare(http, tenant="team", source_ref=source,
+                conversion={"warnings": ["slides 2,3: pptx_diagram_relations_need_review"]},
+                directory=directory, prompt="prompt")
+        self.assertEqual((len(paths), audit["status"]), (2, "attached"))
+        self.assertEqual([item["location"] for item in audit["attached"]], ["슬라이드 2", "슬라이드 3"])
+        self.assertEqual(set(directory.iterdir()), set(paths))
+
+    async def test_slow_render_keeps_event_loop_running_and_returns_images(self):
+        from core.client.ai.codex import _execute
+        ticks = []
+
+        async def tick():
+            while True:
+                ticks.append(True)
+                await asyncio.sleep(.01)
+
+        async def delayed(arguments, **kwargs):
+            script = "import time; time.sleep(.2); from core.client.ai.page_images import _render_worker; _render_worker()"
+            return await _execute([sys.executable, "-B", "-c", script], **kwargs)
+
+        ticker = asyncio.create_task(tick())
+        try:
+            async with self.http(self.raw) as http:
+                with patch("core.client.ai.codex._execute", delayed):
+                    paths, audit = await page_images.prepare(http, tenant="team", source_ref=self.source,
+                        conversion={"warnings": [PDF_REVIEW]}, directory=self.root / "slow", prompt="prompt")
+        finally:
+            ticker.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await ticker
+        self.assertEqual((len(paths), audit["status"]), (1, "attached"))
+        self.assertGreater(len(ticks), 5)
+        self.assertFalse((self.root / "slow" / "render-temp").exists())
+
+    async def test_cancel_reaps_worker_and_child_before_original_cleanup(self):
+        from core.client.ai.codex import _execute
+        directory = self.root / "cancel"
+        ready = self.root / "child-ready"
+        source_existed_at_reap = []
+
+        async def waiting(arguments, **kwargs):
+            child = ("import os,time; from pathlib import Path; "
+                     f"Path({str(ready)!r}).write_text(str(os.getpid())); time.sleep(30)")
+            script = ("import subprocess,sys,time; "
+                      f"subprocess.Popen([sys.executable,'-c',{child!r}]); time.sleep(30)")
+            try:
+                return await _execute([sys.executable, "-B", "-c", script], **kwargs)
+            finally:
+                source_existed_at_reap.append((directory / "original").exists())
+
+        async with self.http(self.raw) as http:
+            with patch("core.client.ai.codex._execute", waiting):
+                task = asyncio.create_task(page_images.prepare(http, tenant="team", source_ref=self.source,
+                    conversion={"warnings": [PDF_REVIEW]}, directory=directory, prompt="prompt"))
+                try:
+                    async with asyncio.timeout(5):
+                        while not ready.exists():
+                            await asyncio.sleep(.01)
+                finally:
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+        self.assertEqual(source_existed_at_reap, [True])
+        self.assertFalse((directory / "original").exists())
+        self.assertFalse((directory / "render-temp").exists())
+        if os.name != "nt":
+            # Windows는 기존 Job Object 경계가 자식 종료를 맡는다. 여기서는 POSIX 실제 자식도 확인한다.
+            async with asyncio.timeout(3):
+                while True:
+                    try:
+                        os.kill(int(ready.read_text()), 0)
+                    except ProcessLookupError:
+                        break
+                    await asyncio.sleep(.01)
+
+    async def test_render_timeout_keeps_text_only_and_cleans_original_after_stop(self):
+        from core.client.ai.codex import _execute
+
+        async def waiting(arguments, **kwargs):
+            return await _execute([sys.executable, "-B", "-c", "import time; time.sleep(30)"], **kwargs)
+
+        async with self.http(self.raw) as http:
+            with patch("core.client.ai.codex._execute", waiting), patch.object(page_images, "RENDER_TIMEOUT", .1):
+                paths, audit = await page_images.prepare(http, tenant="team", source_ref=self.source,
+                    conversion={"warnings": [PDF_REVIEW]}, directory=self.root / "timeout", prompt="prompt")
+        self.assertEqual((paths, audit["status"], audit["reason"]),
+                         ([], "not_attached", "page_images_failed:TimeoutError"))
+        self.assertEqual(list((self.root / "timeout").iterdir()), [])
+
+    async def test_cleanup_failure_does_not_replace_cancellation_with_text_only(self):
+        unlink = Path.unlink
+        rmtree = page_images.shutil.rmtree
+        for failure in ("render_temp", "original"):
+            with self.subTest(failure=failure):
+                started = asyncio.Event()
+                directory = self.root / failure
+
+                async def waiting(arguments, **kwargs):
+                    started.set()
+                    await asyncio.Event().wait()
+
+                def cleanup(path, *args, **kwargs):
+                    if failure == "render_temp" and path == directory / "render-temp":
+                        raise PermissionError("fixture")
+                    return rmtree(path, *args, **kwargs)
+
+                def remove(path, *args, **kwargs):
+                    if failure == "original" and path == directory / "original":
+                        raise PermissionError("fixture")
+                    return unlink(path, *args, **kwargs)
+
+                async with self.http(self.raw) as http:
+                    with patch("core.client.ai.codex._execute", waiting), patch.object(
+                            page_images.shutil, "rmtree", cleanup), patch.object(Path, "unlink", remove):
+                        task = asyncio.create_task(page_images.prepare(http, tenant="team", source_ref=self.source,
+                            conversion={"warnings": [PDF_REVIEW]}, directory=directory, prompt="prompt"))
+                        await asyncio.wait_for(started.wait(), 3)
+                        task.cancel()
+                        with self.assertRaises(asyncio.CancelledError) as caught:
+                            await task
+                self.assertIn("page_images_" + failure + "_cleanup_failed:PermissionError", caught.exception.__notes__)
 
 
 class AdapterImageTests(unittest.IsolatedAsyncioTestCase):

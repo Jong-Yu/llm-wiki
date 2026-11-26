@@ -2,6 +2,13 @@
 
 반복 실행·준비 기록은 통합했다. 실험의 성과와 채택 여부를 구분하며 현재 범위는 [PLAN](PLAN.md)을 따른다.
 
+## 2026-11-26 — 릴리즈 전 쪽 그림 렌더의 실행권·취소 보완
+
+- 쪽 그림의 동기 PDFium·LibreOffice 렌더가 비동기 실행권 갱신을 막는 문제를 재현했다. 기존 소유 프로세스 그룹/Windows Job 실행기로 별도 Python 작업자를 관리하고, 취소·시간 초과 때 자식 회수 후 원본과 Office 임시 폴더를 정리한다. 정리 실패가 취소를 글만 추출로 바꾸지 않도록 원래 취소를 보존하고 정리 오류를 별도 예외 메모로 남긴다.
+- 독립 검토에서 찾은 Windows 출력 인코딩과 Office 탐색 누락도 보완했다. 작업자 출력은 UTF-8 바이트이며 `PROGRAMFILES`·`PROGRAMFILES(X86)`·명시 `FONTCONFIG_FILE`을 전달한다. 실제 느린 작업자 동안 이벤트 루프 유지, 취소 시 실제 자식 종료와 원본 보존 순서, 시간 초과의 글만 진행, 정리 실패의 취소 보존, cp949/cp1252 출력, Windows 표준 경로 탐색을 검사했다.
+- 최종 집중100검사 통과(실제 Mac LibreOffice의 숨김 슬라이드 렌더·별도 작업자 포함). 확장 회귀153검사는152통과·실제 Windows 파일 잠금1건 건너뜀. 최초 sandbox 안의 실제 LibreOffice1건은 실패했고 같은 격리 자료를 sandbox 밖에서 다시 실행해 통과했다. Windows 탐색 검사의 첫 fixture는 Mac 설치 경로를 함께 허용해 실패했으며 Windows 파일 존재 조건으로 고쳐 통과했다.
+- 근거: `.local/releases/0.6.4-current/python-tests-summary.json`, `python-targeted-tests.log`. 실제 AI 호출·Windows 실기·운영 자료 쓰기는 실행하지 않았다.
+
 ## 2026-11-26 — AI 해석 후보 쪽 그림을 그래프 추출 호출에 붙이기(D-169)
 
 - 구현: 후보 목록 읽기·원본 확인·쪽 그림 만들기(`core/client/ai/page_images.py`), Claude `stream-json` 그림 메시지·Codex `--image` 첨부, 추출 단계 연결(첫 호출과 수정 호출 모두 같은 그림), 조립 기록의 `page_images`. 변환 보고는 마지막 10칸을 요약 줄 몫으로 남기고 PPTX 도식 경고를 슬라이드 묶음으로 적는다.
