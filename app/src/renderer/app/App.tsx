@@ -19,6 +19,7 @@ import { DocumentTasksPage } from '@renderer/pages/tasks/DocumentTasksPage';
 import { NotificationsPage } from '@renderer/pages/notifications/NotificationsPage';
 import { ReviewQueuePage } from '@renderer/pages/review/ReviewQueuePage';
 import { UserGuidePage } from '@renderer/pages/guide/UserGuidePage';
+import { ErrorReportPage } from '@renderer/pages/report/ErrorReportPage';
 import { WorkspacePage } from '@renderer/shared/ui/WorkspacePage';
 import { TemplatesPage } from '@renderer/pages/templates/TemplatesPage';
 import { AppShell } from './AppShell';
@@ -86,6 +87,7 @@ function renderWorkspaceRoutes(location: Location): JSX.Element {
       <Route path="/notifications" element={<NotificationsPage />} />
       <Route path="/settings" element={<ConnectionSettingsPage />} />
       <Route path="/guide" element={<UserGuidePage />} />
+      <Route path="/report" element={<ErrorReportPage />} />
       <Route path="*" element={<MissingPage />} />
     </Routes>
   );

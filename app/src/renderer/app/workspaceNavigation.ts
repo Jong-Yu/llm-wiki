@@ -36,6 +36,7 @@ export function workspacePageKey(pathname: string, search: string): string {
     case '/artifact':
     case '/settings':
     case '/guide':
+    case '/report':
     case '/sessions':
     case '/sessions/history':
       return pathname;
@@ -192,6 +193,8 @@ export function workspaceBreadcrumb(
       return [{ label: '설정' }];
     case '/guide':
       return [{ label: '사용자 가이드' }];
+    case '/report':
+      return [{ label: '오류 보고' }];
     default:
       return [];
   }

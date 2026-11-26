@@ -11,6 +11,7 @@ import { createNativeNotificationDelivery } from '@main/windows/notificationDeli
 import { NotificationService } from '@main/backend/NotificationService';
 import { loadNotificationDevice } from '@main/backend/notificationDevice';
 import { registerNotificationHandlers } from './registerNotificationHandlers';
+import { registerVocHandlers } from './registerVocHandlers';
 import { RegistrationDraftService } from '@main/backend/RegistrationDraftService';
 import { registerRegistrationDraftHandlers } from './registerRegistrationDraftHandlers';
 import type { AnalysisContext } from '@main/backend/ConnectionService';
@@ -174,6 +175,7 @@ export async function registerConnectionHandlers(
   );
   // 앱 시작 때 한 번 복원하며 어떤 renderer 요청도 복원 완료 전에 받을 수 없습니다.
   await service.initialize();
+  registerVocHandlers(getWindow, rendererLocation, service);
   registerFileExportHandlers(
     getWindow,
     rendererLocation,

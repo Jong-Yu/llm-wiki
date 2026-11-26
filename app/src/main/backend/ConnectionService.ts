@@ -1,4 +1,9 @@
 import { isServerUnreachable } from './serverReachability';
+import { vocSubmitSchema, vocReceiptSchema } from '@contracts/voc.contract';
+import type {
+  VocSubmitRequest,
+  VocSubmitResult,
+} from '@contracts/voc.contract';
 import type { AccountPreferencesStore } from './AccountPreferencesStore';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
@@ -837,6 +842,74 @@ export class ConnectionService {
     } finally {
       if (this.#pending === controller) this.#pending = null;
     }
+  }
+
+  /** 공간 배정과 관계없이 현재 로그인한 사용자의 텍스트 보고만 서버에 보냅니다. */
+  async submitVoc(request: VocSubmitRequest): Promise<VocSubmitResult> {
+    if (!vocSubmitSchema.safeParse(request).success)
+      return apiFailure('invalid_request', '보고 내용을 확인해 주세요.');
+    const active = this.#active;
+    const token = this.#token;
+    if (
+      !active ||
+      !token ||
+      active.connectionId !== request.connectionId ||
+      this.#pending
+    )
+      return apiFailure(
+        'connection_changed',
+        '로그인 상태가 변경되었습니다. 서버 연결을 다시 확인해 주세요.',
+      );
+    const generation = this.#generation;
+    const current = (): boolean =>
+      generation === this.#generation &&
+      this.#pending === null &&
+      this.#active?.connectionId === active.connectionId &&
+      this.#active.userId === active.userId;
+    const changed = (): ApiFailure =>
+      apiFailure(
+        'connection_changed',
+        '로그인 상태가 변경되어 보고 결과를 확인할 수 없습니다.',
+      );
+    const controller = new AbortController();
+    const access = await this.#read(active.serverUrl, token, controller);
+    if (!current()) return changed();
+    if ('ok' in access) return access;
+    if (access.userId !== active.userId)
+      return apiFailure(
+        'subject_changed',
+        '인증 사용자가 변경되었습니다. 다시 로그인해 주세요.',
+      );
+    const result = await readApiJson(
+      `${active.serverUrl}voc`,
+      token,
+      controller,
+      { method: 'POST', body: { content: request.content } },
+    );
+    // 전송 이후 연결이 바뀐 경우 이전 사용자의 완료를 새 화면에 적용하지 않습니다.
+    if (!current()) return changed();
+    if (!result.ok)
+      return {
+        ...result,
+        error: {
+          ...result.error,
+          message:
+            result.error.status === 401 || result.error.status === 403
+              ? '로그인 상태를 확인한 뒤 다시 보고해 주세요.'
+              : result.error.status === 413
+                ? '보고 내용이 전송 가능한 크기를 초과했습니다.'
+                : result.error.status === 404
+                  ? '현재 서버는 오류 보고를 지원하지 않습니다.'
+                  : '보고 결과를 확인하지 못했습니다. 입력한 내용은 유지됩니다.',
+        },
+      };
+    const parsed = z.object({ data: vocReceiptSchema }).safeParse(result.value);
+    if (!parsed.success)
+      return apiFailure(
+        'invalid_response',
+        '보고 결과를 확인하지 못했습니다. 입력한 내용은 유지됩니다.',
+      );
+    return { ok: true, data: parsed.data.data };
   }
 
   /** 현재 소속을 재조회해 작업 공간의 제한 없는 기본 설정만 선택합니다. */

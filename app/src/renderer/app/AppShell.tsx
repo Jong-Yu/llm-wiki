@@ -99,6 +99,7 @@ const navigation: readonly NavigationItem[] = [
 ];
 
 const pageTitles: Readonly<Record<string, string>> = {
+  '/report': '오류 보고',
   '/notifications': '알림',
   '/documents': '문서',
   '/documents/trash': '휴지통',
@@ -495,6 +496,17 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
           ))}
         </nav>
         <div className={styles.sidebarBottom}>
+          <Link
+            to="/report"
+            className={styles.settingsLink}
+            aria-label="오류 보고"
+            title="오류 보고"
+            aria-current={location.pathname === '/report' ? 'page' : undefined}
+            onClick={openDestination}
+          >
+            <Icon name="circle-alert" size={18} />
+            <span className={styles.navigationText}>오류 보고</span>
+          </Link>
           <Link
             to="/documents/trash"
             className={styles.settingsLink}

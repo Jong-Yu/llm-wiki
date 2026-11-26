@@ -1,0 +1,38 @@
+.form {
+  display: grid;
+  gap: var(--wiki-space-16);
+  width: 100%;
+  max-width: var(--wiki-layout-content-form-width);
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.submitButton {
+  display: inline-grid;
+}
+
+.buttonLabel,
+.buttonMeasure {
+  grid-area: 1 / 1;
+}
+
+.buttonMeasure {
+  visibility: hidden;
+}
+
+.form label,
+.input,
+.submitButton {
+  line-height: var(--wiki-font-line-height-ui);
+}

@@ -1,5 +1,6 @@
 import { KnowledgeComparisonService } from '@main/backend/KnowledgeComparisonService';
 import type { ComparisonRuntime } from '@main/backend/KnowledgeComparisonService';
+import { VOC_CHANNELS, vocSubmitSchema } from '@contracts/voc.contract';
 import {
   KNOWLEDGE_COMPARISON_CHANNELS,
   knowledgeComparisonListSchema,
@@ -339,6 +340,9 @@ export async function createWebServices(
       platform: process.platform,
     },
   }));
+  register(VOC_CHANNELS.submit, 1, (value: unknown): Promise<unknown> =>
+    connection.submitVoc(vocSubmitSchema.parse(value)),
+  );
   register(
     CONNECTION_CHANNELS.authenticate,
     1,

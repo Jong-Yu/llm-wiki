@@ -21,12 +21,14 @@ from core.api.v1.analysis_plans.router import router as analysis_plans
 from core.api.v1.analysis_proposals.router import router as analysis_proposals
 from core.api.v1.notifications.router import router as notifications
 from core.api.v1.source_previews.router import router as source_previews
+from core.api.v1.voc.router import router as voc
 from core.api.schemas import ErrorEnvelope
 
 router = APIRouter(prefix="/api/v1", responses={
     code: {"model": ErrorEnvelope} for code in (400, 401, 403, 404, 405, 409, 413, 415, 421, 422, 500, 503)
 })
 router.include_router(access)
+router.include_router(voc)
 router.include_router(documents, prefix="/tenants/{tenant}")
 router.include_router(knowledge, prefix="/tenants/{tenant}")
 router.include_router(sources, prefix="/tenants/{tenant}")

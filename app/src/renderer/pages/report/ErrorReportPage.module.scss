@@ -1,0 +1,10 @@
+.page {
+  box-sizing: border-box;
+  padding: var(--wiki-space-24);
+}
+
+@container workspace (width < 900px) {
+  .page {
+    padding: var(--wiki-space-16);
+  }
+}

@@ -1,4 +1,13 @@
 import {
+  VOC_CHANNELS,
+  vocSubmitSchema,
+  vocSubmitResultSchema,
+} from '@contracts/voc.contract';
+import type {
+  VocSubmitRequest,
+  VocSubmitResult,
+} from '@contracts/voc.contract';
+import {
   SOURCE_VISUAL_PREVIEW_CHANNELS,
   sourceVisualPreviewRequestSchema,
   sourceVisualPreviewReleaseSchema,
@@ -337,6 +346,12 @@ export function createWikiBridge(
   drop?: AttachmentBridge['drop'],
 ): WikiBridge {
   return {
+    voc: {
+      submit: async (request: VocSubmitRequest): Promise<VocSubmitResult> =>
+        vocSubmitResultSchema.parse(
+          await invoke(VOC_CHANNELS.submit, vocSubmitSchema.parse(request)),
+        ),
+    },
     templates: {
       list: async (request: TemplateSession): Promise<TemplateListResult> =>
         templateListResultSchema.parse(

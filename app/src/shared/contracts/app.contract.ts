@@ -3,6 +3,7 @@ import type { SourceVisualPreviewsBridge } from './sourceVisualPreviews.contract
 import type { DocumentTasksBridge } from './documentTasks.contract';
 import type { RegistrationDraftsBridge } from './registrationDrafts.contract';
 import type { NotificationsBridge } from './notifications.contract';
+import type { VocBridge } from './voc.contract';
 import type { AiSessionsBridge } from './aiSessions.contract';
 import type { RecoveryBridge } from './recovery.contract';
 import type { ProposalExecutionBridge } from './proposalExecution.contract';
@@ -41,6 +42,7 @@ export type GetAppInfoResult =
     };
 
 export type WikiBridge = {
+  voc?: VocBridge;
   sourceVisualPreviews?: SourceVisualPreviewsBridge;
   registrationDrafts?: RegistrationDraftsBridge;
   notifications?: NotificationsBridge;
