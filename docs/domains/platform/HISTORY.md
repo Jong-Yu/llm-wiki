@@ -1,5 +1,21 @@
 # 실행 환경 작업 기록
 
+## 2026-11-26 — 오류 보고 0.6.3 서버와 Windows 포터블 배포
+
+- 사용자 배포 승인으로 VOC 제품/테스트·버전32파일을 `ecc5703fa5946f4bb83b9f21e95f4b6ef482c45e`에 고정하고 `main`·`v0.6.3`과 [Windows 포터블0.6.3](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.3-portable)을 게시했다. 작업 중이던60경로를 제품 소스에 섞지 않았고 해당 지문을 보존했다. 문서는 이번 기능·배포 기록만 별도 반영했다.
+- 기존 터널·공개주소를 유지해 VOC 서버6파일을 새 후보 소스에서 실행했다. 후보492소스와 자료·정책·규약·주소1497파일의 집합/바이트를 확인했고 변경·추가·삭제0이었다. 인계25검사·독립 검토·후보 API12검사와 로컬/공개 API·MCP·VOC6경로의 예상 무인증401을 확인했다. 운영 시험 보고·로그인·정책 변경은 하지 않았다.
+- Windows ZIP 253,735,037바이트, SHA256 `441fb6ad7b3b39e6074b2d7299bf37576920578259b861ef7824e280eafb7c80`. 고정 입력588개·개인 실행 소스357개·런타임2993파일과 PE0.6.3·아이콘·VOC UI/IPC 포함·비밀/개인 경로 제외를 확인했다. Python/OCR 의존성2636파일은0.6.2와 같다. 앱 빌드·보고 UI29·bridge5·실제 격리 HTTP→파일·릴리즈70·Python12검사가 통과했다. 기존 IPC 검사의 별도 고정 채널 수 불일치는 아래 구현 기록대로 남겼다.
+- 최초 패키징의 sandbox DNS 실패와 SHA sidecar 누락 검사 실패는 기록을 보존하고 네트워크 승인 및 checksum 생성 후 재검증했다. 첫 소스 push의 제한된 토큰403은 같은 Jong-Yu 계정의 기존 CLI 로그인·저장소 쓰기 권한을 확인한 뒤 게시했다. 새 인증정보 발급이나 사용자 설정 변경은 하지 않았다.
+- ZIP/SHA 익명 전체 다운로드·GitHub digest를 대조하고 기존 6릴리즈/12자산 및 latest `app-0.4.1-portable`를 보존했다. 설치형 업데이트 피드는 변경하지 않았다. 근거: `.local/releases/0.6.3-voc/local-verification-final.json`, `server-verification.json`, `remote-verification.json`. Windows 실기·운영 인증 제출·두PC·공인 서명/공증·Mac 설치 교체는 미검증이다.
+
+## 2026-11-26 — 텍스트 오류 보고 API와 서버 보관
+
+- [D-168](DECISIONS.md#d-168--텍스트-오류-보고의-서버-전용-보관-2026-11-26)에 따라 인증된 `POST /api/v1/voc`와 `data/voc/<report_id>.json` 저장을 추가했다. 원문·서버 시각·인증 사용자 ID를 보존하며 목록·조회·수정·삭제·피드백 API는 제공하지 않는다. 원자적 신규 공개·기존 파일 보존·저장 직전 재인증을 적용했다.
+- Electron의 제한된 `voc.submit` bridge와 입력/응답·sender 검사, 기존 연결 토큰·오류 변환, web-test dispatch를 연결했다. 소속/tenant/profile 없이 로그인으로 보고할 수 있고, 연결 전환의 늦은 응답·응답 유실은 완료로 표시하거나 자동 재전송하지 않는다.
+- `.venv/bin/python -B -m unittest core.tests.poc_storage.test_voc_http -v` 12개 통과: 입력·HTTP 8 MiB·인증/회수·API 범위·symlink·부분 쓰기·24건 동시 저장·ID 충돌·원문/기존 파일 보존·공개 후 정리 실패. Node24의 `node tests/voc/verify.mjs` 5개 통과: 로그인/범위·원문·응답/예외·늦은 결과·IPC. `node tests/voc/integration.mjs`는 실제 격리 서버의 가입/로그인→bridge→HTTP→파일까지 통과했고 서버/임시 자료를 정리했다.
+- Node24 `npm run build`의 전체 타입·lint·format·194토큰/3테마·main/preload/renderer 번들을 통과했다. 최초 기본 Node16 타입 검사도 완료됐으나 실제 빌드는 명시한 Node24를 사용했다. 별도 기존 `tests/ipc/verify.mjs`는 6개 중5개 통과, VOC를 등록하지 않는 검사의 고정 채널 수 기대값14/실제15 불일치로1개 실패했고 이 테스트는 수정하지 않았다. 격리 통합 서버는 최초 sandbox bind 제한 뒤 승인된 실행으로 검증했다.
+- 운영 서버·사용자 자료·인증정보는 변경하지 않았다. 배포 서버/앱 반영과 Windows 실기기 검증은 미실행이다.
+
 ## 2026-11-26 — 등록 화면 회귀 수정 0.6.2 공개
 
 - 사용자의 기존 게시 승인에 따라 소스 `main`·`v0.6.2`를 `95876dfc5f33a36a1f2c911af9fd17b9c4600e16`에 게시하고 [Windows 포터블0.6.2](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.2-portable)의 ZIP/SHA 두 자산을 추가했다. 별도 작업 중 파일60경로를 제품 소스에 섞지 않았고 요청 범위의 제품/회귀41파일만 고정했다.

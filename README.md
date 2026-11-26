@@ -19,7 +19,7 @@ Python 코드의 위치와 실행 흐름은 [core 길잡이](core/README.md)에�
 
 비밀 값과 개인 자료는 Git에 포함하지 않습니다. 새 컴퓨터의 실행 환경은 아래 설치 명령으로 준비하며 기존 자료·정책·토큰은 자동으로 대체하지 않습니다.
 
-현재 Windows 포터블은 [LLM Wiki 0.6.0](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.0-portable)입니다. 문서 목록의 진행 상세, 원본과 등록 내용의 동시 대조, 직접 입력·수정·초안 복원과 완료 단계 보존을 포함합니다. ZIP 전체를 새 폴더에 풀어 실행하며 Python/OCR 실행기가 포함됩니다. Office 미리보기에는 별도 LibreOffice가 필요하고 큰 문서의 자동 분할 분석은 비활성입니다. 실제 Windows 검증 범위와 사용 방법은 릴리스 설명을 따릅니다.
+현재 Windows 포터블은 [LLM Wiki 0.6.3](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.3-portable)입니다. 사이드바 하단에서 오류 내용을 텍스트로 보고할 수 있습니다. 문서 목록의 진행 상세, 원본과 등록 내용의 동시 대조, 직접 입력·수정·초안 복원과 완료 단계 보존을 포함합니다. ZIP 전체를 새 폴더에 풀어 실행하며 Python/OCR 실행기가 포함됩니다. Office 미리보기에는 별도 LibreOffice가 필요하고 큰 문서의 자동 분할 분석은 비활성입니다. 실제 Windows 검증 범위와 사용 방법은 릴리스 설명을 따릅니다.
 
 ## 프로젝트 스킬
 
