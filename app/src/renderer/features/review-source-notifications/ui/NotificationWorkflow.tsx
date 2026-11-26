@@ -310,7 +310,9 @@ function NotificationWorkflowContent({
     inputError ??
     error ??
     (fixedMixedDrafts
-      ? '이전에 제출한 문서 전체 내용으로 등록을 이어갑니다. 개별 구간 초안은 제출 내용을 바꾸지 않으며 완료 뒤에도 이 기기에 보존합니다.'
+      ? workflow?.state === 'complete'
+        ? '문서 등록이 완료되었습니다. 이전에 제출하지 않은 개별 구간 초안은 이 기기에 보존되어 있습니다.'
+        : '이전에 제출한 문서 전체 내용으로 등록을 이어갑니다. 개별 구간 초안은 제출 내용을 바꾸지 않으며 완료 뒤에도 이 기기에 보존합니다.'
       : mixedDrafts
         ? '문서 전체와 개별 구간의 초안이 함께 남아 있습니다. 전체 초안에 구간 수정을 반영한 뒤 각 구간의 초안을 취소해 주세요. 입력은 모두 보존했습니다.'
         : workflow?.blocked_reason

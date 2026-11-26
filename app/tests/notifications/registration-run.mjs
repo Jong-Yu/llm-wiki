@@ -715,6 +715,13 @@ try {
     Object.values(fixedState.drafts)[0].data.draft.contents['unit:slide-one'],
     '고정 제출과 별도로 남은 구간 초안',
   );
+  await control('complete');
+  await open(detail);
+  await expect(
+    work().getByText(/등록이 완료되었습니다. 이전에 제출하지 않은/),
+  ).toBeVisible();
+  await expect(action('제출한 전체 내용으로 등록 계속')).toHaveCount(0);
+  assert.equal((await snapshot()).calls.continue, fixedState.calls.continue);
   pass(
     '고정 제출은 구간 취소 차단 / 최초 요청으로 재개 / 별도 구간 초안 완료 뒤 보존',
   );
