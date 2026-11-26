@@ -333,6 +333,9 @@ def _picture_text(node, archive, relations, result, scope, picture_text, slide_s
         result.note("picture_content_not_read", scope)
         return []
     found = picture_text(raw)
+    # 복구 템플릿의 내부 표식은 원문 문자와 분리된 그림 슬롯 전체를 가리킨다.
+    if isinstance(found, dict) and "_recovery_slot" in found:
+        return [found["_recovery_slot"]]
     if found is None:
         result.note("picture_without_readable_text", scope, unread=False)
         return []
@@ -343,7 +346,8 @@ def _picture_text(node, archive, relations, result, scope, picture_text, slide_s
         return []
     if found["low_confidence"]:
         result.note(LOW_CONFIDENCE, scope)
-    return ["[그림 속 글자 · OCR]\n" + found["text"]]
+    label = "AI 전사 후보" if found.get("origin") == "ai_image_recovery_candidate" else "OCR"
+    return [f"[그림 속 글자 · {label}]\n" + found["text"]]
 
 
 RELATION_NOTES = {"estimated": "diagram_relations_estimated_by_position",
@@ -475,7 +479,8 @@ def _shape_text(tree, result, scope, *, notes=False, archive=None, relations=Non
     return output
 
 
-def _inherited_content(archive, part, relations, result, scope, visited=None, *, picture_text=None, slide_size=None):
+def _inherited_content(archive, part, relations, result, scope, visited=None, *, picture_text=None, slide_size=None,
+                       literal_text_guard=None):
     """공통 문자는 표시 여부를 단정하지 않고 보존한다.
 
     슬라이드 레이아웃·마스터의 그림(p:pic)은 슬라이드 그림과 같은 규칙이다(D-159·D-167). 작은 그림(로고 등)은
@@ -497,6 +502,8 @@ def _inherited_content(archive, part, relations, result, scope, visited=None, *,
         visited.add(target)
         try:
             root = _xml(archive, target)
+            if literal_text_guard is not None:
+                literal_text_guard(root)
             try:
                 target_relations = _relationships(archive, target)
             except (KeyError, ValueError, ET.ParseError):
@@ -536,7 +543,8 @@ def _inherited_content(archive, part, relations, result, scope, visited=None, *,
             if target_relations is None:
                 raise ValueError("Unreadable layout or master relationships")
             output.extend(_inherited_content(archive, target, target_relations, result, scope, visited,
-                                             picture_text=picture_text, slide_size=slide_size))
+                                             picture_text=picture_text, slide_size=slide_size,
+                                             literal_text_guard=literal_text_guard))
         except OutputLimit:
             raise
         except (KeyError, ValueError, ET.ParseError):
@@ -544,7 +552,7 @@ def _inherited_content(archive, part, relations, result, scope, visited=None, *,
     return output
 
 
-def pptx(path, result, *, picture_text=None):
+def pptx(path, result, *, picture_text=None, selected_slides=None, literal_text_guard=None):
     """슬라이드 파일명 대신 presentation의 관계 목록 순서로 읽는다."""
     with ZipFile(path) as archive:
         entries = archive.infolist()
@@ -558,6 +566,14 @@ def pptx(path, result, *, picture_text=None):
             raise ValueError("Invalid presentation root")
         relations = _relationships(archive, "ppt/presentation.xml")
         slides = presentation.findall(P + "sldIdLst/" + P + "sldId")
+        # 선택 재인식도 원본의 슬라이드 번호를 유지하며 범위 밖 요청은 부분 결과로 숨기지 않는다.
+        if selected_slides is not None:
+            if (not isinstance(selected_slides, (list, tuple, set, frozenset)) or not selected_slides
+                    or any(type(number) is not int or not 1 <= number <= min(len(slides), MAX_SLIDES)
+                           for number in selected_slides)
+                    or len(set(selected_slides)) != len(selected_slides)):
+                raise ValueError("Invalid selected slides")
+            selected_slides = frozenset(selected_slides)
         size = presentation.find(P + "sldSz")
         try:
             slide_size = (int(size.get("cx")), int(size.get("cy"))) if size is not None else None
@@ -568,12 +584,16 @@ def pptx(path, result, *, picture_text=None):
         result.result["total_units"] = len(slides)
         relation_summary = {kind: [] for kind in RELATION_NOTES}
         for index, reference in enumerate(slides[:MAX_SLIDES], 1):
+            if selected_slides is not None and index not in selected_slides:
+                continue
             scope = f"slide {index}"
             try:
                 kind, part = relations[reference.get(R + "id")]
                 if kind != "slide" or part is None:
                     raise ValueError("Missing internal slide relationship")
                 slide = _xml(archive, part)
+                if literal_text_guard is not None:
+                    literal_text_guard(slide)
                 if slide.tag != P + "sld":
                     raise ValueError("Invalid slide root")
                 tree = slide.find(P + "cSld/" + P + "spTree")
@@ -596,7 +616,8 @@ def pptx(path, result, *, picture_text=None):
                 if blips:
                     result.note("picture_or_shape_fill_content_not_read", scope)
                 text.extend(_inherited_content(archive, part, slide_relations, result, scope,
-                                               picture_text=picture_text, slide_size=slide_size))
+                                               picture_text=picture_text, slide_size=slide_size,
+                                               literal_text_guard=literal_text_guard))
                 for relation, target in slide_relations.values():
                     if relation == "notesSlide":
                         if target is None:
@@ -604,13 +625,16 @@ def pptx(path, result, *, picture_text=None):
                             continue
                         try:
                             notes = _xml(archive, target)
+                            if literal_text_guard is not None:
+                                literal_text_guard(notes)
                             notes_tree = notes.find(P + "cSld/" + P + "spTree")
                             if notes_tree is None or notes.tag != P + "notes":
                                 raise ValueError("Missing notes shape tree")
                             notes_relations = _relationships(archive, target)
                             note_text = _shape_text(notes_tree, result, scope + " notes", notes=True,
                                                     archive=archive, relations=notes_relations)
-                            note_text.extend(_inherited_content(archive, target, notes_relations, result, scope + " notes"))
+                            note_text.extend(_inherited_content(archive, target, notes_relations, result, scope + " notes",
+                                                                literal_text_guard=literal_text_guard))
                             if any(value.strip() for value in note_text):
                                 text.extend(["### 발표자 노트", *note_text])
                         except (KeyError, ValueError, ET.ParseError):
@@ -622,7 +646,7 @@ def pptx(path, result, *, picture_text=None):
                 raise
             except (KeyError, ValueError, ET.ParseError):
                 result.note("slide_or_notes_xml_failed", scope)
-        if len(slides) > MAX_SLIDES:
+        if selected_slides is None and len(slides) > MAX_SLIDES:
             result.note("slide_limit", f"slides {MAX_SLIDES + 1}-{len(slides)}")
         for kind, numbers in relation_summary.items():
             for offset in range(0, len(numbers), 40):

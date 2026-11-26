@@ -20,6 +20,8 @@ import type {
   NotificationRetryPageResult,
   NotificationCancelRetryRequest,
   NotificationCancelRetryResult,
+  NotificationRecoverImagesRequest,
+  NotificationRecoverImagesResult,
 } from '@contracts/notifications.contract';
 
 /** 최신 앱의 제한된 알림 bridge만 사용합니다. */
@@ -33,6 +35,10 @@ export function hasNotificationsBridge(): boolean {
   return !!window.wiki?.notifications;
 }
 export const notificationsGateway: NotificationsBridge = {
+  recoverImages: (
+    request: NotificationRecoverImagesRequest,
+  ): Promise<NotificationRecoverImagesResult> =>
+    getBridge().recoverImages(request),
   correct: (
     request: NotificationCorrectRequest,
   ): Promise<NotificationMutationResult> => getBridge().correct(request),

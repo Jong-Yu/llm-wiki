@@ -127,7 +127,7 @@ const list = product.handlers.get(product.NOTIFICATION_CHANNELS.list);
 const readDraft = product.handlers.get(product.REGISTRATION_DRAFT_CHANNELS.get);
 
 await test('registered operations preserve allowed requests and validated results', async () => {
-  assert.equal(product.handlers.size, 14);
+  assert.equal(product.handlers.size, 16);
   assert.deepEqual(await list(event, session), notificationFailure);
   assert.deepEqual(calls.at(-1), { key: 'list', request: session });
   assert.deepEqual(await readDraft(event, get), draftSuccess);
@@ -229,6 +229,64 @@ await test('malformed responses and synchronous/asynchronous failures stay priva
       },
     });
   }
+});
+
+await test('image recovery validates scope, fixed revision and candidate result before crossing IPC', async () => {
+  const request = {
+    ...session,
+    workflowId: 'b'.repeat(32),
+    requestId: 'c'.repeat(32),
+    expectedRevision: 'd'.repeat(64),
+  };
+  let result = {
+    ok: true,
+    data: {
+      units: [
+        {
+          unit_id: 'slide-2',
+          content: '복구 후보',
+          warnings: ['원래 저신뢰 진단'],
+        },
+      ],
+      warnings: [],
+      provider: 'claude',
+      model: null,
+    },
+  };
+  let count = 0;
+  product.handlers.clear();
+  product.registerNotificationHandlers(() => window, renderer, {
+    ...notifications,
+    recoverImages: async () => {
+      count += 1;
+      return result;
+    },
+  });
+  const recover = product.handlers.get(
+    product.NOTIFICATION_CHANNELS.recoverImages,
+  );
+  assert.deepEqual(await recover(event, request), result);
+  assert.equal(count, 1);
+  assert.equal(
+    (await recover({ ...event, sender: {} }, request)).error.code,
+    'forbidden',
+  );
+  assert.equal(
+    (await recover(event, { ...request, expectedRevision: 'bad' })).ok,
+    false,
+  );
+  assert.equal(count, 1);
+  result = {
+    ok: true,
+    data: {
+      ...result.data,
+      units: [{ unit_id: 'slide-2', content: '', warnings: [] }],
+    },
+  };
+  assert.equal(
+    (await recover(event, request)).error.code,
+    'notification_unavailable',
+  );
 });
 
 await test('zero-argument connection-style operations keep count and failure semantics', async () => {

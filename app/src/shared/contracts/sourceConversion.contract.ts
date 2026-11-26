@@ -173,7 +173,7 @@ export function conversionNeedsTextReview(
     report?.complete === false &&
     report.unread_ranges.length > 0 &&
     report.unread_ranges.every((range: string): boolean =>
-      /^(?:page|frame) [1-9][0-9]*: ocr_low_or_missing_confidence_text_retained_manual_review_required$/.test(
+      /^(?:page|slide|frame) [1-9][0-9]*: ocr_low_or_missing_confidence_text_retained_manual_review_required$/.test(
         range,
       ),
     ) &&

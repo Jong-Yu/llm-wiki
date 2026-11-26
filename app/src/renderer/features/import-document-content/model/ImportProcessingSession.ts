@@ -8,7 +8,7 @@ import type {
   SourceConversionScope,
   SourceConversionRun,
 } from '@contracts/sourceConversion.contract';
-import { conversionNeedsPageApproval } from '@contracts/sourceConversion.contract';
+import { conversionNeedsTextReview } from '@contracts/sourceConversion.contract';
 import { importProcessingApi } from '../api/importProcessing.api';
 import type {
   ImportRegisteredSource,
@@ -277,7 +277,7 @@ export class ImportProcessingSession {
     const report = run.report;
     if (
       !report ||
-      !conversionNeedsPageApproval(report) ||
+      !conversionNeedsTextReview(report) ||
       !report.units.some(
         (
           unit: NonNullable<SourceConversionRun['report']>['units'][number],
@@ -286,18 +286,27 @@ export class ImportProcessingSession {
     )
       return false;
     return report.unread_ranges.every((range: string): boolean => {
-      const page = Number(range.split(':', 1)[0]?.split(' ')[1]);
+      const scope = /^(page|slide) ([1-9][0-9]*):/.exec(range);
+      if (!scope) return false;
+      const position = Number(scope[2]);
+      const matches = report.units.filter(
+        (
+          unit: NonNullable<SourceConversionRun['report']>['units'][number],
+        ): boolean =>
+          unit.location.kind === (scope[1] === 'slide' ? 'slides' : 'pages') &&
+          typeof unit.location.start === 'number' &&
+          typeof unit.location.end === 'number' &&
+          unit.location.start <= position &&
+          unit.location.end >= position,
+      );
+      const found = matches[0];
       return (
-        Number.isSafeInteger(page) &&
-        report.units.some(
-          (
-            unit: NonNullable<SourceConversionRun['report']>['units'][number],
-          ): boolean =>
-            unit.location.kind === 'pages' &&
-            unit.location.start === page &&
-            unit.location.end === page &&
-            unit.content.trim().length > 0,
-        )
+        Number.isSafeInteger(position) &&
+        matches.length === 1 &&
+        !!found?.content.trim() &&
+        (found.location.kind === 'pages' || found.location.kind === 'slides') &&
+        found.location.start === position &&
+        found.location.end === position
       );
     });
   }
@@ -381,7 +390,7 @@ export class ImportProcessingSession {
         canRetryConversion: false,
         canExecute: false,
         message:
-          '변환 문자는 보관됐습니다. 알림에서 경고가 있는 쪽을 원본과 대조하고 승인하면 준비된 PC에서 이어갈 수 있습니다.',
+          '변환 문자는 보관됐습니다. 확인이 필요한 위치를 원본과 대조하고 등록할 내용을 확인·수정해 주세요.',
       });
       return false;
     }
@@ -398,7 +407,7 @@ export class ImportProcessingSession {
         message:
           run.state === 'partial' &&
           run.receiptState === 'saved' &&
-          conversionNeedsPageApproval(run.report) &&
+          conversionNeedsTextReview(run.report) &&
           !this.#hasReviewText(run)
             ? '확인 대상 위치의 보관 문자를 찾지 못해 계속할 수 없습니다. 변환 보고와 원본을 확인해 주세요.'
             : run.message ||
@@ -648,7 +657,7 @@ export class ImportProcessingSession {
       }
       const previousReview =
         this.#snapshot.conversion?.state === 'partial' &&
-        conversionNeedsPageApproval(this.#snapshot.conversion.report)
+        this.#hasReviewText(this.#snapshot.conversion)
           ? this.#snapshot.conversion
           : null;
       if (
@@ -669,6 +678,11 @@ export class ImportProcessingSession {
         this.#stopAutomaticPreparation();
         this.#update({ canPrepare: true });
         this.#fail(existing.error);
+        return;
+      }
+      if (previousReview && !existing.data) {
+        // 이미 보관된 보고의 조회 부재를 새 OCR 실행 허가로 해석하지 않는다.
+        this.#applyConversion(null);
         return;
       }
       if (

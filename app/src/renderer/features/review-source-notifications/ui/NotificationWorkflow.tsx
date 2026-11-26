@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { Link } from 'react-router';
 import { isDocumentPath } from '@contracts/documents.contract';
 import { notificationLocation } from '@contracts/notifications.contract';
+import { registrationContentOriginsSchema } from '@contracts/registrationDrafts.contract';
+import type { RegistrationContentOrigins } from '@contracts/registrationDrafts.contract';
 import type { SourceConversionScope } from '@contracts/sourceConversion.contract';
 import { useRouteTitle } from '@renderer/shared/lib/routeTitle';
 import { conversionFailureExplanation } from '@renderer/shared/lib/sourceConversionFailure';
@@ -20,6 +22,7 @@ import {
 import type { NotificationDetail } from '../model/notificationView';
 import { registrationUnits } from '../model/registrationUnits';
 import type { RegistrationUnit } from '../model/registrationUnits';
+import { imageRecoveryUnits } from '../model/imageRecovery';
 import { useNotificationWorkflow } from '../model/useNotificationWorkflow';
 import { canUseRegistrationContent } from '../model/RegistrationContentSubmission';
 import type { ContentDraft } from '../model/RegistrationContentSubmission';
@@ -38,6 +41,7 @@ const contentSchema = z.object({
   contents: z.record(z.string(), z.string()),
   blanks: z.array(z.string()),
   target: z.string(),
+  contentOrigins: registrationContentOriginsSchema,
 });
 type ContentValues = z.infer<typeof contentSchema>;
 type ConversionUnit = NonNullable<
@@ -92,11 +96,20 @@ function NotificationWorkflowContent({
       : null;
   const form = useForm<ContentValues>({
     resolver: zodResolver(contentSchema),
-    defaultValues: { contents: {}, blanks: [], target: verifiedTarget ?? '' },
+    defaultValues: {
+      contents: {},
+      blanks: [],
+      target: verifiedTarget ?? '',
+      contentOrigins: {},
+    },
   });
   const contents = useWatch({ control: form.control, name: 'contents' });
   const blanks = useWatch({ control: form.control, name: 'blanks' });
   const target = useWatch({ control: form.control, name: 'target' });
+  const contentOrigins = useWatch({
+    control: form.control,
+    name: 'contentOrigins',
+  });
   const units = useMemo(
     (): RegistrationUnit[] => (detail ? registrationUnits(detail) : []),
     [detail],
@@ -135,6 +148,7 @@ function NotificationWorkflowContent({
         contents: restored.contents,
         blanks: restored.blankUnits,
         target: restored.targetDocument,
+        contentOrigins: restored.contentOrigins ?? {},
       });
       restoreDraft(restored);
     });
@@ -144,8 +158,8 @@ function NotificationWorkflowContent({
   }, [draft.ready, draft.restored, form, restoreDraft]);
 
   useEffect((): (() => void) | undefined => {
-    return scheduleDraft({ contents, blanks, target });
-  }, [contents, blanks, target, scheduleDraft]);
+    return scheduleDraft({ contents, blanks, target, contentOrigins });
+  }, [contents, blanks, target, contentOrigins, scheduleDraft]);
 
   /** 빈 페이지는 명시 확인하며, 실제 누락 내용을 비운 채 등록하지 않습니다. */
   async function submit(values: ContentValues): Promise<void> {
@@ -162,7 +176,7 @@ function NotificationWorkflowContent({
           ...notificationLocation(unit),
           content: '',
           method: 'blank',
-          warnings: [],
+          warnings: values.contentOrigins[unit.key]?.warnings ?? [],
         });
       else if (
         Object.hasOwn(values.contents, unit.key) &&
@@ -172,8 +186,8 @@ function NotificationWorkflowContent({
         selectedDrafts.push({
           ...notificationLocation(unit),
           content,
-          method: 'manual',
-          warnings: [],
+          method: values.contentOrigins[unit.key]?.method ?? 'manual',
+          warnings: values.contentOrigins[unit.key]?.warnings ?? [],
         });
       if (
         unit.needsReview &&
@@ -262,6 +276,15 @@ function NotificationWorkflowContent({
     supported;
   const targetDocument =
     workflow?.target_document ?? verifiedTarget ?? target.trim();
+  const recoveryUnits = imageRecoveryUnits(detail);
+  const recoveryBlockedByDraft =
+    Object.keys(contents).length > 0 || blanks.length > 0;
+  const canRecoverImages =
+    writable &&
+    !draft.pending &&
+    !recoveryBlockedByDraft &&
+    recoveryUnits.length > 0 &&
+    !!inspection?.ready;
   const lastFailure =
     workflow && ['failed', 'stopped'].includes(workflow.state)
       ? detail?.events.findLast(
@@ -325,13 +348,16 @@ function NotificationWorkflowContent({
                 ? '등록할 내용을 확인하고 있습니다…'
                 : phase === 'continuing'
                   ? '문서 등록을 이어가고 있습니다…'
-                  : reviewing
-                    ? (contentIssue ??
-                      '원본과 등록할 내용을 대조하고 필요한 부분을 수정해 주세요.')
-                    : workflow?.state === 'complete'
-                      ? '문서 등록이 완료되었습니다.'
-                      : (contentIssue ??
-                        '완료되지 않은 작업부터 문서 등록을 이어갑니다.'));
+                  : phase === 'recovering'
+                    ? '개인 AI가 그림 속 문자를 복구하고 있습니다…'
+                    : reviewing
+                      ? (model.recoveryMessage ??
+                        contentIssue ??
+                        '원본과 등록할 내용을 대조하고 필요한 부분을 수정해 주세요.')
+                      : workflow?.state === 'complete'
+                        ? '문서 등록이 완료되었습니다.'
+                        : (contentIssue ??
+                          '완료되지 않은 작업부터 문서 등록을 이어갑니다.'));
 
   /** 위치 선택은 화면만 바꾸고 실행이나 저장을 시작하지 않습니다. */
   function select(unit: RegistrationUnit | undefined): void {
@@ -373,6 +399,61 @@ function NotificationWorkflowContent({
     } else {
       form.setValue(`contents.${selected.key}`, value, { shouldDirty: true });
     }
+    const origin = contentOrigins[selected.key];
+    if (origin)
+      form.setValue(
+        `contentOrigins.${selected.key}`,
+        { ...origin, method: 'manual' },
+        { shouldDirty: true },
+      );
+    setInputError(null);
+  }
+
+  /** 명시적으로 받은 복구 결과를 초안에만 반영하고 사용자의 수정이나 빈 구간 선택은 덮지 않습니다. */
+  async function recoverImages(): Promise<void> {
+    if (!canRecoverImages || !detail) return;
+    const before = JSON.stringify(form.getValues());
+    const result = await model.recoverImages();
+    if (!result) return;
+    if (
+      JSON.stringify(form.getValues()) !== before ||
+      result.units.some(
+        (unit: (typeof result.units)[number]): boolean =>
+          !recoveryUnits.includes(unit.unit_id),
+      )
+    ) {
+      setInputError(
+        '편집 내용 또는 복구 대상이 바뀌어 결과를 적용하지 않았습니다. 기존 내용은 유지했습니다.',
+      );
+      return;
+    }
+    const nextContents = { ...form.getValues('contents') };
+    const nextOrigins: RegistrationContentOrigins = {
+      ...form.getValues('contentOrigins'),
+    };
+    for (const unit of result.units) {
+      const key = `unit:${unit.unit_id}`;
+      const warnings = [
+        ...new Set([
+          ...result.warnings,
+          ...unit.warnings,
+          `ai_image_recovery_provider=${result.provider};model=${result.model ?? 'unspecified'}`,
+        ]),
+      ];
+      if (warnings.length > 100) {
+        setInputError(
+          '복구 결과의 확인 사항이 저장 한도를 넘어 적용하지 않았습니다. 기존 내용은 유지했습니다.',
+        );
+        return;
+      }
+      nextContents[key] = unit.content;
+      nextOrigins[key] = { method: 'ocr', warnings };
+    }
+    model.beginEdit(undefined);
+    form.setValue('contents', nextContents, { shouldDirty: true });
+    form.setValue('contentOrigins', nextOrigins, { shouldDirty: true });
+    setSelection(result.units[0] ? `unit:${result.units[0].unit_id}` : null);
+    setRange('review');
     setInputError(null);
   }
 
@@ -382,6 +463,9 @@ function NotificationWorkflowContent({
     model.beginEdit(selected);
     const nextContents = { ...contents };
     delete nextContents[selected.key];
+    const nextOrigins = { ...contentOrigins };
+    delete nextOrigins[selected.key];
+    form.setValue('contentOrigins', nextOrigins, { shouldDirty: true });
     form.setValue('contents', nextContents, { shouldDirty: true });
     form.setValue(
       'blanks',
@@ -571,6 +655,35 @@ function NotificationWorkflowContent({
             ? status
             : (error ?? '원본과 보관한 내용을 불러오고 있습니다.')}
         </div>
+        {(recoveryUnits.length > 0 || phase === 'recovering') && (
+          <div className={styles.contentOptions}>
+            {phase === 'recovering' ? (
+              <Button
+                variant="surface"
+                onClick={(): void => {
+                  void model.cancelRecovery();
+                }}
+              >
+                그림 문자 복구 취소
+              </Button>
+            ) : (
+              <Button
+                variant="surface"
+                disabled={!canRecoverImages}
+                onClick={(): void => {
+                  void recoverImages();
+                }}
+              >
+                AI로 그림 문자 복구
+              </Button>
+            )}
+            <span>
+              {recoveryBlockedByDraft
+                ? '편집한 내용이 있어 복구를 시작하지 않습니다. 현재 초안을 먼저 확인해 주세요.'
+                : '문제가 있는 그림을 사용 중인 개인 AI에 전달합니다. 복구 결과는 초안에만 반영됩니다.'}
+            </span>
+          </div>
+        )}
         <div className={styles.contentComparison}>
           <section className={styles.contentPane} aria-label="원본">
             {visualPreview && visualFormat ? (
@@ -741,7 +854,12 @@ function NotificationWorkflowContent({
                   void model
                     .clearDraft('discarded')
                     .then((): void => {
-                      form.reset({ contents: {}, blanks: [], target });
+                      form.reset({
+                        contents: {},
+                        blanks: [],
+                        target,
+                        contentOrigins: {},
+                      });
                     })
                     .catch((cause: unknown): void =>
                       setInputError(

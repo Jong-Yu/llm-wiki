@@ -160,6 +160,12 @@ function id(): string {
 }
 const draft: RegistrationDraft = {
   basisRevision: revision,
+  contentOrigins: {
+    'page:1': {
+      method: 'ocr',
+      warnings: ['ai_image_recovery_provider=claude;model=fixture'],
+    },
+  },
   basisContents: { 'page:1': '원래 내용', 'page:2': '' },
   contents: {
     'page:1': '편집한 내용 😀',

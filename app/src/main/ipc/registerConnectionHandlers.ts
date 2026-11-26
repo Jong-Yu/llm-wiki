@@ -67,6 +67,7 @@ import { AnalysisService } from '@main/backend/AnalysisService';
 import { DocumentTaskService } from '@main/backend/DocumentTaskService';
 import { SourceConversionService } from '@main/backend/SourceConversionService';
 import { SourcePageOcrService } from '@main/backend/SourcePageOcrService';
+import { SourceImageRecoveryService } from '@main/backend/SourceImageRecoveryService';
 import { registerDocumentTaskHandlers } from './registerDocumentTaskHandlers';
 import type { SourceConversionReadRequest } from '@contracts/sourceConversion.contract';
 import type {
@@ -240,6 +241,9 @@ export async function registerConnectionHandlers(
     recovery,
     new SourcePageOcrService(service, {
       workRoot: join(app.getPath('userData'), 'source-page-ocr'),
+    }),
+    new SourceImageRecoveryService(service, {
+      workRoot: join(app.getPath('userData'), 'source-image-recovery'),
     }),
   );
   analysis.connectExecutionGuard(

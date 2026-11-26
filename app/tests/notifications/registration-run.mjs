@@ -911,6 +911,156 @@ try {
   await available();
   pass('환경 미준비는 기존 설정으로 안내 / 상태 확인으로 복귀');
 
+  const slideEditor = () =>
+    work().getByRole('textbox', { name: '3슬라이드 등록할 내용', exact: true });
+  const imageRecovery = () => action('AI로 그림 문자 복구');
+  await reset(detail, () => control('pptxLowConfidence'));
+  await expect(imageRecovery()).toBeEnabled();
+  const beforeRecovery = await snapshot();
+  assert.equal(beforeRecovery.calls.recoverImages ?? 0, 0);
+  await layout('image-recovery-before');
+  await imageRecovery().click();
+  await expect(slideEditor()).toHaveValue(
+    '3슬라이드에 보관한 본문\n복구한 그림 문자입니다.',
+  );
+  await expect(imageRecovery()).toBeDisabled();
+  await expect
+    .poll(async () =>
+      Object.values((await snapshot()).drafts).some(
+        (entry) =>
+          entry.data.draft?.contentOrigins?.['unit:slide-8']?.method === 'ocr',
+      ),
+    )
+    .toBe(true);
+  let recovered = await snapshot();
+  assert.deepEqual(
+    recovered.detail.conversion,
+    beforeRecovery.detail.conversion,
+  );
+  for (const action of ['correct', 'decide', 'approve', 'continue'])
+    assert.equal(recovered.calls[action] ?? 0, 0);
+  await layout('image-recovery-draft');
+  await audit('image-recovery-draft');
+  await page.reload();
+  await expect(slideEditor()).toHaveValue(
+    '3슬라이드에 보관한 본문\n복구한 그림 문자입니다.',
+  );
+  await slideEditor().fill('AI 후보를 확인한 사용자의 수정');
+  await available();
+  await action('이 내용으로 등록 계속').click();
+  await continued();
+  recovered = await snapshot();
+  assert.equal(
+    recovered.detail.corrections.find((unit) => unit.unit_id === 'slide-3')
+      ?.method,
+    'manual',
+  );
+  assert.equal(
+    recovered.detail.corrections.find((unit) => unit.unit_id === 'slide-8')
+      ?.method,
+    'ocr',
+  );
+  for (const unit of recovered.detail.corrections) {
+    assert.ok(unit.warnings.includes('ai_image_recovery_requires_review'));
+    assert.ok(
+      unit.warnings.includes(
+        'ai_image_recovery_provider=claude;model=fixture-model',
+      ),
+    );
+  }
+  assert.deepEqual(
+    recovered.detail.conversion,
+    beforeRecovery.detail.conversion,
+  );
+  pass(
+    'AI 그림 복구: 명시 1회로 여러 슬라이드 초안·출처 보존 / 재시작·수동 수정 후 명시 등록 / 원보고 불변',
+  );
+
+  await reset(detail, () => control('pptxLowConfidence'));
+  await expect(imageRecovery()).toBeEnabled();
+  await slideEditor().fill('사용자가 먼저 수정한 내용');
+  await expect(imageRecovery()).toBeDisabled();
+  assert.equal((await snapshot()).calls.recoverImages ?? 0, 0);
+  await reset(detail, () => control('pptxLowConfidence'));
+  await work()
+    .getByRole('checkbox', { name: '내용이 없는 구간입니다' })
+    .check();
+  await expect(imageRecovery()).toBeDisabled();
+  assert.equal((await snapshot()).calls.recoverImages ?? 0, 0);
+  pass(
+    'AI 그림 복구: 사용자 입력·빈 구간 선택이 있으면 덮어쓰지 않고 실행 차단',
+  );
+
+  await reset(detail, () => control('pptxLowConfidence'));
+  await expect(imageRecovery()).toBeEnabled();
+  await imageRecovery().click();
+  await expect(slideEditor()).toHaveValue(
+    '3슬라이드에 보관한 본문\n복구한 그림 문자입니다.',
+  );
+  await control('otherEdit');
+  await refreshed();
+  await expect(work()).toContainText('편집 중 다른 변경이 저장되었습니다.');
+  await expect(action('이 내용으로 등록 계속')).toBeDisabled();
+  await expect(slideEditor()).toHaveValue(
+    '3슬라이드에 보관한 본문\n복구한 그림 문자입니다.',
+  );
+  pass(
+    'AI 복구 후 서버 판본 변경은 후보를 보존하고 충돌 안내·등록 차단을 우선',
+  );
+
+  for (const outcome of [
+    'cancel',
+    'changed',
+    'empty',
+    'failed',
+    'leave',
+    'denied',
+  ]) {
+    await reset(detail, async () => {
+      await control('pptxLowConfidence');
+      if (outcome === 'empty') await control('ocrMode', 'empty');
+      else if (outcome === 'failed') await control('fail', 'recoverImages');
+      else await control('ocrMode', 'delayed');
+    });
+    await expect(imageRecovery()).toBeEnabled();
+    await imageRecovery().click();
+    if (['cancel', 'changed', 'leave', 'denied'].includes(outcome)) {
+      await expect(action('그림 문자 복구 취소')).toBeVisible();
+      await expect(slideEditor()).toHaveAttribute('readonly', '');
+      if (outcome === 'cancel') await action('그림 문자 복구 취소').click();
+      if (outcome === 'changed') await control('otherEdit');
+      if (outcome === 'denied') await control('deny');
+      if (outcome === 'leave') {
+        await page.evaluate(() => {
+          location.hash = '#/library';
+        });
+        await expect
+          .poll(async () => (await snapshot()).calls.cancelRetry ?? 0)
+          .toBe(1);
+      }
+      await control('finishRetry');
+      if (outcome === 'leave')
+        await page.evaluate((path) => {
+          location.hash = '#' + path;
+        }, detail);
+    }
+    await expect(action('그림 문자 복구 취소')).toHaveCount(0);
+    if (outcome === 'denied')
+      await expect(work().getByRole('textbox')).toHaveCount(0);
+    else await expect(slideEditor()).toHaveValue('3슬라이드에 보관한 본문');
+    const unchanged = await snapshot();
+    for (const action of ['correct', 'decide', 'approve', 'continue'])
+      assert.equal(unchanged.calls[action] ?? 0, 0);
+    assert.equal(
+      Object.values(unchanged.drafts).filter((entry) => !!entry.data.draft)
+        .length,
+      0,
+    );
+    pass(
+      `AI 그림 복구 ${outcome}: 늦은 응답·실패가 기존 문자나 초안을 덮지 않음`,
+    );
+  }
+
   await reset(detail, () => control('otherPc'));
   await expect(action('이 내용으로 등록 계속')).toHaveCount(0);
   assert.equal((await snapshot()).calls.continue ?? 0, 0);

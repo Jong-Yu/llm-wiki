@@ -7,6 +7,13 @@ import {
 
 const id = z.string().regex(/^[a-f0-9]{32}$/);
 const revision = z.string().regex(/^[a-f0-9]{64}$/);
+export const registrationContentOriginsSchema = z.record(
+  z.string(),
+  z.object({
+    method: z.enum(['manual', 'ocr']),
+    warnings: z.array(z.string().max(1024)).max(100),
+  }),
+);
 export const REGISTRATION_DRAFT_CHANNELS = {
   get: 'registration-drafts:get',
   save: 'registration-drafts:save',
@@ -22,6 +29,7 @@ export const registrationDraftSchema = z.strictObject({
   basisRevision: revision,
   basisContents: z.record(z.string(), z.string()),
   contents: z.record(z.string(), z.string()),
+  contentOrigins: registrationContentOriginsSchema.optional(),
   blankUnits: z.array(z.string()),
   targetDocument: z.string(),
   submission: z.json().nullable(),
@@ -59,6 +67,9 @@ export type RegistrationDraftIdentity = z.infer<
   typeof registrationDraftIdentitySchema
 >;
 export type RegistrationDraft = z.infer<typeof registrationDraftSchema>;
+export type RegistrationContentOrigins = z.infer<
+  typeof registrationContentOriginsSchema
+>;
 export type RegistrationDraftGetRequest = z.infer<
   typeof registrationDraftGetSchema
 >;

@@ -67,6 +67,7 @@ export const NOTIFICATION_CHANNELS = {
   page: 'notifications:page',
   correct: 'notifications:correct',
   retryPage: 'notifications:retry-page',
+  recoverImages: 'notifications:recover-images',
   cancelRetry: 'notifications:cancel-retry',
 } as const;
 export const notificationSessionSchema = z.strictObject({
@@ -144,6 +145,7 @@ export const notificationCorrectSchema = mutation
 export const notificationRetryPageSchema = mutation.extend({
   page: z.number().int().min(1).max(100000),
 });
+export const notificationRecoverImagesSchema = mutation;
 export const notificationCancelRetrySchema = notificationReadSchema.extend({
   requestId: id,
 });
@@ -383,6 +385,49 @@ export const notificationCancelRetryResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.object({ cancelled: z.boolean() }) }),
   failure,
 ]);
+export const notificationRecoverImagesDataSchema = z.object({
+  units: z
+    .array(
+      z.object({
+        unit_id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
+        content: notificationContentSchema.refine(
+          (value: string): boolean => !!value.trim(),
+        ),
+        warnings: correctionWarnings,
+      }),
+    )
+    .max(40)
+    .refine(
+      (units: { unit_id: string; content: string }[]): boolean =>
+        new Set(units.map((unit: { unit_id: string }): string => unit.unit_id))
+          .size === units.length &&
+        units.reduce(
+          (total: number, unit: { content: string }): number =>
+            total + new TextEncoder().encode(unit.content).byteLength,
+          0,
+        ) <=
+          20 * 1024 * 1024,
+    ),
+  warnings: correctionWarnings,
+  provider: z.enum(['codex', 'claude']),
+  model: z.string().min(1).max(200).nullable(),
+});
+export const notificationRecoverImagesResultSchema = z.discriminatedUnion(
+  'ok',
+  [
+    z.object({
+      ok: z.literal(true),
+      data: notificationRecoverImagesDataSchema,
+    }),
+    failure,
+  ],
+);
+export type NotificationRecoverImagesRequest = z.infer<
+  typeof notificationRecoverImagesSchema
+>;
+export type NotificationRecoverImagesResult = z.infer<
+  typeof notificationRecoverImagesResultSchema
+>;
 export type NotificationCorrectRequest = z.infer<
   typeof notificationCorrectSchema
 >;
@@ -441,6 +486,9 @@ export type NotificationPageResult = z.infer<
   typeof notificationPageResultSchema
 >;
 export type NotificationsBridge = {
+  recoverImages: (
+    request: NotificationRecoverImagesRequest,
+  ) => Promise<NotificationRecoverImagesResult>;
   correct: (
     request: NotificationCorrectRequest,
   ) => Promise<NotificationMutationResult>;

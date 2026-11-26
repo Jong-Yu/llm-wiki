@@ -53,6 +53,8 @@ import {
   notificationCorrectSchema,
   notificationRetryPageSchema,
   notificationRetryPageResultSchema,
+  notificationRecoverImagesSchema,
+  notificationRecoverImagesResultSchema,
   notificationCancelRetrySchema,
   notificationCancelRetryResultSchema,
 } from '@contracts/notifications.contract';
@@ -75,6 +77,8 @@ import type {
   NotificationCorrectRequest,
   NotificationRetryPageRequest,
   NotificationRetryPageResult,
+  NotificationRecoverImagesRequest,
+  NotificationRecoverImagesResult,
   NotificationCancelRetryRequest,
   NotificationCancelRetryResult,
 } from '@contracts/notifications.contract';
@@ -626,6 +630,15 @@ export function createWikiBridge(
         ),
     },
     notifications: {
+      recoverImages: async (
+        request: NotificationRecoverImagesRequest,
+      ): Promise<NotificationRecoverImagesResult> =>
+        notificationRecoverImagesResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.recoverImages,
+            notificationRecoverImagesSchema.parse(request),
+          ),
+        ),
       correct: async (
         request: NotificationCorrectRequest,
       ): Promise<NotificationMutationResult> =>

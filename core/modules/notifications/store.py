@@ -253,6 +253,8 @@ class NotificationStore:
                 reason = self._basis_reason(value, db=db, cache=cache)
                 if reason:
                     self._obsolete(db, value, reason)
+                else:
+                    self._refresh_review_targets(db, value)
             prelaunch = db.execute("SELECT value FROM workflows WHERE tenant=? AND user_id=? AND profile=? "
                                    "AND state='claimed'", self.scope).fetchall()
             for row in prelaunch:
@@ -267,6 +269,30 @@ class NotificationStore:
                     self._event(db, value, 'stopped', identity(execution['claim_id'], 'prelaunch_expired'),
                                 timestamp=expires.isoformat(), notify=True,
                                 details={'reason': 'execution_not_started', 'claim_id': execution['claim_id']})
+
+    def _refresh_review_targets(self, db, value):
+        """구버전이 만든 미판단 전체 입력만 실제 단위로 복원하고 사용자 선택·보고는 보존한다."""
+        if (value['state'] != 'review' or value.get('approval') or value.get('execution')
+                or not value.get('conversion_ref') or len(value['pages']) != 1):
+            return
+        prior = value['pages'][0]
+        if (not prior.get('whole_document') or prior['state'] != 'pending' or prior.get('correction_ref')):
+            return
+        # 사용자가 보류했다 되돌린 기록까지 보존한다. 자동 생성된 대기 상태만 갱신한다.
+        events = db.execute('SELECT value FROM events WHERE tenant=? AND user_id=? AND profile=? AND workflow_id=?',
+                            (*self.scope, value['workflow_id'])).fetchall()
+        if any(json.loads(row['value'])['kind'] != 'approval_required' for row in events):
+            return
+        report = self._conversion(value['conversion_ref'])
+        selected = review_targets(report['manifest'], report['components'])
+        if not selected or any('whole_document' in item for item in selected):
+            return
+        from core.modules.analysis_plans.corrections import needs_input
+        pages = [dict(item, state='pending', input_required=needs_input(report, item)) for item in selected]
+        value.update(pages=pages, updated_at=self.now())
+        self._put(db, value)
+        self._event(db, value, 'review_targets_updated', identity(value['workflow_id'], 'review_targets_updated'),
+                    details=dict(previous_pages=[prior], pages=pages, conversion_ref=value['conversion_ref']))
 
     def _new(self, workflow_id, source_ref, conversion_ref, title, pages, target=None):
         now = self.now()

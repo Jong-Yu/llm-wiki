@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { NotificationInspectionResult } from '@contracts/notifications.contract';
+import type {
+  NotificationInspectionResult,
+  NotificationRecoverImagesResult,
+} from '@contracts/notifications.contract';
 import type { SourceConversionScope } from '@contracts/sourceConversion.contract';
 import { registrationDraftSchema } from '@contracts/registrationDrafts.contract';
-import type { RegistrationDraft } from '@contracts/registrationDrafts.contract';
+import type {
+  RegistrationDraft,
+  RegistrationContentOrigins,
+} from '@contracts/registrationDrafts.contract';
 import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
 import { notificationsApi } from '../api/notifications.api';
 import {
   notificationAccessLost,
   notificationSession,
   contentText,
+  notificationRequestId,
 } from './notificationView';
 import type { NotificationDetail } from './notificationView';
 import type { RegistrationUnit } from './registrationUnits';
@@ -21,12 +28,17 @@ import type {
 } from './RegistrationContentSubmission';
 
 type Inspection = Extract<NotificationInspectionResult, { ok: true }>['data'];
-type Phase = 'loading' | SubmissionPhase | null;
+type Phase = 'loading' | 'recovering' | SubmissionPhase | null;
+type ImageRecoveryData = Extract<
+  NotificationRecoverImagesResult,
+  { ok: true }
+>['data'];
 type DraftBasis = { revision: string; contents: Record<string, string> };
 type EditValues = {
   contents: Record<string, string>;
   blanks: string[];
   target: string;
+  contentOrigins: RegistrationContentOrigins;
 };
 type WorkflowModel = {
   detail: NotificationDetail | null;
@@ -39,6 +51,9 @@ type WorkflowModel = {
   basis: DraftBasis | null;
   draft: ReturnType<typeof useRegistrationDraft>;
   phase: Phase;
+  recoveryMessage: string | null;
+  recoverImages: () => Promise<ImageRecoveryData | null>;
+  cancelRecovery: () => Promise<void>;
   restoreDraft: (restored: RegistrationDraft) => void;
   beginEdit: (selected: RegistrationUnit | undefined) => void;
   scheduleDraft: (values: EditValues) => (() => void) | undefined;
@@ -97,6 +112,10 @@ export function useNotificationWorkflow(
   const editSequence = useRef(0);
   const autoSaveTimer = useRef<number | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const recovery = useRef<{ requestId: string; cancelled: boolean } | null>(
+    null,
+  );
   const pending = useRef(false);
   const live = useRef(true);
   const accessGeneration = useRef(0);
@@ -151,6 +170,7 @@ export function useNotificationWorkflow(
         basisRevision: basis.revision,
         basisContents: basis.contents,
         contents: values.contents,
+        contentOrigins: values.contentOrigins,
         blankUnits: values.blanks,
         targetDocument: values.target,
         submission: null,
@@ -280,8 +300,20 @@ export function useNotificationWorkflow(
     return (): void => {
       live.current = false;
       accessGeneration.current += 1;
+      const request = recovery.current;
+      if (request) {
+        request.cancelled = true;
+        recovery.current = null;
+        void notificationsApi
+          .cancelRetry({
+            ...notificationSession(requestScope),
+            workflowId,
+            requestId: request.requestId,
+          })
+          .catch((): void => {});
+      }
     };
-  }, [inspect, load]);
+  }, [inspect, load, requestScope, workflowId]);
   useEffect((): (() => void) | undefined => {
     if (!active) return;
     const refresh = (): void => {
@@ -294,6 +326,122 @@ export function useNotificationWorkflow(
       window.removeEventListener('focus', refresh);
     };
   }, [active, load]);
+
+  /** 명시 실행한 그림 복구 결과만 돌려주며 저장·승인·등록은 시작하지 않습니다. */
+  async function recoverImages(): Promise<ImageRecoveryData | null> {
+    if (
+      !active ||
+      !detail ||
+      pending.current ||
+      uncertain ||
+      error ||
+      accessBlocked.current ||
+      submitted ||
+      resuming ||
+      detail.workflow.state !== 'review'
+    )
+      return null;
+    const request = { requestId: notificationRequestId(), cancelled: false };
+    recovery.current = request;
+    pending.current = true;
+    setPhase('recovering');
+    setRecoveryMessage(null);
+    const access = accessGeneration.current;
+    const edits = editSequence.current;
+    try {
+      const result = await notificationsApi.recoverImages({
+        ...notificationSession(requestScope),
+        workflowId,
+        requestId: request.requestId,
+        expectedRevision: detail.workflow.revision,
+      });
+      if (
+        !live.current ||
+        request.cancelled ||
+        recovery.current !== request ||
+        access !== accessGeneration.current ||
+        edits !== editSequence.current
+      )
+        return null;
+      if (!result.ok) {
+        if (notificationAccessLost(result.error)) invalidate();
+        throw new Error(result.error.message);
+      }
+      if (!result.data.units.length) {
+        setRecoveryMessage(
+          '그림에서 복구한 문자가 없습니다. 기존 내용은 유지했습니다.',
+        );
+        return null;
+      }
+      setRecoveryMessage(
+        `${result.data.units.length}개 슬라이드의 복구 문자를 받았습니다. 원본과 대조한 뒤 등록을 이어가세요.`,
+      );
+      return result.data;
+    } catch (cause: unknown) {
+      if (
+        live.current &&
+        !request.cancelled &&
+        access === accessGeneration.current
+      )
+        setRecoveryMessage(
+          cause instanceof Error
+            ? cause.message
+            : '그림 문자를 복구하지 못했습니다. 기존 내용은 유지했습니다.',
+        );
+      return null;
+    } finally {
+      if (recovery.current === request && !request.cancelled) {
+        recovery.current = null;
+        pending.current = false;
+        if (live.current) setPhase(null);
+      }
+    }
+  }
+
+  /** 취소 뒤 도착하는 후보는 적용하지 않으며 기존 초안·원보고는 보존합니다. */
+  const cancelRecovery = useCallback(async (): Promise<void> => {
+    const request = recovery.current;
+    if (!request) return;
+    request.cancelled = true;
+    try {
+      const result = await notificationsApi.cancelRetry({
+        ...notificationSession(requestScope),
+        workflowId,
+        requestId: request.requestId,
+      });
+      if (!result.ok) {
+        if (notificationAccessLost(result.error)) invalidate();
+        throw new Error(result.error.message);
+      }
+      if (live.current)
+        setRecoveryMessage(
+          '복구 결과 적용을 취소했습니다. 기존 내용은 유지됩니다.',
+        );
+    } catch (cause: unknown) {
+      if (live.current)
+        setRecoveryMessage(
+          cause instanceof Error
+            ? cause.message
+            : '복구 취소 요청을 확인하지 못했습니다. 늦게 도착한 결과는 적용하지 않습니다.',
+        );
+    } finally {
+      if (recovery.current === request) {
+        recovery.current = null;
+        pending.current = false;
+        if (live.current) setPhase(null);
+      }
+    }
+  }, [invalidate, requestScope, workflowId]);
+
+  useEffect((): void => {
+    const request = recovery.current;
+    if (!active && request) {
+      request.cancelled = true;
+      queueMicrotask((): void => {
+        if (recovery.current === request) void cancelRecovery();
+      });
+    }
+  }, [active, cancelRecovery]);
 
   /** 최초 내용·판본을 고정한 조정기를 재사용해 중간 실패 후 성공한 저장을 반복하지 않습니다. */
   async function submit(
@@ -322,6 +470,7 @@ export function useNotificationWorkflow(
         basisRevision,
         basisContents: basis?.contents ?? {},
         contents: values.contents,
+        contentOrigins: values.contentOrigins,
         blankUnits: values.blanks,
         targetDocument: snapshot.targetDocument,
         submission: snapshot,
@@ -410,6 +559,9 @@ export function useNotificationWorkflow(
     basis,
     draft,
     phase,
+    recoveryMessage,
+    recoverImages,
+    cancelRecovery,
     restoreDraft,
     beginEdit,
     scheduleDraft,

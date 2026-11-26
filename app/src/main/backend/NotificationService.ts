@@ -10,6 +10,7 @@ import {
   notificationApproveSchema,
   notificationLocation,
   notificationLocationKey,
+  notificationRecoverImagesDataSchema,
 } from '@contracts/notifications.contract';
 import type {
   NotificationSession,
@@ -34,6 +35,8 @@ import type {
   NotificationRetryPageResult,
   NotificationCancelRetryRequest,
   NotificationCancelRetryResult,
+  NotificationRecoverImagesRequest,
+  NotificationRecoverImagesResult,
 } from '@contracts/notifications.contract';
 import { conversionNeedsContentReview } from '@contracts/sourceConversion.contract';
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
@@ -58,6 +61,11 @@ import {
 import type { RecoveryEntry } from '@contracts/recovery.contract';
 import { ExecutionStarts } from './ExecutionStarts';
 import type { SourcePageOcrService } from './SourcePageOcrService';
+import type {
+  SourceImageRecoveryService,
+  ImageRecoveryInput,
+  ImageRecoveryUnit,
+} from './SourceImageRecoveryService';
 
 type Connection = Pick<
   ConnectionService,
@@ -124,6 +132,82 @@ function pageRetryKey(request: NotificationCancelRetryRequest): string {
   ]);
 }
 
+/** 저신뢰 진단을 유일한 단일 슬라이드로 연결하고 기존 보정·입력 대상을 보존합니다. */
+function imageRecoveryInput(
+  data: Extract<NotificationDetailResult, { ok: true }>['data'],
+  revision: string,
+): ImageRecoveryInput | null {
+  const { workflow, conversion } = data;
+  if (
+    data.source_format !== 'pptx' ||
+    workflow.state !== 'review' ||
+    workflow.blocked_reason ||
+    workflow.revision !== revision ||
+    !workflow.conversion_ref ||
+    !conversion ||
+    !workflow.pages.length ||
+    workflow.pages.some(
+      (page: NotificationWorkflow['pages'][number]): boolean =>
+        !!page.whole_document || !!page.input_required || !!page.correction_ref,
+    ) ||
+    data.corrections.length
+  )
+    return null;
+  const slides = new Set<number>();
+  for (const range of conversion.manifest.unread_ranges) {
+    const match =
+      /^slide ([1-9][0-9]*): ocr_low_or_missing_confidence_text_retained_manual_review_required$/.exec(
+        range,
+      );
+    if (!match) return null;
+    slides.add(Number(match[1]));
+  }
+  if (!slides.size || slides.size > 40) return null;
+  const units: ImageRecoveryUnit[] = [];
+  for (const slide of slides) {
+    // 범위 단위가 겹치는 경우에도 첫 후보를 임의 선택하지 않습니다.
+    const matches = conversion.manifest.units.filter(
+      (unit: (typeof conversion.manifest.units)[number]): boolean =>
+        unit.location.kind === 'slides' &&
+        typeof unit.location.start === 'number' &&
+        typeof unit.location.end === 'number' &&
+        unit.location.start <= slide &&
+        unit.location.end >= slide,
+    );
+    const unit = matches[0];
+    if (
+      matches.length !== 1 ||
+      !unit ||
+      unit.location.kind !== 'slides' ||
+      unit.location.start !== slide ||
+      unit.location.end !== slide ||
+      workflow.pages.filter(
+        (page: NotificationWorkflow['pages'][number]): boolean =>
+          page.unit_id === unit.unit_id,
+      ).length !== 1
+    )
+      return null;
+    const content = conversion.components[unit.unit_id];
+    if (typeof content !== 'string' || !content.trim()) return null;
+    units.push({
+      unit_id: unit.unit_id,
+      content,
+      location: { kind: 'slides', start: slide, end: slide },
+    });
+  }
+  if (
+    new Set(units.map((unit: ImageRecoveryUnit): string => unit.unit_id))
+      .size !== units.length ||
+    workflow.pages.length !== units.length
+  )
+    return null;
+  return {
+    source_ref: workflow.source_ref,
+    conversion_ref: workflow.conversion_ref,
+    units,
+  };
+}
+
 /** 서버의 알림·페이지 확인·승인 영수증을 소유하고 실행은 기존 개인 실행기에 연결합니다. */
 export class NotificationService {
   readonly #connection: Connection;
@@ -135,6 +219,9 @@ export class NotificationService {
   readonly #starts = new ExecutionStarts();
   readonly #flushes = new ExecutionStarts();
   readonly #pageOcr: Pick<SourcePageOcrService, 'run' | 'stop'> | undefined;
+  readonly #imageRecovery:
+    | Pick<SourceImageRecoveryService, 'run' | 'stop'>
+    | undefined;
   readonly #pageRetries = new Map<string, AbortController>();
 
   constructor(
@@ -143,12 +230,14 @@ export class NotificationService {
     device: NotificationDevice,
     recovery: ProcessRecovery,
     pageOcr?: Pick<SourcePageOcrService, 'run' | 'stop'>,
+    imageRecovery?: Pick<SourceImageRecoveryService, 'run' | 'stop'>,
   ) {
     this.#connection = connection;
     this.#analysis = analysis;
     this.#device = device;
     this.#recovery = recovery;
     this.#pageOcr = pageOcr;
+    this.#imageRecovery = imageRecovery;
     this.#contentReader = new NotificationContentReader(
       (context: AnalysisContext, path: string): Promise<ReadApiResult> =>
         this.#api(context, path),
@@ -162,6 +251,7 @@ export class NotificationService {
   async stop(): Promise<void> {
     for (const controller of this.#pageRetries.values()) controller.abort();
     await this.#pageOcr?.stop();
+    await this.#imageRecovery?.stop();
   }
 
   /** 다른 PC의 claim을 화면에서 복사해도 이 PC의 직접 분석 실행으로 우회할 수 없습니다. */
@@ -576,6 +666,101 @@ export class NotificationService {
           '선택한 쪽의 재인식 결과를 확인할 수 없습니다.',
         );
       return result;
+    } finally {
+      this.#pageRetries.delete(key);
+      this.#requests.delete(controller);
+      finish();
+    }
+  }
+
+  /** 명시한 요청에서만 그림 복구 후보를 만들며 서버 보고·보정·승인을 쓰지 않습니다. */
+  async recoverImages(
+    request: NotificationRecoverImagesRequest,
+  ): Promise<NotificationRecoverImagesResult> {
+    if (!this.#imageRecovery)
+      return apiFailure(
+        'image_recovery_unavailable',
+        '이 PC의 개인 AI 실행기를 준비해 주세요. 내용을 직접 수정할 수도 있습니다.',
+      );
+    const finish = this.#starts.begin('page-ocr');
+    if (!finish)
+      return apiFailure(
+        'conversion_busy',
+        '이 PC에서 다른 문자를 다시 읽고 있습니다.',
+      );
+    const controller = new AbortController();
+    const key = pageRetryKey(request);
+    this.#pageRetries.set(key, controller);
+    this.#requests.add(controller);
+    const cancelled = (): ApiFailure =>
+      apiFailure(
+        'cancelled',
+        '그림 문자 복구를 취소했습니다. 원래 내용은 보존됩니다.',
+      );
+    const conflict = (): ApiFailure =>
+      apiFailure(
+        'conflict',
+        '검토 내용이나 원본이 변경되었거나 복구 대상을 확정할 수 없습니다. 현재 내용을 다시 확인해 주세요.',
+      );
+    try {
+      const context = await this.#context(request, true);
+      if ('ok' in context) return context;
+      // 일반 조회의 outbox flush를 실행하지 않아 후보 생성에 서버 쓰기가 섞이지 않습니다.
+      const detail = await this.#contentReader.read(
+        context,
+        request.workflowId,
+      );
+      if (!detail.ok) return detail;
+      const input = imageRecoveryInput(detail.data, request.expectedRevision);
+      if (!input) return conflict();
+      const before = await this.#context(request, true);
+      if ('ok' in before) return before;
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      if (controller.signal.aborted) return cancelled();
+      const result = await this.#imageRecovery.run(
+        context,
+        input,
+        request.requestId,
+        controller.signal,
+      );
+      // 실행기가 정리 실패를 함께 알린 취소 오류는 일반 취소 문구로 덮지 않습니다.
+      if (!result.ok) return result;
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      if (controller.signal.aborted) return cancelled();
+      const after = await this.#context(request, true);
+      if ('ok' in after) return after;
+      const current = await this.#contentReader.read(after, request.workflowId);
+      if (!current.ok) return current;
+      const currentInput = imageRecoveryInput(
+        current.data,
+        request.expectedRevision,
+      );
+      if (
+        !currentInput ||
+        JSON.stringify(currentInput) !== JSON.stringify(input)
+      )
+        return conflict();
+      const permission = await this.#context(request, true);
+      if ('ok' in permission) return permission;
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      if (controller.signal.aborted) return cancelled();
+      const parsed = notificationRecoverImagesDataSchema.safeParse(result.data);
+      if (
+        !parsed.success ||
+        parsed.data.units.length !== input.units.length ||
+        parsed.data.units.some(
+          (unit: { unit_id: string }): boolean =>
+            !input.units.some(
+              (target: ImageRecoveryUnit): boolean =>
+                target.unit_id === unit.unit_id,
+            ),
+        )
+      )
+        return apiFailure(
+          'invalid_image_recovery',
+          '선택한 슬라이드의 복구 결과를 확인할 수 없습니다. 원래 내용은 보존됩니다.',
+        );
+      return { ok: true, data: parsed.data };
     } finally {
       this.#pageRetries.delete(key);
       this.#requests.delete(controller);

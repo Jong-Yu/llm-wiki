@@ -12,6 +12,7 @@ MAX_EFFECTIVE_TEXT_BYTES = 20 * 1024 * 1024
 SOURCE_KEYS = ('source_id', 'source_version', 'source_sha256', 'registration_revision')
 TARGET_FIELDS = ('page', 'unit_id', 'whole_document')
 PAGE_RANGE = re.compile(r'^page ([1-9][0-9]*): (.+)$')
+UNIT_RANGE = re.compile(r'^(slide|frame) ([1-9][0-9]*): (.+)$')
 LOW = 'ocr_low_or_missing_confidence_text_retained_manual_review_required'
 BLOCKED = re.compile(r'checkpoint|encrypted|password|corrupt|dependency_missing|language_load|'
                      r'engine_failed|conversion_cancelled|conversion_.*failed|worker|memory|resources|'
@@ -41,6 +42,22 @@ def target_key(value):
             'unit:' + value['unit_id'] if 'unit_id' in value else 'whole_document')
 
 
+def range_target(manifest, components, value):
+    """미독 위치를 실제 보관 단위에 연결한다. 없는 슬라이드·모호한 범위는 추정하지 않는다."""
+    page = PAGE_RANGE.fullmatch(value)
+    if page and int(page[1]) <= 1000000:
+        return dict(page=int(page[1]))
+    match = UNIT_RANGE.fullmatch(value)
+    if match:
+        kind, number = match[1] + 's', int(match[2])
+        matches = [unit for unit in manifest['units'] if unit['location'].get('kind') == kind
+                   and unit['location']['start'] <= number <= unit['location']['end']]
+        if (len(matches) == 1 and matches[0]['unit_id'] in components
+                and matches[0]['location']['start'] == matches[0]['location']['end'] == number):
+            return dict(unit_id=matches[0]['unit_id'])
+    return dict(whole_document=True)
+
+
 def review_targets(manifest, components):
     """보관된 보고의 입력 부족을 연결하며 실행/파일 오류는 명시 전체 대체만 허용한다."""
     if manifest.get('complete'):
@@ -52,8 +69,7 @@ def review_targets(manifest, components):
         return [dict(whole_document=True)]
     result = {}
     for item in unread:
-        match = PAGE_RANGE.fullmatch(item)
-        selected = dict(page=int(match[1])) if match and int(match[1]) <= 1000000 else dict(whole_document=True)
+        selected = range_target(manifest, components, item)
         result[target_key(selected)] = selected
     return list(result.values()) or [dict(whole_document=True)]
 
@@ -110,10 +126,8 @@ def needs_input(report, selected):
         return True
     if bound['unit_id'] is None or not report['components'][bound['unit_id']].strip():
         return True
-    if 'page' in selected:
-        prefix = 'page ' + str(selected['page']) + ': '
-        return any(item.startswith(prefix) and item != prefix + LOW for item in report['manifest']['unread_ranges'])
-    return False
+    return any(range_target(report['manifest'], report['components'], item) == selected
+               and item.split(': ', 1)[-1] != LOW for item in report['manifest']['unread_ranges'])
 
 
 def validate_reference(value):
@@ -242,8 +256,7 @@ def resolution(report, corrections):
     targets = {target_key(item) for item in corrections}
     resolved, remaining = [], []
     for value in report['manifest']['unread_ranges']:
-        match = PAGE_RANGE.fullmatch(value)
-        key = 'page:' + match[1] if match else None
+        key = target_key(range_target(report['manifest'], report['components'], value))
         destination = resolved if 'whole_document' in targets or key in targets else remaining
         destination.append(value)
     complete = bool(report['manifest']['complete'] or ('whole_document' in targets) or

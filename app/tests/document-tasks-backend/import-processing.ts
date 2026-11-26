@@ -162,6 +162,121 @@ export async function verifyImportProcessing(
   assert.equal(frameSession.getSnapshot().canExecute, false);
   const reviewReport = review.report;
   assert.ok(reviewReport && review.reference);
+  const slides = [121, 122, 124, 128, 136];
+  const slideReview: SourceConversionRun = {
+    ...review,
+    format: 'pptx',
+    report: {
+      ...reviewReport,
+      method: 'pptx_text',
+      units: slides.map((slide: number) => ({
+        unit_id: `slide-${slide}`,
+        content: `보관한 ${slide}슬라이드 문자`,
+        location: { kind: 'slides' as const, start: slide, end: slide },
+      })),
+      unread_ranges: slides.map(
+        (slide: number): string =>
+          `slide ${slide}: ocr_low_or_missing_confidence_text_retained_manual_review_required`,
+      ),
+    },
+  };
+  const slideTask: DocumentTask = {
+    ...task,
+    item: { ...task.item, format: 'pptx' },
+  };
+  const beforeSlides = { ...calls };
+  const preservedSlides = JSON.stringify(slideReview);
+  let slideReads = 0;
+  current = {
+    task: slideTask,
+    conversion: slideReview,
+    analysis: null,
+    errors: [],
+  };
+  const slideSession = new ImportProcessingSession(
+    scope,
+    { item: slideTask.item, cleanupWarningCount: 0 },
+    slideTask.targetDocument,
+    true,
+    {
+      ...api,
+      conversionRead: async () => {
+        slideReads += 1;
+        return { ok: true, data: slideReview };
+      },
+    },
+    current,
+  );
+  await slideSession.refresh();
+  await Promise.all([slideSession.begin(), slideSession.begin()]);
+  assert.equal(slideSession.getSnapshot().phase, 'conversion_review');
+  assert.equal(slideSession.getSnapshot().canPrepare, false);
+  assert.equal(slideSession.getSnapshot().canRetryConversion, false);
+  assert.equal(slideSession.getSnapshot().canExecute, false);
+  assert.match(slideSession.getSnapshot().message, /원본과 대조.*확인·수정/);
+  assert.deepEqual(calls, { ...beforeSlides, read: beforeSlides.read + 1 });
+  assert.equal(slideReads, 1);
+  assert.equal(JSON.stringify(slideReview), preservedSlides);
+  const missingReview = new ImportProcessingSession(
+    scope,
+    { item: slideTask.item, cleanupWarningCount: 0 },
+    slideTask.targetDocument,
+    true,
+    api,
+    current,
+  );
+  await missingReview.begin();
+  assert.equal(missingReview.getSnapshot().phase, 'conversion_unconfirmed');
+  assert.equal(missingReview.getSnapshot().canPrepare, false);
+  assert.equal(missingReview.getSnapshot().canRetryConversion, false);
+  assert.equal(
+    JSON.stringify(missingReview.getSnapshot().conversion),
+    preservedSlides,
+  );
+  assert.deepEqual(calls, { ...beforeSlides, read: beforeSlides.read + 1 });
+  for (const variant of [
+    'missing',
+    'empty',
+    'ambiguous',
+    'overlapping',
+    'wrong-kind',
+    'gap',
+  ] as const) {
+    const report = structuredClone(slideReview.report);
+    assert.ok(report);
+    const first = report.units[0];
+    assert.ok(first);
+    if (variant === 'missing') report.units.shift();
+    if (variant === 'empty') first.content = '';
+    if (variant === 'ambiguous')
+      report.units.push({ ...first, unit_id: 'duplicate' });
+    if (variant === 'overlapping')
+      report.units.push({
+        ...first,
+        unit_id: 'overlapping',
+        location: { kind: 'slides', start: 120, end: 122 },
+      });
+    if (variant === 'wrong-kind') first.location.kind = 'pages';
+    if (variant === 'gap')
+      report.unread_ranges.push('slide 121: picture_content_not_read');
+    const session = new ImportProcessingSession(
+      scope,
+      { item: slideTask.item, cleanupWarningCount: 0 },
+      slideTask.targetDocument,
+      true,
+      api,
+      {
+        task: slideTask,
+        conversion: { ...slideReview, report },
+        analysis: null,
+        errors: [],
+      },
+    );
+    assert.equal(session.getSnapshot().phase, 'conversion_failed', variant);
+    assert.equal(session.getSnapshot().canPrepare, false, variant);
+    assert.equal(session.getSnapshot().canExecute, false, variant);
+  }
+  assert.deepEqual(calls, { ...beforeSlides, read: beforeSlides.read + 1 });
   const originalReview = JSON.stringify(review);
   const reviewCalls = { convert: 0, register: 0, execute: 0, read: 0 };
   const reviewDetail: AnalysisDetail = {
@@ -242,7 +357,7 @@ export async function verifyImportProcessing(
   assert.equal(reviewSession.getSnapshot().canPrepare, false);
   assert.equal(reviewSession.getSnapshot().canRetryConversion, false);
   assert.equal(reviewSession.getSnapshot().canExecute, false);
-  assert.match(reviewSession.getSnapshot().message, /원본과 대조하고 승인/);
+  assert.match(reviewSession.getSnapshot().message, /원본과 대조.*확인·수정/);
   assert.equal(reviewSession.getSnapshot().conversion?.report?.complete, false);
   assert.deepEqual(reviewCalls, {
     convert: 0,

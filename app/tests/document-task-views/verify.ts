@@ -429,6 +429,60 @@ const reviewedAttempt = reviewedTask.conversions[0];
 assert.ok(reviewedAttempt);
 const lowConfidenceCode =
   'ocr_low_or_missing_confidence_text_retained_manual_review_required';
+const slideTask = fixturePresentationTask();
+const slideAttempt = slideTask.conversions[0];
+assert.ok(slideAttempt);
+const reviewSlides = [121, 122, 124, 128, 136];
+slideAttempt.reportSummary = {
+  complete: false,
+  unreadRanges: reviewSlides.map(
+    (slide: number): string => `slide ${slide}: ${lowConfidenceCode}`,
+  ),
+  warnings: [lowConfidenceCode],
+};
+slideAttempt.diagnosticCodes = [lowConfidenceCode];
+const slideConversion = sourceConversionRunSchema.parse({
+  ...slideAttempt,
+  source: slideTask.source,
+  format: 'pptx',
+  report: {
+    method: 'pptx_text',
+    complete: false,
+    unread_ranges: slideAttempt.reportSummary.unreadRanges,
+    warnings: [lowConfidenceCode],
+    units: reviewSlides.map((slide: number) => ({
+      unit_id: `slide-${slide}`,
+      location: { kind: 'slides', start: slide, end: slide },
+      content: `보관한 ${slide}슬라이드 문자`,
+    })),
+    origin: 'client_reported',
+    coverage: 'reported_units_only',
+    original_coverage: 'not_verified',
+    semantic_validation: 'not_run',
+  },
+  reference: null,
+  cleanupWarning: false,
+});
+const slideView = buildDocumentTaskView(slideTask, {
+  conversion: slideConversion,
+});
+assert.equal(slideView.state, 'review');
+assert.deepEqual(
+  slideView.textReviewScopes,
+  reviewSlides.map((slide: number): string => `${slide}슬라이드`),
+);
+assert.deepEqual(
+  slideView.textReviewUnits,
+  reviewSlides.map((slide: number) => ({
+    label: `${slide}슬라이드`,
+    content: `보관한 ${slide}슬라이드 문자`,
+  })),
+);
+assert.notEqual(slideView.primaryAction?.id, 'retry-conversion');
+assert.deepEqual(
+  buildDocumentTaskView(slideTask).textReviewScopes,
+  slideView.textReviewScopes,
+);
 reviewedAttempt.state = 'partial';
 reviewedAttempt.diagnosticCodes = [lowConfidenceCode];
 reviewedAttempt.reportSummary = {

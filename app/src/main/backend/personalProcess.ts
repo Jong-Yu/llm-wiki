@@ -324,6 +324,7 @@ export function spawnPersonalProcess(
 type PersonalOutputOptions = {
   maxBytes: number;
   timeoutMs: number;
+  terminateGraceMs?: number;
   signal?: AbortSignal;
 };
 
@@ -409,6 +410,13 @@ export async function runPersonalCommand(
   options: PersonalOutputOptions,
 ): Promise<PersonalOutput> {
   if (options.signal?.aborted) throw new Error('personal_command_aborted');
+  const terminateGraceMs = options.terminateGraceMs ?? 1_000;
+  if (
+    !Number.isInteger(terminateGraceMs) ||
+    terminateGraceMs < 1_000 ||
+    terminateGraceMs > 10_000
+  )
+    throw new Error('invalid_termination_grace');
   const child = spawnPersonalProcess(runtime, args);
   const decoder = new StringDecoder('utf8');
   let output = '';
@@ -419,7 +427,9 @@ export async function runPersonalCommand(
     child.once('error', done);
   });
   const stop = (): void => {
-    void stopPersonalProcess(child, closed, 1_000).catch((): void => {});
+    void stopPersonalProcess(child, closed, terminateGraceMs).catch(
+      (): void => {},
+    );
   };
   child.stdout?.on('data', (chunk: Buffer): void => {
     bytes += chunk.length;

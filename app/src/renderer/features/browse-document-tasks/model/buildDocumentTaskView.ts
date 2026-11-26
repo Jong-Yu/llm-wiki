@@ -83,6 +83,7 @@ function textReviewScopes(conversion: ConversionView | null): string[] {
         const scope = range.slice(0, range.indexOf(':'));
         return scope
           .replace(/^page (\d+)$/, '$1페이지')
+          .replace(/^slide (\d+)$/, '$1슬라이드')
           .replace(/^frame (\d+)$/, '$1번째 프레임');
       }),
     ),
@@ -100,12 +101,16 @@ function textReviewUnits(
       unit: NonNullable<SourceConversionRun['report']>['units'][number],
     ): DocumentTaskView['textReviewUnits'] => {
       const location = unit.location;
-      if (location.kind !== 'pages' || location.start !== location.end)
+      if (
+        (location.kind !== 'pages' && location.kind !== 'slides') ||
+        location.start !== location.end
+      )
         return [];
-      const label = scopes.find(
-        (scope: string): boolean =>
-          scope === `${location.start}페이지` ||
-          scope === `${location.start}번째 프레임`,
+      const label = scopes.find((scope: string): boolean =>
+        location.kind === 'slides'
+          ? scope === `${location.start}슬라이드`
+          : scope === `${location.start}페이지` ||
+            scope === `${location.start}번째 프레임`,
       );
       return label && unit.content ? [{ label, content: unit.content }] : [];
     },

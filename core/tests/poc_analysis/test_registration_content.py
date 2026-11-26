@@ -1,5 +1,6 @@
 """실제 누락·빈 페이지·일반 단위·전체 입력의 불변 선택 계약. 모두 격리 합성 자료다."""
 from uuid import uuid4
+from io import BytesIO
 import unittest
 from unittest.mock import patch
 
@@ -159,6 +160,142 @@ class RegistrationContentTests(unittest.TestCase):
         self.assertIn('Corrected text lines.', markdown)
         self.assertEqual(report['effective_units'][0]['location']['kind'], 'lines')
         self.assertEqual(report['approved_corrections'][0]['unit_id'], 'lines1')
+
+    def slide_report(self, **changes):
+        """실제 VOC와 같은 170단위·5쪽 경고를 합성 본문으로 재현한다."""
+        from core.tests.poc_analysis.test_presentation_conversion import package
+        staged = self.sources.stage(BytesIO(package()), kind='file', title='Synthetic PPT',
+                                    format='pptx', filename='fixture.pptx')
+        registered = self.sources.commit(staged, **self.scope, request_id=uuid4().hex, authorize=self.auth)
+        catalog = self.sources.get_source(registered['receipt']['source_id'])
+        original = catalog['versions'][-1]
+        self.source = {key: original[key] for key in corrections.SOURCE_KEYS if key != 'registration_revision'}
+        self.source['registration_revision'] = catalog['registration_revision']
+        self.request.update(source_ref=self.source)
+        values = dict(pdf=False, method='pptx_text', units=[
+            dict(unit_id=f'slide-{number}', location=dict(kind='slides', start=number, end=number),
+                 content=self.text if number == 1 else f'Synthetic slide {number}.')
+            for number in range(1, 171)], unread=[f'slide {number}: {LOW}' for number in (121, 122, 124, 128, 136)])
+        return self.report(**dict(values, **changes))
+
+    def test_slide_confidence_review_reaches_registration_and_analysis_input(self):
+        original = self.slide_report()
+        before = self.original_bytes()
+        pages = self.detail()['pages']
+        self.assertEqual([item['unit_id'] for item in pages],
+                         ['slide-121', 'slide-122', 'slide-124', 'slide-128', 'slide-136'])
+        self.assertTrue(all(not item['input_required'] for item in pages))
+        markdown, report = self.frozen()
+        self.assertEqual(report['units'], original['manifest']['units'])
+        self.assertFalse(report['complete'])
+        self.assertEqual(report['unread_ranges'], original['manifest']['unread_ranges'])
+        self.jobs.claim(self.job_id, **self.scope, expected_job_revision=self.query()['job_revision'],
+                        authorize=self.auth, execution_claim_id=self.detail()['execution']['claim_id'])
+        args, manifest, parts = self.prepare('prepare_wiki')
+        self.assertTrue(manifest['input_ready'])
+        self.assertIn('Synthetic slide 170.', parts['data/registration.md'])
+        saved = self.results.write_wiki(self.job_id, **args, content=parts['data/registration.md'], expected_revision=None)
+        self.assertTrue(saved['saved'])
+        graph_args, graph_manifest = registration_cases.RegistrationTest.graph_args(self)
+        generated = self.results.generate_ontology(self.job_id, **graph_args)
+        self.assertTrue(generated['saved'])
+        self.assertEqual(self.query()['result_summary']['status'], 'complete')
+        self.assertEqual(self.original_bytes(), before)
+
+    def test_slide_correction_resolves_only_its_original_range(self):
+        original = self.slide_report()
+        before = self.original_bytes()
+        self.correct(unit_id='slide-122', content='Corrected synthetic slide.')
+        markdown, report = self.frozen()
+        self.assertIn('Corrected synthetic slide.', markdown)
+        self.assertEqual(report['user_input_resolution']['resolved_ranges'], [f'slide 122: {LOW}'])
+        self.assertEqual(len(report['user_input_resolution']['remaining_ranges']), 4)
+        self.assertEqual(report['effective_units'], original['manifest']['units'])
+        self.assertEqual(self.original_bytes(), before)
+
+    def test_slide_gaps_and_ambiguous_locations_cannot_be_marked_usable(self):
+        unit = dict(unit_id='custom-id', location=dict(kind='slides', start=121, end=121), content='Retained text.')
+        for units, unread, selected in (
+                ([dict(unit, content='')], [f'slide 121: {LOW}'], dict(unit_id='custom-id')),
+                ([unit], ['slide 121: ocr_engine_failed'], dict(whole_document=True)),
+                ([unit], ['slide 121: unsupported_picture_format'], dict(unit_id='custom-id')),
+                ([dict(unit, location=dict(kind='slides', start=122, end=122))],
+                 [f'slide 121: {LOW}'], dict(whole_document=True)),
+                ([dict(unit, location=dict(kind='slides', start=121, end=122))],
+                 [f'slide 121: {LOW}'], dict(whole_document=True)),
+                ([unit, dict(unit, unit_id='overlap', location=dict(kind='slides', start=120, end=122))],
+                 [f'slide 121: {LOW}'], dict(whole_document=True)),
+                ([unit], [f'slide 121: {LOW}', 'remaining source: conversion_checkpoint_read_failed'],
+                 dict(whole_document=True))):
+            with self.subTest(unread=unread, units=units):
+                self.slide_report(units=units, unread=unread)
+                self.assertEqual([corrections.target(item) for item in self.detail()['pages']], [selected])
+                with self.assertRaises(JobConflictError) as error:
+                    self.mutate('pages', PageDecisions, decisions=[dict(**selected, state='usable')])
+                self.assertEqual(error.exception.code, 'content_input_required')
+        with self.assertRaisesRegex(ValueError, 'locations must be distinct'):
+            self.slide_report(units=[unit, dict(unit, unit_id='other')], unread=[f'slide 121: {LOW}'])
+        report = dict(manifest=dict(complete=False, units=[unit, dict(unit, unit_id='other')],
+                                   unread_ranges=[f'slide 121: {LOW}']),
+                      components={'custom-id': 'Retained text.', 'other': 'Duplicate text.'})
+        self.assertEqual(corrections.review_targets(report['manifest'], report['components']),
+                         [dict(whole_document=True)])
+
+    def test_legacy_unjudged_slide_review_is_restored_once_without_reconversion(self):
+        with patch('core.modules.notifications.store.review_targets', return_value=[dict(whole_document=True)]):
+            self.slide_report()
+            prior = self.detail()
+        before = self.original_bytes()
+        updated = self.service().detail(self.workflow_id)
+        self.assertNotEqual(updated['workflow']['revision'], prior['revision'])
+        self.assertEqual(len(updated['workflow']['pages']), 5)
+        events = [item for item in updated['events'] if item['kind'] == 'review_targets_updated']
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['details']['previous_pages'], prior['pages'])
+        self.assertEqual(self.service().detail(self.workflow_id), updated)
+        with self.assertRaises(JobConflictError) as error:
+            self.service().mutate(self.workflow_id, 'pages', PageDecisions(request_id=uuid4().hex,
+                expected_revision=prior['revision'], decisions=[dict(whole_document=True, state='held')]), self.auth)
+        self.assertEqual(error.exception.code, 'conflict')
+        self.assertEqual(self.original_bytes(), before)
+
+    def test_legacy_user_decisions_and_whole_corrections_are_not_replaced(self):
+        for mode in ('held', 'pending_again', 'corrected', 'approved'):
+            with self.subTest(mode=mode):
+                with patch('core.modules.notifications.store.review_targets', return_value=[dict(whole_document=True)]):
+                    self.slide_report()
+                    if mode in ('held', 'pending_again'):
+                        self.mutate('pages', PageDecisions, decisions=[dict(whole_document=True, state='held')])
+                        if mode == 'pending_again':
+                            self.mutate('pages', PageDecisions, decisions=[dict(whole_document=True, state='pending')])
+                    else:
+                        self.correct(whole_document=True, content='Whole document supplied by the user.')
+                        if mode == 'approved':
+                            self.approve()
+                    prior = self.service().detail(self.workflow_id)
+                self.assertEqual(self.service().detail(self.workflow_id), prior)
+
+    def test_review_target_repair_rolls_back_if_history_cannot_be_saved(self):
+        from core.modules.notifications.store import NotificationStore
+        with patch('core.modules.notifications.store.review_targets', return_value=[dict(whole_document=True)]):
+            self.slide_report()
+            prior = self.detail()
+        with patch.object(NotificationStore, '_event', side_effect=OSError('History write failed')):
+            with self.assertRaises(OSError):
+                self.detail()
+        with self.service().database() as db:
+            self.assertEqual(self.service()._get(db, self.workflow_id), prior)
+        self.assertEqual(len(self.detail()['pages']), 5)
+
+    def test_frame_confidence_targets_use_preserved_id_and_require_actual_text(self):
+        unit = dict(unit_id='retained-image', location=dict(kind='frames', start=2, end=2))
+        manifest = dict(complete=False, units=[unit], unread_ranges=[f'frame 2: {LOW}'])
+        report = dict(manifest=manifest, components={'retained-image': 'OCR text.'})
+        selected = dict(unit_id='retained-image')
+        self.assertEqual(corrections.review_targets(manifest, report['components']), [selected])
+        self.assertFalse(corrections.needs_input(report, selected))
+        report['components']['retained-image'] = ''
+        self.assertTrue(corrections.needs_input(report, selected))
 
     def test_whole_document_replaces_selection_without_rewriting_original(self):
         self.report(units=[self.page(1, 'Original first page.')], unread=['PDF: unsupported embedded content'])

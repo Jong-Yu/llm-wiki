@@ -528,23 +528,27 @@ export async function verifyRegistrationContent(
     assert.deepEqual(presentationRead.data.conversion?.manifest.unread_ranges, [
       'slide 1: picture_content_not_read',
     ]);
-    assert.equal(presentationRead.data.workflow.pages[0]?.whole_document, true);
+    assert.equal(presentationRead.data.workflow.pages[0]?.unit_id, 'slide_1');
+    assert.equal(
+      presentationRead.data.workflow.pages[0]?.whole_document,
+      undefined,
+    );
     assert.equal(presentationRead.data.workflow.pages[0]?.input_required, true);
     assert.equal(
       originalContentText(presentationRead.data, { whole_document: true }),
       '첫 슬라이드의 보존된 본문.\n\n둘째 슬라이드의 보존된 본문.',
-      'A real partial PPTX report reaches the whole-document editor with its retained text.',
+      'The optional whole-document editor still preserves all text while the required target is one slide.',
     );
-    const unconfirmedWhole = await service.decide({
+    const unconfirmedSlide = await service.decide({
       ...session,
       workflowId: presentation.workflow_id,
       expectedRevision: presentationRead.data.workflow.revision,
       requestId: id(),
-      decisions: [{ whole_document: true, state: 'usable' }],
+      decisions: [{ unit_id: 'slide_1', state: 'usable' }],
     });
     assert.ok(
-      !unconfirmedWhole.ok &&
-        unconfirmedWhole.error.code === 'content_input_required',
+      !unconfirmedSlide.ok &&
+        unconfirmedSlide.error.code === 'content_input_required',
       'Showing retained text does not approve missing slide content.',
     );
     const correctedSlide = await service.correct({

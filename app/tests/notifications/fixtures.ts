@@ -15,6 +15,8 @@ import type {
   NotificationCorrectRequest,
   NotificationRetryPageRequest,
   NotificationRetryPageResult,
+  NotificationRecoverImagesRequest,
+  NotificationRecoverImagesResult,
   NotificationCancelRetryRequest,
   NotificationCancelRetryResult,
   NotificationContinueRequest,
@@ -51,6 +53,7 @@ type Method =
   | 'continue'
   | 'correct'
   | 'retryPage'
+  | 'recoverImages'
   | 'cancelRetry';
 export const workflowId = '1'.repeat(32);
 const deviceId = '2'.repeat(32);
@@ -307,6 +310,53 @@ const denied = {
 } as const;
 let completeRetry: (() => void) | null = null;
 const bridge: NotificationsBridge = {
+  recoverImages: async (
+    request: NotificationRecoverImagesRequest,
+  ): Promise<NotificationRecoverImagesResult> => {
+    enter('recoverImages', request);
+    if (state.deny) return denied;
+    if (state.ocrMode === 'delayed')
+      await new Promise<void>((resolve: () => void): void => {
+        completeRetry = resolve;
+      });
+    if (state.deny) return denied;
+    if (request.expectedRevision !== state.detail.workflow.revision)
+      return {
+        ok: false,
+        error: {
+          code: 'conflict',
+          message: '검토 기준이 변경되었습니다. 기존 내용은 유지했습니다.',
+        },
+      };
+    return {
+      ok: true,
+      data: {
+        units:
+          state.ocrMode === 'empty'
+            ? []
+            : state.detail.workflow.pages.flatMap(
+                (
+                  unit: NotificationWorkflow['pages'][number],
+                ): Extract<
+                  NotificationRecoverImagesResult,
+                  { ok: true }
+                >['data']['units'] =>
+                  unit.unit_id
+                    ? [
+                        {
+                          unit_id: unit.unit_id,
+                          content: `${state.detail.conversion?.components[unit.unit_id] ?? ''}\n복구한 그림 문자입니다.`,
+                          warnings: ['ai_image_recovery_requires_review'],
+                        },
+                      ]
+                    : [],
+              ),
+        warnings: ['ai_image_recovery_candidate'],
+        provider: 'claude',
+        model: 'fixture-model',
+      },
+    };
+  },
   correct: async (
     request: NotificationCorrectRequest,
   ): Promise<NotificationMutationResult> => {
@@ -892,6 +942,42 @@ export function installNotifications(): void {
         state.detail.conversion.components = {
           'paragraph-one': '원래 문단 내용',
         };
+      }
+      persist();
+    },
+    pptxLowConfidence: (): void => {
+      const positions = [3, 8];
+      state.detail.source_format = 'pptx';
+      state.detail.sourcePageCount = null;
+      state.detail.workflow.pages = positions.map(
+        (position: number): NotificationWorkflow['pages'][number] => ({
+          unit_id: `slide-${position}`,
+          state: 'pending',
+          input_required: false,
+        }),
+      );
+      if (state.detail.conversion) {
+        state.detail.conversion.manifest.method = 'pptx_text';
+        state.detail.conversion.manifest.units = positions.map(
+          (
+            position: number,
+          ): NonNullable<
+            Detail['conversion']
+          >['manifest']['units'][number] => ({
+            unit_id: `slide-${position}`,
+            location: { kind: 'slides', start: position, end: position },
+          }),
+        );
+        state.detail.conversion.manifest.unread_ranges = positions.map(
+          (position: number): string =>
+            `slide ${position}: ocr_low_or_missing_confidence_text_retained_manual_review_required`,
+        );
+        state.detail.conversion.components = Object.fromEntries(
+          positions.map((position: number): [string, string] => [
+            `slide-${position}`,
+            `${position}슬라이드에 보관한 본문`,
+          ]),
+        );
       }
       persist();
     },

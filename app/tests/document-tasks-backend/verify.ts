@@ -15,6 +15,8 @@ import { verifyImportProcessing } from './import-processing';
 import { verifyNotificationDelivery } from './notification-delivery';
 import { verifyPageCorrections } from './page-corrections';
 import { verifyPageOcr } from './page-ocr';
+import { verifyImageRecovery } from './image-recovery';
+import { verifyImageRecoveryNotifications } from './image-recovery-notifications';
 import { verifyRegistrationContent } from './registration-content';
 import {
   verifyNotifications,
@@ -35,7 +37,10 @@ import type {
   AnalysisStartRequest,
 } from '@contracts/analysis.contract';
 import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
-import { conversionNeedsTextReview } from '@contracts/sourceConversion.contract';
+import {
+  conversionNeedsTextReview,
+  conversionNeedsPageApproval,
+} from '@contracts/sourceConversion.contract';
 
 const root = process.env.WIKI_TASK_TEST_ROOT!;
 const python = process.env.WIKI_TASK_TEST_PYTHON!;
@@ -433,6 +438,17 @@ async function finished(
 try {
   const unchangedReview = JSON.stringify(reviewReport);
   assert.equal(conversionNeedsTextReview(reviewReport), true);
+  assert.equal(conversionNeedsPageApproval(reviewReport), true);
+  const slidesReview = {
+    ...reviewReport,
+    unread_ranges: [121, 122, 124, 128, 136].map(
+      (slide: number): string =>
+        `slide ${slide}: ocr_low_or_missing_confidence_text_retained_manual_review_required`,
+    ),
+  };
+  assert.equal(conversionNeedsTextReview(slidesReview), true);
+  assert.equal(conversionNeedsPageApproval(slidesReview), false);
+  assert.match(conversionMessage('partial', slidesReview), /OCR 문자 확인/);
   assert.equal(
     conversionNeedsTextReview({
       ...reviewReport,
@@ -449,6 +465,10 @@ try {
     [
       'page 0: ocr_low_or_missing_confidence_text_retained_manual_review_required',
     ],
+    [
+      'slide 0: ocr_low_or_missing_confidence_text_retained_manual_review_required',
+    ],
+    [...slidesReview.unread_ranges, 'slide 124: picture_content_not_read'],
     [
       'page 1: ocr_low_or_missing_confidence_text_retained_manual_review_required_extra',
     ],
@@ -924,6 +944,15 @@ try {
     root,
   );
   await verifyPageOcr(context, root, python);
+  await verifyImageRecovery(context, root, python);
+  await verifyImageRecoveryNotifications(
+    context,
+    services('image-recovery-notifications').recovery,
+    root,
+  );
+  console.log(
+    'PASS image recovery fixed refs/IDs/UTF8 limits, private auth cleanup, cancellation and late scope/permission/revision guards; original report remains unchanged',
+  );
   await verifyNotifications(
     context,
     connection,

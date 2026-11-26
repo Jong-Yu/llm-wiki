@@ -20,6 +20,8 @@ import {
   notificationRetryPageResultSchema,
   notificationCancelRetrySchema,
   notificationCancelRetryResultSchema,
+  notificationRecoverImagesSchema,
+  notificationRecoverImagesResultSchema,
 } from '@contracts/notifications.contract';
 import type { NotificationsBridge } from '@contracts/notifications.contract';
 import type { BrowserWindow } from 'electron';
@@ -37,6 +39,11 @@ const contracts = {
     channel: NOTIFICATION_CHANNELS.retryPage,
     request: notificationRetryPageSchema,
     result: notificationRetryPageResultSchema,
+  },
+  recoverImages: {
+    channel: NOTIFICATION_CHANNELS.recoverImages,
+    request: notificationRecoverImagesSchema,
+    result: notificationRecoverImagesResultSchema,
   },
   cancelRetry: {
     channel: NOTIFICATION_CHANNELS.cancelRetry,
@@ -106,6 +113,7 @@ export function registerNotificationHandlers(
   });
   validated(contracts.correct, service.correct.bind(service));
   validated(contracts.retryPage, service.retryPage.bind(service));
+  validated(contracts.recoverImages, service.recoverImages.bind(service));
   validated(contracts.cancelRetry, service.cancelRetry.bind(service));
   validated(contracts.list, service.list.bind(service));
   validated(contracts.read, service.read.bind(service));

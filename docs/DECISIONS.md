@@ -8,6 +8,7 @@
 
 | 결정 | 소유 도메인 | 본문 |
 | --- | --- | --- |
+| D-170 | `sources` | [명시 실행으로 저신뢰 PPTX 그림 문자를 AI 전사 후보로 복구](domains/sources/DECISIONS.md#d-170--명시-실행으로-저신뢰-pptx-그림-문자를-ai-전사-후보로-복구-2026-11-26) |
 | D-169 | `analysis` | [AI 해석 후보 쪽의 원본 화면을 그래프 추출 호출에 함께 넘기기](domains/analysis/DECISIONS.md#d-169--ai-해석-후보-쪽의-원본-화면을-그래프-추출-호출에-함께-넘기기-2026-11-26) |
 | D-168 | `platform` | [텍스트 오류 보고의 서버 전용 보관](domains/platform/DECISIONS.md#d-168--텍스트-오류-보고의-서버-전용-보관-2026-11-26) |
 | D-167 | `sources` | [PPT 레이아웃 그림과 도식 관계를 PDF와 같은 기준으로](domains/sources/DECISIONS.md#d-167--ppt-레이아웃-그림과-도식-관계를-pdf와-같은-기준으로-2026-11-26) |
