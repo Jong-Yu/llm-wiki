@@ -84,6 +84,10 @@ class NotificationStore:
               CREATE INDEX IF NOT EXISTS notification_unread ON notifications(tenant,user_id,profile,read_at,sequence DESC);
               CREATE INDEX IF NOT EXISTS notification_kind ON notifications(tenant,user_id,profile,kind,sequence DESC);
               CREATE INDEX IF NOT EXISTS notification_changes ON notifications(tenant,user_id,profile,change_sequence);
+              CREATE TABLE IF NOT EXISTS notification_dismissals (
+                tenant TEXT NOT NULL,user_id TEXT NOT NULL,profile TEXT NOT NULL,
+                notification_id TEXT NOT NULL,dismissed_at TEXT NOT NULL,
+                PRIMARY KEY(tenant,user_id,profile,notification_id));
               CREATE TABLE IF NOT EXISTS changes (
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT, tenant TEXT NOT NULL,user_id TEXT NOT NULL,profile TEXT NOT NULL);
               CREATE INDEX IF NOT EXISTS changes_scope ON changes(tenant,user_id,profile,sequence DESC);
@@ -502,17 +506,30 @@ class NotificationStore:
         with self.sources._coordination_lock(create=True):
             self.reconcile_locked()
             with self.database() as db:
+                visible = (' AND NOT EXISTS (SELECT 1 FROM notification_dismissals d WHERE '
+                           'd.tenant=notifications.tenant AND d.user_id=notifications.user_id '
+                           'AND d.profile=notifications.profile AND d.notification_id=notifications.notification_id)')
                 clause = " AND read_at IS NULL" if filter == 'unread' else " AND kind='approval_required' AND workflow_id IN (SELECT workflow_id FROM workflows WHERE tenant=? AND user_id=? AND profile=? AND state='review')" if filter == 'approval' else ''
                 rows = db.execute('SELECT * FROM notifications WHERE tenant=? AND user_id=? AND profile=? '
-                                  'AND sequence<? AND sequence>? AND change_sequence>?' + clause + ' ORDER BY sequence DESC LIMIT ?',
+                                  'AND sequence<? AND sequence>? AND change_sequence>?' + visible + clause + ' ORDER BY sequence DESC LIMIT ?',
                                   (*self.scope, before, after_seq or 0, after_change_seq or 0, *(self.scope if filter == 'approval' else ()), limit + 1)).fetchall()
-                counts = db.execute('SELECT count(*) AS unread FROM notifications WHERE tenant=? AND user_id=? '
-                                    'AND profile=? AND read_at IS NULL', self.scope).fetchone()
-                approvals = db.execute("SELECT count(*) FROM workflows WHERE tenant=? AND user_id=? AND profile=? "
-                                       "AND state='review'", self.scope).fetchone()[0]
+                counts = db.execute('SELECT count(*) AS total, coalesce(sum(read_at IS NULL),0) AS unread '
+                                    'FROM notifications WHERE tenant=? AND user_id=? AND profile=?' + visible,
+                                    self.scope).fetchone()
+                approvals = db.execute("SELECT count(DISTINCT workflow_id) FROM notifications WHERE tenant=? AND user_id=? AND profile=? "
+                                       "AND kind='approval_required'" + visible + " AND workflow_id IN (SELECT workflow_id FROM workflows "
+                                       "WHERE tenant=? AND user_id=? AND profile=? AND state='review')", (*self.scope, *self.scope)).fetchone()[0]
                 latest = db.execute('SELECT coalesce(max(sequence),0) FROM notifications WHERE tenant=? AND user_id=? '
                                     'AND profile=?', self.scope).fetchone()[0]
                 latest_change = db.execute('SELECT coalesce(max(sequence),0) FROM changes WHERE tenant=? AND user_id=? AND profile=?', self.scope).fetchone()[0]
+                # Incremental consumers must replace their list when a previously
+                # visible item was dismissed; absence alone cannot remove a cache row.
+                refresh_required = after_change_seq is not None and db.execute(
+                    'SELECT 1 FROM notifications n JOIN notification_dismissals d '
+                    'ON d.tenant=n.tenant AND d.user_id=n.user_id AND d.profile=n.profile '
+                    'AND d.notification_id=n.notification_id WHERE n.tenant=? AND n.user_id=? '
+                    'AND n.profile=? AND n.change_sequence>? LIMIT 1',
+                    (*self.scope, after_change_seq)).fetchone() is not None
                 items = []
                 for row in rows[:limit]:
                     current = self._get(db, row['workflow_id'])
@@ -521,8 +538,9 @@ class NotificationStore:
                                       **({'blocked_reason': current['blocked_reason']} if current.get('blocked_reason') else {})))
                 next_cursor = None if len(rows) <= limit else base64.urlsafe_b64encode(json.dumps(
                     dict(scope=identity(*self.scope, filter), before=rows[limit - 1]['sequence'])).encode()).decode().rstrip('=')
-                return dict(items=items, next_cursor=next_cursor, unread_count=counts['unread'],
-                            approval_count=approvals, latest_sequence=latest, latest_change_sequence=latest_change)
+                return dict(items=items, next_cursor=next_cursor, total_count=counts['total'], unread_count=counts['unread'],
+                            approval_count=approvals, latest_sequence=latest, latest_change_sequence=latest_change,
+                            refresh_required=refresh_required)
 
     def read_flags(self, body, authorize):
         with self.sources._coordination_lock(create=True):
@@ -533,6 +551,26 @@ class NotificationStore:
                     limits.identifier(identifier)
                     updated += db.execute('UPDATE notifications SET read_at=?,change_sequence=? WHERE tenant=? AND user_id=? AND profile=? '
                                           'AND notification_id=?', (self.now() if body.read else None, self._changed(db), *self.scope, identifier)).rowcount
+                return dict(updated=updated)
+
+    def dismiss(self, body, authorize):
+        """Hide personal inbox entries while preserving original events and work."""
+        identifiers = set(body.notification_ids)
+        for identifier in identifiers:
+            limits.identifier(identifier)
+        with self.sources._coordination_lock(create=True):
+            records.authorized(authorize, *self.scope[:2])
+            with self.database() as db:
+                updated = 0
+                for identifier in identifiers:
+                    inserted = db.execute('INSERT OR IGNORE INTO notification_dismissals '
+                        'SELECT tenant,user_id,profile,notification_id,? FROM notifications '
+                        'WHERE tenant=? AND user_id=? AND profile=? AND notification_id=?',
+                        (self.now(), *self.scope, identifier)).rowcount
+                    if inserted:
+                        db.execute('UPDATE notifications SET change_sequence=? WHERE tenant=? AND user_id=? '
+                                   'AND profile=? AND notification_id=?', (self._changed(db), *self.scope, identifier))
+                        updated += inserted
                 return dict(updated=updated)
 
     def mutate(self, workflow_id, operation, body, authorize):

@@ -59,6 +59,7 @@ export const NOTIFICATION_CHANNELS = {
   list: 'notifications:list',
   read: 'notifications:read',
   markRead: 'notifications:mark-read',
+  dismiss: 'notifications:dismiss',
   decide: 'notifications:decide',
   approve: 'notifications:approve',
   inspect: 'notifications:inspect',
@@ -84,6 +85,9 @@ export const notificationReadSchema = notificationSessionSchema.extend({
 export const notificationMarkReadSchema = notificationSessionSchema.extend({
   notificationIds: z.array(id).min(1).max(100),
   read: z.boolean(),
+});
+export const notificationDismissSchema = notificationSessionSchema.extend({
+  notificationIds: z.array(id).min(1).max(100),
 });
 const mutation = notificationReadSchema.extend({
   requestId: id,
@@ -234,8 +238,10 @@ export const notificationListDataSchema = z.object({
   items: z.array(notificationItemSchema).max(100),
   next_cursor: z.string().nullable(),
   unread_count: z.number().int().nonnegative(),
+  total_count: z.number().int().nonnegative().optional(),
   approval_count: z.number().int().nonnegative(),
   latest_sequence: z.number().int().nonnegative(),
+  refresh_required: z.boolean().optional(),
   access: notificationAccessSchema,
 });
 export const notificationDetailDataSchema = z.object({
@@ -390,6 +396,9 @@ export type NotificationReadRequest = z.infer<typeof notificationReadSchema>;
 export type NotificationMarkReadRequest = z.infer<
   typeof notificationMarkReadSchema
 >;
+export type NotificationDismissRequest = z.infer<
+  typeof notificationDismissSchema
+>;
 export type NotificationDecideRequest = z.infer<
   typeof notificationDecideSchema
 >;
@@ -437,6 +446,9 @@ export type NotificationsBridge = {
   read: (request: NotificationReadRequest) => Promise<NotificationDetailResult>;
   markRead: (
     request: NotificationMarkReadRequest,
+  ) => Promise<NotificationReadStateResult>;
+  dismiss: (
+    request: NotificationDismissRequest,
   ) => Promise<NotificationReadStateResult>;
   decide: (
     request: NotificationDecideRequest,

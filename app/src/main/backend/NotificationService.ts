@@ -16,6 +16,7 @@ import type {
   NotificationListRequest,
   NotificationReadRequest,
   NotificationMarkReadRequest,
+  NotificationDismissRequest,
   NotificationDecideRequest,
   NotificationApproveRequest,
   NotificationContinueRequest,
@@ -413,6 +414,20 @@ export class NotificationService {
     const result = await this.#api(context, 'notifications/read', {
       notification_ids: request.notificationIds,
       read: request.read,
+    });
+    return result.ok
+      ? { ok: true, data: notificationReadStateDataSchema.parse(result.value) }
+      : result;
+  }
+
+  /** 개인 알림 목록에서만 제거하고 원본 문서와 처리 이력을 보존합니다. */
+  async dismiss(
+    request: NotificationDismissRequest,
+  ): Promise<NotificationReadStateResult> {
+    const context = await this.#context(request);
+    if ('ok' in context) return context;
+    const result = await this.#api(context, 'notifications/dismiss', {
+      notification_ids: request.notificationIds,
     });
     return result.ok
       ? { ok: true, data: notificationReadStateDataSchema.parse(result.value) }

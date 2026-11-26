@@ -232,7 +232,10 @@ export async function verifyNotifications(
           revision: hex('f', 64),
           execution: { ...workflow.execution, job_id: String(body.job_id) },
         };
-      } else if (path.endsWith('/notifications/read')) {
+      } else if (
+        path.endsWith('/notifications/read') ||
+        path.endsWith('/notifications/dismiss')
+      ) {
         return envelope({ updated: 1, access: actor });
       } else if (path.endsWith('/notification-events')) {
         if (body.request_id === staleEventRequest)
@@ -313,6 +316,10 @@ export async function verifyNotifications(
       true,
     );
     assert.equal(workflow.approval, null);
+    assert.equal(
+      (await service.dismiss({ ...session, notificationIds: [hex('3')] })).ok,
+      true,
+    );
     const readonlyService = new NotificationService(
       {
         analysisContext: async (
@@ -349,6 +356,15 @@ export async function verifyNotifications(
         })
       ).ok,
       false,
+    );
+    assert.equal(
+      (
+        await readonlyService.dismiss({
+          ...session,
+          notificationIds: [hex('3')],
+        })
+      ).ok,
+      true,
     );
     assert.equal(workflow.approval, null);
     await service.decide({

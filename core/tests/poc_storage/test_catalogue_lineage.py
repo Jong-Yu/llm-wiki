@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
+from zipfile import ZipFile
 
 from core.common.read_index import CanonicalIndexUnavailable
 from core.modules.documents.listing import CatalogChangedError, InvalidCursorError
@@ -166,6 +167,44 @@ class CatalogueLineageTests(unittest.TestCase):
 
 
 class CatalogueLineageHttpTests(ServerFixture):
+    def test_uploaded_presentations_remain_listable_and_download_unchanged(self):
+        """PPT/PPTX 등록 성공 뒤 목록 응답 계약과 원본 보존을 함께 확인한다."""
+        package = BytesIO()
+        with ZipFile(package, "w") as archive:
+            archive.writestr("[Content_Types].xml",
+                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                '<Override PartName="/ppt/presentation.xml" '
+                'ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+                '</Types>')
+            archive.writestr("_rels/.rels", "<Relationships/>")
+            archive.writestr("ppt/presentation.xml", "<presentation/>")
+        # 구형 PPT의 업로드 경계는 OLE 표식을 검사하며 실제 변환 가능성과 구별한다.
+        originals = {"pptx": package.getvalue(), "ppt": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"fixture"}
+        prefix = f"/api/v1/tenants/{self.tenant}"
+        registered = {}
+        for format, content in originals.items():
+            response = self.client.post(prefix + "/sources", headers=self.headers(),
+                data={"request_id": uuid4().hex, "title": f"Synthetic {format}"},
+                files={"file": (f"fixture.{format}", content, "application/octet-stream")})
+            self.assertEqual(response.status_code, 201, response.text)
+            registered[format] = response.json()["data"]
+        for grouping in ("false", "true"):
+            with self.subTest(group_sources=grouping):
+                response = self.client.get(prefix + "/documents", headers=self.headers(),
+                    params={"group_sources": grouping})
+                self.assertEqual(response.status_code, 200, response.text)
+                items = {item["format"]: item for item in response.json()["data"]["items"]}
+                self.assertEqual(set(items), set(originals))
+                for format, source in registered.items():
+                    self.assertEqual(items[format]["source_id"], source["source_id"])
+                    self.assertEqual(items[format]["source_version"], source["source_version"])
+                    self.assertEqual(items[format]["source_sha256"], source["source_sha256"])
+        for format, source in registered.items():
+            response = self.client.get(prefix + f"/sources/{source['source_id']}/versions/{source['source_version']}/file",
+                headers=self.headers())
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.content, originals[format])
+
     def test_opt_in_http_and_existing_default_share_access_and_documents(self):
         scope = self.policy.authorize(self.token, self.tenant, "write")
         sources = SourceStore(scope.store)

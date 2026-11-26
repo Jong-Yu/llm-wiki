@@ -212,15 +212,6 @@ export function DocumentLibrary({
       </div>
       {library.refreshError && <p role="alert">{library.refreshError}</p>}
       <HeaderActions>
-        {ready && (
-          <Button
-            variant="surface"
-            aria-expanded={trash.open}
-            onClick={(): void => trash.setOpen(!trash.open)}
-          >
-            <Icon name="trash-2" /> 휴지통
-          </Button>
-        )}
         <Link className={styles.primary} to="/register">
           <Icon name="plus" /> 문서 등록
         </Link>

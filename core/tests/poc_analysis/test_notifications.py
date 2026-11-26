@@ -8,7 +8,7 @@ from uuid import uuid4
 import unittest
 
 from core.api.v1.analysis_plans.schemas import CreateConversion
-from core.api.v1.notifications.schemas import Approve, Claim, CreateWorkflow, Execution, PageDecisions, ReadFlags, ReportedEvent
+from core.api.v1.notifications.schemas import Approve, Claim, CreateWorkflow, Execution, PageDecisions, ReadFlags, Dismiss, ReportedEvent
 from core.modules.analysis_jobs.contracts import JobConflictError, JobValidationError
 from core.modules.analysis_jobs.store import JobStore
 from core.modules.analysis_plans.store import PlanStore
@@ -160,6 +160,55 @@ class NotificationTest(unittest.TestCase):
             self.assertEqual(sum(isinstance(result, dict) for result in results), 1)
         compete('approve', Approve, dict(target_document='pump.md'))
         compete('claim', Claim, {})
+
+    def test_dismiss_preserves_source_workflow_and_event_and_survives_restart(self):
+        original = self.conversion()
+        service = self.service()
+        before = service.detail(self.workflow_id)
+        initial = service.list()
+        notification = initial['items'][0]
+        body = Dismiss(notification_ids=[notification['notification_id']])
+        self.assertEqual(service.dismiss(body, self.auth), dict(updated=1))
+        self.assertEqual(self.service().dismiss(body, self.auth), dict(updated=0))
+        delta = self.service().list(after_change_seq=initial['latest_change_sequence'])
+        self.assertEqual(delta['items'], [])
+        self.assertTrue(delta['refresh_required'])
+        self.assertFalse(self.service().list(after_change_seq=delta['latest_change_sequence'])['refresh_required'])
+        self.assertFalse(self.service().list()['refresh_required'])
+        for filter in ('all', 'unread', 'approval'):
+            result = self.service().list(filter=filter)
+            self.assertEqual(result['items'], [])
+            self.assertEqual((result['total_count'], result['unread_count'], result['approval_count']), (0, 0, 0))
+            self.assertEqual(result['latest_sequence'], notification['sequence'])
+        self.assertEqual(service.detail(self.workflow_id), before)
+        preserved = PlanStore(self.store, self.actor).read('conversions', self.workflow_id)
+        self.assertEqual(preserved['manifest'], original['manifest'])
+        self.assertEqual(preserved['components'], original['components'])
+        with service.database() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM notifications').fetchone()[0], 1)
+        # A later event is a new inbox item, not suppressed by a dismissed request.
+        with service.database() as db:
+            service._event(db, before['workflow'], 'failed', uuid4().hex, notify=True)
+        self.assertEqual(len(service.list()['items']), 1)
+
+    def test_dismiss_is_scoped_and_atomic_on_failure(self):
+        self.conversion()
+        service = self.service()
+        notification = service.list()['items'][0]
+        body = Dismiss(notification_ids=[notification['notification_id']])
+        for actor in (dict(self.actor, user_id='bob'), dict(self.actor, profile_id='other'), dict(self.actor, tenant='other')):
+            self.assertEqual(self.service(actor).dismiss(body, lambda: actor), dict(updated=0))
+        def denied():
+            raise PermissionError('access revoked')
+        with self.assertRaises(PermissionError):
+            service.dismiss(body, denied)
+        with patch.object(service, '_changed', side_effect=OSError('simulated write failure')):
+            with self.assertRaises(OSError):
+                service.dismiss(body, self.auth)
+        self.assertEqual(service.list()['items'], [notification])
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(workers.map(lambda _: self.service().dismiss(body, self.auth), (0, 1)))
+        self.assertEqual(sum(result['updated'] for result in results), 1)
 
     def test_failed_notification_write_preserves_conversion_and_reconciles_once(self):
         with patch.object(NotificationStore, 'database', side_effect=OSError('simulated notification disk error')):
@@ -537,3 +586,25 @@ class NotificationAPITest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forged.status_code, 422)
         denied = await self.http.get(self.base + '/notifications', headers={'Authorization': 'Bearer invalid'})
         self.assertEqual(denied.status_code, 401)
+
+    async def test_dismiss_route_preserves_detail_and_rejects_foreign_actor(self):
+        listed = await self.http.get(self.base + '/notifications')
+        sequence = listed.json()['data']['latest_change_sequence']
+        item = listed.json()['data']['items'][0]
+        body = dict(notification_ids=[item['notification_id']])
+        forged = await self.http.post(self.base + '/notifications/dismiss', json=dict(body, user_id='someone-else'))
+        self.assertEqual(forged.status_code, 422)
+        denied = await self.http.post(self.base + '/notifications/dismiss', json=body,
+                                      headers={'Authorization': 'Bearer invalid'})
+        self.assertEqual(denied.status_code, 401)
+        result = await self.http.post(self.base + '/notifications/dismiss', json=body)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()['data']['updated'], 1)
+        delta = await self.http.get(self.base + '/notifications', params={'after_change_seq': sequence})
+        self.assertEqual(delta.status_code, 200, delta.text)
+        self.assertTrue(delta.json()['data']['refresh_required'])
+        listed = await self.http.get(self.base + '/notifications')
+        self.assertEqual(listed.json()['data']['items'], [])
+        detail = await self.http.get(self.base + '/notification-workflows/' + self.workflow_id)
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()['data']['workflow']['state'], 'review')

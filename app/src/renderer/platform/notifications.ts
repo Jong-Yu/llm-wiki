@@ -9,6 +9,7 @@ import type {
   NotificationListRequest,
   NotificationListResult,
   NotificationMarkReadRequest,
+  NotificationDismissRequest,
   NotificationMutationResult,
   NotificationPageRequest,
   NotificationPageResult,
@@ -48,6 +49,9 @@ export const notificationsGateway: NotificationsBridge = {
   markRead: (
     request: NotificationMarkReadRequest,
   ): Promise<NotificationReadStateResult> => getBridge().markRead(request),
+  dismiss: (
+    request: NotificationDismissRequest,
+  ): Promise<NotificationReadStateResult> => getBridge().dismiss(request),
   decide: (
     request: NotificationDecideRequest,
   ): Promise<NotificationMutationResult> => getBridge().decide(request),

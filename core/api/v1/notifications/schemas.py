@@ -30,6 +30,10 @@ class ReadFlags(Profile):
     read: bool
 
 
+class Dismiss(Profile):
+    notification_ids: list[str] = Field(min_length=1, max_length=100)
+
+
 class Mutation(Profile):
     request_id: str = Field(pattern=r'^[a-f0-9]{32}$')
     expected_revision: str = Field(pattern=r'^[a-f0-9]{64}$')

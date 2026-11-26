@@ -8,7 +8,7 @@ import { trashTarget } from '../api/documentTrash.api';
 import type { DocumentTrashModel } from '../model/useDocumentTrash';
 import styles from './DocumentLibrary.module.scss';
 
-type DocumentTrashProps = { model: DocumentTrashModel };
+type DocumentTrashProps = { model: DocumentTrashModel; showItems?: boolean };
 
 /** 원본 이름과 Wiki 제목은 목록과 같은 기준으로 표시합니다. */
 export function trashTitle(target: TrashTarget): string {
@@ -23,7 +23,10 @@ export function trashTitle(target: TrashTarget): string {
 }
 
 /** 휴지통 확인은 실제 대상 이름과 연쇄 삭제 여부를 설명하고 네이티브 대화상자로 초점을 보존합니다. */
-export function DocumentTrash({ model }: DocumentTrashProps): JSX.Element {
+export function DocumentTrash({
+  model,
+  showItems = false,
+}: DocumentTrashProps): JSX.Element {
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useId();
   const description = useId();
@@ -34,10 +37,10 @@ export function DocumentTrash({ model }: DocumentTrashProps): JSX.Element {
   return (
     <>
       {model.message && <p role="status">{model.message}</p>}
-      {model.open && (
+      {showItems && (
         <section className={styles.trashPanel} aria-label="휴지통">
           <div className={styles.toolbar}>
-            <h2>휴지통</h2>
+            <p>삭제한 문서를 복원할 수 있습니다.</p>
             <Button
               variant="surface"
               disabled={model.loading || model.busy}
@@ -46,10 +49,7 @@ export function DocumentTrash({ model }: DocumentTrashProps): JSX.Element {
               새로 고침
             </Button>
           </div>
-          <p>
-            삭제한 문서를 복원할 수 있습니다. 원본과 생성된 Wiki는 각각
-            관리합니다.
-          </p>
+          <p>원본과 생성된 Wiki는 각각 관리합니다.</p>
           {model.error && <p role="alert">{model.error}</p>}
           {model.loading && <p role="status">휴지통을 불러오는 중입니다.</p>}
           {model.page?.incomplete && (

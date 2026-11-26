@@ -35,6 +35,7 @@ import {
   notificationListResultSchema,
   notificationListSchema,
   notificationMarkReadSchema,
+  notificationDismissSchema,
   notificationMutationResultSchema,
   notificationPageResultSchema,
   notificationPageSchema,
@@ -56,6 +57,7 @@ import type {
   NotificationListRequest,
   NotificationListResult,
   NotificationMarkReadRequest,
+  NotificationDismissRequest,
   NotificationMutationResult,
   NotificationPageRequest,
   NotificationPageResult,
@@ -661,6 +663,15 @@ export function createWikiBridge(
           await invoke(
             NOTIFICATION_CHANNELS.markRead,
             notificationMarkReadSchema.parse(request),
+          ),
+        ),
+      dismiss: async (
+        request: NotificationDismissRequest,
+      ): Promise<NotificationReadStateResult> =>
+        notificationReadStateResultSchema.parse(
+          await invoke(
+            NOTIFICATION_CHANNELS.dismiss,
+            notificationDismissSchema.parse(request),
           ),
         ),
       decide: async (

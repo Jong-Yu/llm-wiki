@@ -86,7 +86,7 @@ class RegisteredSourceItem(Model):
     source_version: str
     source_sha256: str
     size_bytes: int
-    format: Literal["md", "txt", "pdf", "xlsx", "docx", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"]
+    format: Literal["md", "txt", "pdf", "xlsx", "docx", "pptx", "ppt", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"]
     registration_revision: str
     documents: list[dict[str, JsonValue]]
     analysis_status: Literal["not_started"]

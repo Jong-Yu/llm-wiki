@@ -4,7 +4,10 @@ import type { WorkspaceRequest } from '@contracts/workspace.contract';
 import { sameAccessRevision } from '@contracts/connection.contract';
 import { workspaceGateway } from '@renderer/platform/workspace';
 import { ReadQueryError } from '@renderer/shared/lib/readQueries';
-import type { LibraryScope } from '../model/documentLibrary.types';
+
+export type TrashScope = WorkspaceRequest['expectedScope'] & {
+  connectionId: string;
+};
 
 const revision = z.string().regex(/^[a-f0-9]{64}$/);
 const common = { title: z.string(), deleted_at: z.string() };
@@ -54,7 +57,7 @@ export function trashTarget(target: TrashTarget): {
 
 /** 읽었던 접근 범위를 쓰기와 응답에 고정하며 늦은 다른 공간 응답을 거부합니다. */
 async function execute(
-  scope: LibraryScope,
+  scope: TrashScope,
   request: WorkspaceRequest,
 ): Promise<unknown> {
   const result = await workspaceGateway.execute(request);
@@ -77,9 +80,7 @@ async function execute(
 }
 
 /** 원본과 Wiki 휴지통을 함께 읽되 부분 조회를 전체 결과로 표시하지 않습니다. */
-export async function readDocumentTrash(
-  scope: LibraryScope,
-): Promise<TrashPage> {
+export async function readDocumentTrash(scope: TrashScope): Promise<TrashPage> {
   const expectedScope = {
     userId: scope.userId,
     tenant: scope.tenant,
@@ -115,7 +116,7 @@ export async function readDocumentTrash(
 
 /** 삭제와 복원은 같은 기준 판본으로 한 번만 요청하며 응답 유실을 자동 재시도하지 않습니다. */
 export async function changeDocumentTrash(
-  scope: LibraryScope,
+  scope: TrashScope,
   target: TrashTarget,
   restore: boolean,
 ): Promise<number> {

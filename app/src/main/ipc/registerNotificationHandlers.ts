@@ -9,6 +9,7 @@ import {
   notificationListResultSchema,
   notificationListSchema,
   notificationMarkReadSchema,
+  notificationDismissSchema,
   notificationMutationResultSchema,
   notificationPageResultSchema,
   notificationPageSchema,
@@ -55,6 +56,11 @@ const contracts = {
   markRead: {
     channel: NOTIFICATION_CHANNELS.markRead,
     request: notificationMarkReadSchema,
+    result: notificationReadStateResultSchema,
+  },
+  dismiss: {
+    channel: NOTIFICATION_CHANNELS.dismiss,
+    request: notificationDismissSchema,
     result: notificationReadStateResultSchema,
   },
   decide: {
@@ -104,6 +110,7 @@ export function registerNotificationHandlers(
   validated(contracts.list, service.list.bind(service));
   validated(contracts.read, service.read.bind(service));
   validated(contracts.markRead, service.markRead.bind(service));
+  validated(contracts.dismiss, service.dismiss.bind(service));
   validated(contracts.decide, service.decide.bind(service));
   validated(contracts.approve, service.approve.bind(service));
   validated(contracts.inspect, service.inspect.bind(service));

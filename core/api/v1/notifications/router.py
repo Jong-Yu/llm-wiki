@@ -8,7 +8,7 @@ from core.api.schemas import Envelope
 from core.api.v1.analysis_plans.router import guard
 from core.api.v1.analysis_plans.schemas import Profile
 from core.modules.notifications.store import NotificationStore
-from .schemas import Listing, DetailQuery, ContentQuery, CreateWorkflow, ReadFlags, PageDecisions, PageCorrection, Approve, Claim, Execution, ReportedEvent
+from .schemas import Listing, DetailQuery, ContentQuery, CreateWorkflow, ReadFlags, Dismiss, PageDecisions, PageCorrection, Approve, Claim, Execution, ReportedEvent
 
 router = APIRouter(tags=['notifications'])
 Identifier = Annotated[str, Path(pattern=r'^[a-f0-9]{32}$')]
@@ -44,6 +44,12 @@ async def create(request: Request, tenant: str, token: Annotated[str, Depends(cr
 async def read_flags(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
     return await json_operation(request, tenant, token, ReadFlags, 'read',
         lambda scope, value: service(scope, request).read_flags(value, guard(scope, request, token, 'read')))
+
+
+@router.post('/notifications/dismiss', response_model=Response, openapi_extra=body_schema(Dismiss))
+async def dismiss(request: Request, tenant: str, token: Annotated[str, Depends(credential)]):
+    return await json_operation(request, tenant, token, Dismiss, 'read',
+        lambda scope, value: service(scope, request).dismiss(value, guard(scope, request, token, 'read')))
 
 
 @router.post('/notification-events', response_model=Response, openapi_extra=body_schema(ReportedEvent))

@@ -107,10 +107,33 @@
   overflow-wrap: anywhere;
 }
 .filters {
-  border-bottom: 1px solid var(--wiki-color-border-default);
-  padding-bottom: 8px;
+  gap: 8px;
 }
-.filters button[aria-pressed='true'],
+.filters .filterButton {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  gap: 8px;
+  font-weight: 600;
+}
+.filters .filterButton[aria-pressed='true'] {
+  background: var(--wiki-color-action-surface);
+  border-color: var(--wiki-color-action-primary);
+  color: var(--wiki-color-text-primary);
+}
+.filterCount {
+  min-width: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--wiki-color-surface-canvas);
+  color: var(--wiki-color-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.filterHelp {
+  color: var(--wiki-color-text-secondary);
+  overflow-wrap: anywhere;
+}
 .tabs button[aria-pressed='true'] {
   background: var(--wiki-color-action-surface);
   color: var(--wiki-color-text-primary);
@@ -121,7 +144,7 @@
 }
 .notification {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 128px 96px;
+  grid-template-columns: 16px minmax(0, 1fr) 128px auto;
   gap: 12px;
   align-items: center;
   min-height: 64px;
@@ -153,9 +176,11 @@
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-.notification > button {
+.notificationActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-self: end;
-  min-height: 32px;
 }
 .eventIcon {
   color: var(--wiki-color-status-warning);
@@ -378,7 +403,7 @@
   .notificationTime {
     grid-area: time;
   }
-  .notification > button {
+  .notificationActions {
     grid-area: action;
   }
   .reviewGrid {
@@ -408,7 +433,7 @@
     grid-template-columns: 16px minmax(0, 1fr);
     grid-template-areas: 'icon body' '. time' '. action';
   }
-  .notification > button {
+  .notificationActions {
     justify-self: start;
   }
 }

@@ -25,6 +25,7 @@ import type {
   NotificationListRequest,
   NotificationListResult,
   NotificationMarkReadRequest,
+  NotificationDismissRequest,
   NotificationMutationResult,
   NotificationPageRequest,
   NotificationPageResult,
@@ -42,6 +43,7 @@ import {
 type Detail = Extract<NotificationDetailResult, { ok: true }>['data'];
 type Method =
   | 'list'
+  | 'dismiss'
   | 'read'
   | 'page'
   | 'decide'
@@ -428,6 +430,7 @@ const bridge: NotificationsBridge = {
       ok: true,
       data: {
         items: items.slice(offset, offset + 5),
+        total_count: rows.length,
         next_cursor: offset + 5 < items.length ? String(offset + 5) : null,
         unread_count: rows.filter(
           (item: NotificationItem): boolean => !item.read_at,
@@ -464,6 +467,22 @@ const bridge: NotificationsBridge = {
     return {
       ok: true,
       data: { updated: request.notificationIds.length, access },
+    };
+  },
+  dismiss: async (
+    request: NotificationDismissRequest,
+  ): Promise<NotificationReadStateResult> => {
+    enter('dismiss', request);
+    if (state.deny) return denied;
+    const previous = state.items.length;
+    state.items = state.items.filter(
+      (item: NotificationItem): boolean =>
+        !request.notificationIds.includes(item.notification_id),
+    );
+    persist();
+    return {
+      ok: true,
+      data: { updated: previous - state.items.length, access },
     };
   },
   decide: async (

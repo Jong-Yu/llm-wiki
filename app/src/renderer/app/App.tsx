@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router';
 import type { Location } from 'react-router';
 import { DocumentLibraryPage } from '@renderer/pages/documents/DocumentLibraryPage';
+import { DocumentTrashPage } from '@renderer/pages/documents/DocumentTrashPage';
 import { RegisterDocumentPage } from '@renderer/pages/register/RegisterDocumentPage';
 import { DocumentDetailPage } from '@renderer/pages/document/DocumentDetailPage';
 import { OntologyMapPage } from '@renderer/pages/ontology/OntologyMapPage';
@@ -67,6 +68,7 @@ function renderWorkspaceRoutes(location: Location): JSX.Element {
       <Route path="/" element={<Navigate to="/documents" replace />} />
       <Route path="/renewal/*" element={<LegacyRouteRedirect />} />
       <Route path="/documents" element={<DocumentLibraryPage />} />
+      <Route path="/documents/trash" element={<DocumentTrashPage />} />
       <Route path="/register" element={<RegisterDocumentPage />} />
       <Route path="/templates" element={<TemplatesPage />} />
       <Route path="/document" element={<DocumentDetailPage />} />

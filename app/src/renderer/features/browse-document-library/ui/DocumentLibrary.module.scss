@@ -126,13 +126,11 @@
   gap: var(--wiki-space-8);
 }
 .trashPanel {
-  margin-bottom: var(--wiki-space-16);
-  padding: var(--wiki-space-16);
-  border: 1px solid var(--wiki-color-border-default);
-  border-radius: var(--wiki-component-control-radius);
-  h2 {
+  > p {
+    color: var(--wiki-color-text-secondary);
+  }
+  .toolbar p {
     margin: 0;
-    font-size: var(--wiki-font-size-16);
   }
 }
 .trashList {

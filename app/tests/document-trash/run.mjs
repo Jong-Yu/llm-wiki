@@ -149,11 +149,33 @@ try {
     .getByRole('button', { name: '휴지통으로 이동', exact: true })
     .click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(
+    page.getByText('휴지통으로 이동했습니다.', { exact: true }),
+  ).toHaveCount(0);
   assert.equal(
     (await fixture.list()).filter((item) => item.kind === 'wiki').length,
     0,
   );
   await page.getByRole('button', { name: '휴지통 열기', exact: true }).click();
+  await page.evaluate(() => {
+    window.mode = 'access-unavailable';
+  });
+  await page.getByRole('button', { name: '새로 고침', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText(
+    '접근 상태를 확인하지 못했습니다.',
+  );
+  await expect(page.getByRole('listitem')).toHaveCount(0);
+  await page.evaluate(() => {
+    window.mode = 'normal';
+  });
+  await page.getByRole('button', { name: '새로 고침', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'Wiki 문서' }),
+  ).toHaveCount(1);
+  console.log(
+    'PASS explicit refresh recovers after denied read without stale data',
+  );
   await page
     .getByRole('listitem')
     .filter({ hasText: 'Wiki 문서' })

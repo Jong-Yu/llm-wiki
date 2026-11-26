@@ -284,7 +284,6 @@ function NotificationWorkflowContent({
     >
       <div className={styles.heading}>
         <div>
-          <Link to={backPath}>문서로 돌아가기</Link>
           <h1>{workflow?.title ?? '문서 내용 확인'}</h1>
         </div>
         <Button

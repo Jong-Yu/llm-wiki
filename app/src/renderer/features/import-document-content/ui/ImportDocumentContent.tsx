@@ -175,7 +175,7 @@ function RegisteredTask({
   const navigate = useNavigate();
   useEffect((): void => {
     if (!active || !snapshot.taskId) return;
-    void navigate('/documents', {
+    void navigate(documentTaskPath(snapshot.taskId), {
       replace: true,
       state: { workflowReturnTo: '/documents' },
     });

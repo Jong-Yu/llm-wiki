@@ -294,6 +294,54 @@ grant_test_membership_for_user(policy, sys.argv[2])`,
   pass(
     'document status opens a full progress page; return preserves search and focus without executing',
   );
+  assert.equal(
+    await js(
+      `!!document.querySelector(${JSON.stringify(active + ' a[href="#/documents/trash"]')})`,
+    ),
+    false,
+  );
+  await js('document.querySelector(\'aside a[aria-label="휴지통"]\').click()');
+  await until("location.hash === '#/documents/trash'");
+  await until(visibleIncludes('휴지통이 비어 있습니다.'));
+  assert.equal(
+    await js(
+      'document.querySelector(\'aside a[aria-label="휴지통"]\')?.getAttribute("aria-current")',
+    ),
+    'page',
+  );
+  assert.equal(
+    await js(
+      'document.querySelector(\'aside a[aria-label="문서"]\')?.getAttribute("aria-current")',
+    ),
+    null,
+  );
+  assert.equal(
+    await js(
+      `!!document.querySelector(${JSON.stringify(active + ' input[aria-label="문서 검색"]')})`,
+    ),
+    false,
+  );
+  assert.equal(
+    await js(
+      'document.querySelector(\'nav[aria-label="현재 위치"] [aria-current="page"]\')?.textContent',
+    ),
+    '휴지통',
+  );
+  await capture('document-trash');
+  await js('document.querySelector(\'button[aria-label="뒤로가기"]\').click()');
+  await until("location.hash === '#/documents'");
+  assert.equal(
+    await js(
+      `document.querySelector(${JSON.stringify(active + ' input[aria-label="문서 검색"]')}).value`,
+    ),
+    '이동 검증 원본',
+  );
+  await until(
+    "document.activeElement?.getAttribute('aria-label')?.includes('진행 상세')",
+  );
+  pass(
+    'sidebar trash opens independently and back restores the document search and prior selection',
+  );
   await go('/tasks');
   await until("location.hash === '#/documents'");
   await go('/settings');

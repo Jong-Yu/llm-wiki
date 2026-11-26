@@ -101,6 +101,7 @@ const navigation: readonly NavigationItem[] = [
 const pageTitles: Readonly<Record<string, string>> = {
   '/notifications': '알림',
   '/documents': '문서',
+  '/documents/trash': '휴지통',
   '/templates': '템플릿',
   '/register': '문서 등록',
   '/document': '문서 상세',
@@ -494,6 +495,19 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
           ))}
         </nav>
         <div className={styles.sidebarBottom}>
+          <Link
+            to="/documents/trash"
+            className={styles.settingsLink}
+            aria-label="휴지통"
+            title="휴지통"
+            aria-current={
+              location.pathname === '/documents/trash' ? 'page' : undefined
+            }
+            onClick={openDestination}
+          >
+            <Icon name="trash-2" size={18} />
+            <span className={styles.navigationText}>휴지통</span>
+          </Link>
           <Link
             to="/guide"
             className={styles.settingsLink}

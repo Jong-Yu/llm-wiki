@@ -9,11 +9,15 @@ import axe from 'axe-core';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, '../..');
-const destination = resolve(
-  app,
-  '../.local/diagnostics/2026-11-25-registration-content-ui',
+const diagnostics = resolve(app, '../.local/diagnostics');
+await mkdir(diagnostics, { recursive: true });
+// 같은 검사를 다시 실행해도 이전 화면·검증 기록을 덮어쓰지 않습니다.
+const destination = await mkdtemp(
+  resolve(
+    diagnostics,
+    `${new Date().toISOString().slice(0, 10)}-notification-registration-ui-`,
+  ),
 );
-await mkdir(destination, { recursive: true });
 const temporary = await mkdtemp('/private/tmp/wiki-notification-ui-');
 const built = await build({
   configFile: false,
@@ -202,9 +206,59 @@ try {
     .first()
     .evaluate((element) => element.getBoundingClientRect().height);
   assert.equal(rowHeight, 64);
+  const filters = list().getByRole('group', { name: '알림 필터' });
+  await expect(filters.getByRole('button', { name: /^전체/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(
+    filters.getByRole('button', { name: /^내용 확인 필요/ }),
+  ).toBeVisible();
+  await layout('notification-list');
+  await audit('notification-list');
+  const filterPositions = () =>
+    filters.getByRole('button').evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const { x, y, width, height } = button.getBoundingClientRect();
+        return { x, y, width, height };
+      }),
+    );
+  const positions = await filterPositions();
+  await control('fail', 'list');
+  await filters.getByRole('button', { name: /^읽지 않음/ }).click();
+  await expect(list().getByRole('alert')).toContainText('합성 네트워크 실패');
+  assert.deepEqual(await filterPositions(), positions);
+  await filters.getByRole('button', { name: /^전체/ }).click();
+  await expect(list().getByRole('alert')).toHaveCount(0);
+  assert.deepEqual(await filterPositions(), positions);
+  pass('필터 변경·조회 실패·복구 동안 건수 배지와 버튼 위치 유지');
+  const beforeDelete = await snapshot();
+  const deleteButton = list().getByRole('button', {
+    name: '합성 처리 기록 2 알림 삭제',
+    exact: true,
+  });
+  await control('fail', 'dismiss');
+  await deleteButton.click();
+  await expect(list().getByRole('alert')).toContainText('합성 네트워크 실패');
+  await expect(deleteButton).toBeVisible();
+  await deleteButton.click();
+  await expect(deleteButton).toHaveCount(0);
+  assert.deepEqual((await snapshot()).detail, beforeDelete.detail);
+  await open('/notifications');
+  await expect(deleteButton).toHaveCount(0);
+  assert.equal((await snapshot()).items.length, beforeDelete.items.length - 1);
+  pass(
+    '알림 삭제 실패 시 행 유지 / 삭제 후 재접속 유지 / 문서와 작업 이력 보존',
+  );
   await list().getByRole('button', { name: '표시된 알림 읽음' }).click();
   assert.equal((await snapshot()).calls.approve ?? 0, 0);
   assert.equal((await snapshot()).calls.continue ?? 0, 0);
+  await filters.getByRole('button', { name: /^내용 확인 필요/ }).click();
+  await expect(list().locator('[data-notification-row]')).toHaveCount(1);
+  await expect(
+    filters.getByRole('button', { name: /^내용 확인 필요/ }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  pass('읽음 처리 후에도 등록 내용 확인 필요 필터에 문서 유지');
   await list().getByRole('button', { name: '내용 확인', exact: true }).click();
   await available();
   pass(
@@ -218,6 +272,9 @@ try {
     work().getByRole('button', { name: /승인|보류|이 PC/ }),
   ).toHaveCount(0);
   await expect(work().locator('details')).toHaveCount(0);
+  await expect(
+    work().getByRole('link', { name: '문서로 돌아가기', exact: true }),
+  ).toHaveCount(0);
   await expect(
     work().getByRole('img', { name: '등록한 PDF의 2페이지 원본' }),
   ).toBeVisible();

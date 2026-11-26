@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useWorkspaceActivity } from '@renderer/shared/lib/workspaceActivity';
 import {
   invalidatesReadScope,
   ReadQueryError,
@@ -9,12 +10,13 @@ import {
   changeDocumentTrash,
   readDocumentTrash,
 } from '../api/documentTrash.api';
-import type { TrashPage, TrashTarget } from '../api/documentTrash.api';
-import type { LibraryScope } from './documentLibrary.types';
+import type {
+  TrashPage,
+  TrashScope,
+  TrashTarget,
+} from '../api/documentTrash.api';
 
 export type DocumentTrashModel = {
-  open: boolean;
-  setOpen: (open: boolean) => void;
   page: TrashPage | null;
   loading: boolean;
   error: string;
@@ -29,15 +31,16 @@ export type DocumentTrashModel = {
 
 /** 휴지통 조회와 명시 변경을 관리하고 연결 변경 이후의 늦은 결과는 버립니다. */
 export function useDocumentTrash(
-  scope: LibraryScope | null,
-  onChanged: () => void,
+  scope: TrashScope | null,
+  onChanged?: () => void,
+  showItems: boolean = false,
 ): DocumentTrashModel {
   const { cache, snapshot } = useReadQueries();
+  const active = useWorkspaceActivity();
   const scopeKey = JSON.stringify([scope, cache.identity, snapshot.generation]);
   const current = useRef(scopeKey);
   const mounted = useRef(true);
   const running = useRef<string | null>(null);
-  const [open, setOpen] = useState(false);
   const [busyScope, setBusyScope] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     scopeKey: string;
@@ -58,7 +61,7 @@ export function useDocumentTrash(
   }, [scopeKey]);
   const query = useQuery({
     queryKey: cache.key('document-trash', scopeKey),
-    enabled: open && scope !== null && !snapshot.failure,
+    enabled: showItems && active && scope !== null && !snapshot.failure,
     queryFn: async (): Promise<TrashPage> => {
       if (!scope) throw new Error('작업 공간을 선택해 주세요.');
       return readDocumentTrash(scope);
@@ -83,12 +86,16 @@ export function useDocumentTrash(
       setPending(null);
       setFeedback({
         scopeKey,
-        text: `${shownPending.restore ? '복원했습니다.' : '휴지통으로 이동했습니다.'}${warnings ? ' 처리는 완료됐지만 임시 파일 정리 문제가 있습니다.' : ''}`,
+        text: warnings
+          ? '처리는 완료됐지만 임시 파일 정리 문제가 있습니다.'
+          : shownPending.restore
+            ? '복원했습니다.'
+            : '',
       });
       // 기존 읽기 무효화 경로를 사용하며 다른 화면의 편집 초안은 유지합니다.
       cache.invalidate();
-      onChanged();
-      if (open) void query.refetch();
+      onChanged?.();
+      if (showItems) void query.refetch();
     } catch (error) {
       if (!mounted.current || current.current !== startedScope) return;
       if (
@@ -118,8 +125,6 @@ export function useDocumentTrash(
     }
   }
   return {
-    open,
-    setOpen,
     page: snapshot.failure ? null : (query.data ?? null),
     loading: query.isFetching,
     error:
@@ -140,8 +145,9 @@ export function useDocumentTrash(
     },
     confirm,
     refresh: (): void => {
-      void query.refetch();
-      onChanged();
+      if (snapshot.failure) cache.clear();
+      else void query.refetch();
+      onChanged?.();
     },
   };
 }

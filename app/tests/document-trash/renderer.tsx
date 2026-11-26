@@ -21,7 +21,7 @@ declare global {
       items: DocumentListItem[];
     };
     executeFixture: (request: WorkspaceRequest) => Promise<WorkspaceResult>;
-    mode: 'normal' | 'conflict' | 'unknown' | 'delayed';
+    mode: 'normal' | 'conflict' | 'unknown' | 'delayed' | 'access-unavailable';
     releaseDelayed: (() => void) | undefined;
     delayedSettled: boolean;
     writes: number;
@@ -34,6 +34,17 @@ Object.defineProperty(window, 'wiki', {
   value: {
     workspace: {
       execute: async (request: WorkspaceRequest): Promise<WorkspaceResult> => {
+        if (
+          window.mode === 'access-unavailable' &&
+          request.operation === 'documentTrash'
+        )
+          return {
+            ok: false,
+            error: {
+              code: 'access_unavailable',
+              message: '접근 상태를 확인하지 못했습니다.',
+            },
+          };
         const mutation = [
           'trashDocument',
           'trashSource',
@@ -68,8 +79,11 @@ Object.defineProperty(window, 'wiki', {
 function Harness(): JSX.Element {
   const [scope, setScope] = useState(window.fixture.scope);
   const [changes, setChanges] = useState(0);
-  const model = useDocumentTrash(scope, (): void =>
-    setChanges((value: number): number => value + 1),
+  const [showItems, setShowItems] = useState(false);
+  const model = useDocumentTrash(
+    scope,
+    (): void => setChanges((value: number): number => value + 1),
+    showItems,
   );
   return (
     <main style={{ padding: 16, maxWidth: 900, margin: 'auto' }}>
@@ -85,7 +99,7 @@ function Harness(): JSX.Element {
             {item.kind === 'wiki' ? 'Wiki 삭제' : '원본 삭제'}
           </button>
         ))}
-        <button onClick={(): void => model.setOpen(!model.open)}>
+        <button onClick={(): void => setShowItems(!showItems)}>
           휴지통 열기
         </button>
         <button onClick={(): void => setScope(window.fixture.alternateScope)}>
@@ -93,7 +107,7 @@ function Harness(): JSX.Element {
         </button>
       </div>
       <output data-testid="changes">{changes}</output>
-      <DocumentTrash model={model} />
+      <DocumentTrash model={model} showItems={showItems} />
     </main>
   );
 }

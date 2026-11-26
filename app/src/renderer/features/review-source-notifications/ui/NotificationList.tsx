@@ -24,11 +24,15 @@ import styles from './Notifications.module.scss';
 
 type NotificationListProps = { scope: SourceConversionScope };
 type ListData = Extract<NotificationListResult, { ok: true }>['data'];
+type ListCounts = Pick<
+  ListData,
+  'total_count' | 'unread_count' | 'approval_count'
+>;
 type Filter = NonNullable<NotificationListRequest['filter']>;
 const filters: readonly { value: Filter; label: string }[] = [
   { value: 'all', label: '전체' },
   { value: 'unread', label: '읽지 않음' },
-  { value: 'approval', label: '내용 확인' },
+  { value: 'approval', label: '내용 확인 필요' },
 ];
 
 /** 서버 알림을 현재 허용 범위에서 읽으며 읽음 처리와 승인을 분리합니다. */
@@ -39,6 +43,7 @@ export function NotificationList({
   const active = useWorkspaceActivity();
   const [filter, setFilter] = useState<Filter>('all');
   const [data, setData] = useState<ListData | null>(null);
+  const [counts, setCounts] = useState<ListCounts | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receivedAt, setReceivedAt] = useState<string | null>(null);
@@ -60,9 +65,17 @@ export function NotificationList({
         });
         if (!live.current || request !== generation.current) return;
         if (!result.ok) {
-          if (notificationAccessLost(result.error)) setData(null);
+          if (notificationAccessLost(result.error)) {
+            setData(null);
+            setCounts(null);
+          }
           throw new Error(result.error.message);
         }
+        setCounts({
+          total_count: result.data.total_count,
+          unread_count: result.data.unread_count,
+          approval_count: result.data.approval_count,
+        });
         setData((previous: ListData | null): ListData => {
           if (!cursor || !previous) return result.data;
           const items = new Map(
@@ -137,7 +150,10 @@ export function NotificationList({
         });
         if (!live.current) return;
         if (!result.ok) {
-          if (notificationAccessLost(result.error)) setData(null);
+          if (notificationAccessLost(result.error)) {
+            setData(null);
+            setCounts(null);
+          }
           throw new Error(result.error.message);
         }
       }
@@ -154,6 +170,54 @@ export function NotificationList({
       if (live.current) {
         setBusy(false);
         void load();
+      }
+    }
+  }
+
+  /** 서버 확인을 받은 뒤 개인 목록에서만 제거하며 문서 작업은 유지합니다. */
+  async function dismiss(item: NotificationItem): Promise<void> {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    let saved = false;
+    try {
+      const result = await notificationsApi.dismiss({
+        ...notificationSession(scope),
+        notificationIds: [item.notification_id],
+      });
+      if (!live.current) return;
+      if (!result.ok) {
+        if (notificationAccessLost(result.error)) {
+          setData(null);
+          setCounts(null);
+        }
+        throw new Error(result.error.message);
+      }
+      setData((previous: ListData | null): ListData | null =>
+        previous
+          ? {
+              ...previous,
+              items: previous.items.filter(
+                (entry: NotificationItem): boolean =>
+                  entry.notification_id !== item.notification_id,
+              ),
+            }
+          : null,
+      );
+      setError(null);
+      saved = true;
+    } catch (cause: unknown) {
+      if (live.current)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : '알림 삭제를 확인하지 못했습니다. 새로고침해 확인해 주세요.',
+        );
+    } finally {
+      pending.current = false;
+      if (live.current) {
+        setBusy(false);
+        if (saved) void load();
       }
     }
   }
@@ -193,31 +257,46 @@ export function NotificationList({
           </Button>
         </div>
       </div>
-      <div className={styles.filters} aria-label="알림 필터">
-        {filters.map((item: { value: Filter; label: string }): JSX.Element => (
-          <Button
-            key={item.value}
-            size="small"
-            variant="surface"
-            aria-pressed={filter === item.value}
-            disabled={busy}
-            onClick={(): void => {
-              setFilter(item.value);
-              setData(null);
-              setReceivedAt(null);
-            }}
-          >
-            {item.label}
-            {data && item.value === 'unread'
-              ? ` ${data.unread_count}`
-              : data && item.value === 'approval'
-                ? ` ${data.approval_count}`
-                : ''}
-          </Button>
-        ))}
+      <div className={styles.filters} role="group" aria-label="알림 필터">
+        {filters.map((item: { value: Filter; label: string }): JSX.Element => {
+          const count = !counts
+            ? undefined
+            : item.value === 'unread'
+              ? counts.unread_count
+              : item.value === 'approval'
+                ? counts.approval_count
+                : counts.total_count;
+          return (
+            <Button
+              key={item.value}
+              className={styles.filterButton}
+              size="small"
+              variant="surface"
+              aria-pressed={filter === item.value}
+              disabled={busy}
+              onClick={(): void => {
+                setFilter(item.value);
+                setData(null);
+                setReceivedAt(null);
+              }}
+            >
+              {item.label}
+              <span
+                className={styles.filterCount}
+                aria-label={count === undefined ? '개수 확인 중' : `${count}개`}
+              >
+                {count ?? '—'}
+              </span>
+            </Button>
+          );
+        })}
       </div>
+      <p className={styles.filterHelp}>
+        읽지 않음은 아직 읽음 처리하지 않은 알림입니다. 내용 확인 필요는 등록할
+        문자의 검토가 남은 문서이며, 알림을 읽어도 유지됩니다.
+      </p>
       {error && (
-        <StatusNotice tone="error" title="알림 수신을 확인하지 못했습니다">
+        <StatusNotice tone="error" title="알림 상태를 확인하지 못했습니다">
           {error}
           {data && (
             <p>
@@ -278,7 +357,9 @@ export function NotificationList({
                       {workflowStateLabel(item.state, item.blocked_reason)}
                     </span>
                   )}
-                  {!item.read_at && <span className={styles.unread}>미독</span>}
+                  {!item.read_at && (
+                    <span className={styles.unread}>읽지 않음</span>
+                  )}
                 </div>
               </div>
               <time
@@ -287,16 +368,30 @@ export function NotificationList({
               >
                 {formatTimestamp(item.created_at)}
               </time>
-              <Button
-                size="small"
-                variant="secondary"
-                onClick={(): void => {
-                  void markRead([item]);
-                  void navigate(notificationWorkflowPath(item.workflow_id));
-                }}
-              >
-                {item.state === 'review' ? '내용 확인' : '문서 보기'}
-              </Button>
+              <div className={styles.notificationActions}>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={(): void => {
+                    void markRead([item]);
+                    void navigate(notificationWorkflowPath(item.workflow_id));
+                  }}
+                >
+                  {item.state === 'review' ? '내용 확인' : '문서 보기'}
+                </Button>
+                <Button
+                  size="small"
+                  variant="surface"
+                  disabled={busy}
+                  aria-label={`${item.title} 알림 삭제`}
+                  onClick={(): void => {
+                    void dismiss(item);
+                  }}
+                >
+                  <Icon name="trash-2" size={16} />
+                  삭제
+                </Button>
+              </div>
             </article>
           ))}
         </div>
@@ -313,8 +408,7 @@ export function NotificationList({
         </Button>
       )}
       <p className={styles.receipt}>
-        알림을 열면 해당 문서로 이동합니다. 앱이 닫힌 동안 서버에 기록된 알림은
-        다음 연결 때 가져옵니다.
+        알림을 삭제해도 문서와 진행 중인 작업은 유지됩니다.
       </p>
     </section>
   );

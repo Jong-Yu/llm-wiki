@@ -28,6 +28,7 @@ export function workspacePageKey(pathname: string, search: string): string {
         ? `task:${query.get('taskId')}:${query.get('view') ?? 'progress'}`
         : '/documents';
     case '/notifications':
+    case '/documents/trash':
     case '/register':
     case '/ontology':
     case '/review':
@@ -108,6 +109,8 @@ export function workspaceBreadcrumb(
     }
     case '/register':
       return [documents, { label: '문서 등록' }];
+    case '/documents/trash':
+      return [documents, { label: '휴지통' }];
     case '/document':
       return [
         documents,
