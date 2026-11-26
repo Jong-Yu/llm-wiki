@@ -43,6 +43,7 @@ function baselineSession(task: PreviewTask): ImportProcessingSession {
   const conversionPhase = task.phase === 'conversion';
   const detail = conversionPhase ? null : jobFixture(task);
   const snapshot: ImportProcessingSnapshot = {
+    taskId: task.id,
     busy: false,
     phase:
       task.state === 'failed'

@@ -5,10 +5,15 @@ import {
   buildAnalysisProgressView,
 } from '@renderer/features/browse-document-tasks/model/buildDocumentTaskView';
 import { conversionFailureExplanation } from '@renderer/shared/lib/sourceConversionFailure';
+import {
+  conversionDiagnosticMessages,
+  conversionGapExplanation,
+} from '@renderer/features/browse-document-tasks/model/conversionDiagnostics';
 import { documentTaskNeedsAttention } from '@renderer/features/browse-document-tasks/model/documentTask.types';
 import {
   fixtureAnalysis,
   fixtureCompleteAnalysis,
+  fixturePresentationTask,
   fixtureTask,
 } from './fixtures';
 
@@ -28,6 +33,74 @@ assert.equal(
 );
 console.log(
   'PASS worker failure remains actionable and preserves source/attempt records',
+);
+
+const presentation = fixturePresentationTask();
+const preservedPresentation = JSON.stringify(presentation);
+const presentationView = buildDocumentTaskView(presentation);
+assert.equal(presentationView.state, 'partial');
+assert.equal(presentationView.status, '변환 내용 확인 필요');
+assert.equal(presentationView.steps[0]?.state, 'review');
+assert.match(presentationView.explanation.body, /연결선/);
+assert.match(presentationView.explanation.body, /레이아웃·마스터/);
+assert.match(presentationView.explanation.next, /대조.*보완/);
+assert.doesNotMatch(presentationView.explanation.body, /중단 원인/);
+assert.equal(JSON.stringify(presentation), preservedPresentation);
+assert.equal(
+  conversionDiagnosticMessages(presentationView.attempts[0]?.codes ?? [])
+    .length,
+  6,
+);
+assert.deepEqual(
+  conversionDiagnosticMessages(['unknown_code', 'pypdf_6.21.2']),
+  [],
+);
+assert.equal(
+  conversionGapExplanation(['slide 1: small_picture_not_ocr']),
+  null,
+);
+assert.equal(
+  conversionGapExplanation([
+    'slide 1: picture_content_not_read',
+    'remaining source: unknown_error',
+  ]),
+  null,
+);
+for (const [code, message] of [
+  ['parser_failed', /원본을 읽는 중/],
+  ['conversion_output_or_archive_limit', /처리할 수 있는 범위/],
+  ['dependency_missing:pypdf', /구성 요소/],
+] as const) {
+  const mixed = fixturePresentationTask();
+  const mixedAttempt = mixed.conversions[0];
+  assert.ok(mixedAttempt?.reportSummary);
+  mixedAttempt.reportSummary.unreadRanges.push(`remaining source: ${code}`);
+  const mixedView = buildDocumentTaskView(mixed);
+  assert.match(mixedView.explanation.body, message);
+  assert.equal(mixedView.status, '문자 변환 중단');
+}
+const presentationAttempt = presentation.conversions[0];
+assert.ok(presentationAttempt?.reportSummary);
+presentationAttempt.reportSummary.unreadRanges.push(
+  'remaining source: conversion_memory_failed',
+);
+assert.match(buildDocumentTaskView(presentation).explanation.body, /메모리/);
+assert.match(
+  conversionFailureExplanation(['remaining source: conversion_idle_timeout'])
+    ?.body ?? '',
+  /새 진행/,
+);
+presentationAttempt.state = 'complete';
+presentationAttempt.reportSummary.complete = true;
+presentationAttempt.reportSummary.unreadRanges = [];
+assert.equal(buildDocumentTaskView(presentation).state, 'ready');
+presentationAttempt.state = 'failed';
+assert.match(
+  buildDocumentTaskView(presentation).explanation.body,
+  /구체적인 중단 원인/,
+);
+console.log(
+  'PASS VOC content gaps use retained ranges; warnings never imply execution failure or resolve missing content',
 );
 
 const unconfirmedTask = structuredClone(task);

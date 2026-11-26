@@ -58,6 +58,46 @@ export function fixtureTask(): DocumentTask {
   });
 }
 
+/** VOC의 진단 조합을 합성하며 뒤쪽 미변환 사유가 진단 목록에서 빠진 경우도 재현합니다. */
+export function fixturePresentationTask(): DocumentTask {
+  const task = fixtureTask();
+  task.taskId = 'c'.repeat(32);
+  task.item.title = '슬라이드 변환 확인';
+  task.item.format = 'pptx';
+  const attempt = task.conversions[0];
+  if (!attempt) throw new Error('Conversion fixture missing');
+  attempt.state = 'partial';
+  attempt.format = 'pptx';
+  attempt.progress = { stage: 'convert', completed: 3, total: 3 };
+  attempt.message = '일부 내용을 문자로 변환하지 못했습니다.';
+  attempt.diagnosticCodes = [
+    'adapter_llm-wiki-source-conversion-v1',
+    'pypdf_6.21.2',
+    'pypdfium2_5.14.0',
+    'openpyxl_3.1.5',
+    'python-docx_1.2.0',
+    'Pillow_12.3.0',
+    'ocr_auto_language_kor_eng_pdf_ocr_target_dpi_300_ocr_psm_3',
+    'tesseract_v5.5.3.20260724',
+    'picture_without_readable_text',
+    'small_picture_not_ocr',
+    'inherited_text_and_cached_fields_preserved_display_visibility_not_verified',
+    'diagram_relations_estimated_by_position',
+  ];
+  attempt.reportSummary = {
+    complete: false,
+    unreadRanges: [
+      'slide 2: connector_endpoint_not_resolved',
+      'slide 3: layout_or_master_graphics_not_read',
+    ],
+    warnings: [
+      'slide 1: small_picture_not_ocr',
+      'slide 2: small_picture_not_ocr',
+    ],
+  };
+  return task;
+}
+
 /** Wiki 저장 후 추출이 중단된 상태를 실제 영수증 형식으로 구성합니다. */
 export function fixtureAnalysis(task: DocumentTask): AnalysisDetail {
   const detail = visualJob(task.targetDocument, task.item.title);

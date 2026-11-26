@@ -4,15 +4,19 @@ PPTX는 ZIP 안의 XML만 읽고 외부 관계를 따라가지 않는다. 구형
 LibreOffice가 있을 때만 격리된 임시 사본을 PPTX로 변환하며 원본은 바꾸지 않는다.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
 import json
 import os
 import posixpath
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET
+from xml.sax.saxutils import escape
 from zipfile import BadZipFile, ZipFile
 
 from core.runtime.client_process import no_window_options
@@ -152,6 +156,90 @@ def _shape_details(node):
     return details
 
 
+def _geometry_numbers(node, names, *, positive=False):
+    """수식·누락·범위 밖 값을 해석하지 않고 명시된 정수 좌표만 허용한다."""
+    for name in names:
+        raw = node.get(name, "")
+        if len(raw) > 20 or re.fullmatch(r"-?[0-9]+", raw) is None:
+            return False
+        value = int(raw)
+        if not -(2 ** 63) <= value < 2 ** 63 or (positive and value <= 0):
+            return False
+    return True
+
+
+def _custom_geometry(geometry, emit):
+    """숫자 직선 경로 전체를 먼저 확인하고 원값·명령 순서를 보존한다. 의미는 판정하지 않는다."""
+    order = {A + name: index for index, name in enumerate(
+        ("avLst", "gdLst", "ahLst", "cxnLst", "rect", "pathLst"))}
+    children = list(geometry)
+    if geometry.attrib or not children or children[-1].tag != A + "pathLst":
+        return False
+    tags = [child.tag for child in children]
+    if any(tag not in order for tag in tags) or len(set(tags)) != len(tags):
+        return False
+    if [order[tag] for tag in tags] != sorted(order[tag] for tag in tags):
+        return False
+    if any((node.text or "").strip() or (node.tail or "").strip() for node in geometry.iter()):
+        return False
+    for child in children[:-1]:
+        if child.tag == A + "rect":
+            if list(child) or set(child.attrib) != {"l", "t", "r", "b"} or not _geometry_numbers(
+                    child, ("l", "t", "r", "b")):
+                return False
+        elif child.attrib or list(child):
+            return False  # 빈 보조 목록만 허용해 가이드 수식·조정점·연결점을 버리지 않는다.
+    paths = children[-1]
+    if paths.attrib or not list(paths):
+        return False
+    path_attributes = ("w", "h", "fill", "stroke", "extrusionOk")
+    for path in paths:
+        if (path.tag != A + "path" or set(path.attrib) - set(path_attributes)
+                or not _geometry_numbers(path, ("w", "h"), positive=True)):
+            return False
+        if path.get("fill", "norm") not in {"none", "norm", "lighten", "lightenLess", "darken", "darkenLess"}:
+            return False
+        if any(path.get(key, "true") not in {"true", "false", "0", "1"} for key in ("stroke", "extrusionOk")):
+            return False
+        active = False
+        has_line = False
+        for command in path:
+            if command.attrib:
+                return False
+            if command.tag == A + "close":
+                if list(command) or not active or not has_line:
+                    return False
+                active = False
+                continue
+            if command.tag not in {A + "moveTo", A + "lnTo"} or len(command) != 1:
+                return False
+            point = command[0]
+            if (point.tag != A + "pt" or list(point) or set(point.attrib) != {"x", "y"}
+                    or not _geometry_numbers(point, ("x", "y"))):
+                return False
+            if command.tag == A + "moveTo":
+                if active and not has_line:
+                    return False
+                active, has_line = True, False
+            else:
+                if not active:
+                    return False
+                has_line = True
+        if not has_line:
+            return False
+    # 지원 밖의 명령이 뒤에 있으면 앞부분도 읽었다고 게시하지 않는다. 출력은 기존 전체 한도를 거친다.
+    emit("사용자 정의 도형 직선 경로 (경로 내부 좌표·원본 명령, 시각·업무 의미 미검증)")
+    rectangle = geometry.find(A + "rect")
+    if rectangle is not None:
+        emit("문자 영역 rect: " + _attributes(rectangle, ("l", "t", "r", "b")))
+    for index, path in enumerate(paths, 1):
+        emit(f"직선 경로 {index}: " + _attributes(path, path_attributes))
+        for command in path:
+            name = command.tag[len(A):]
+            emit(name if name == "close" else name + ": " + _attributes(command[0], ("x", "y")))
+    return True
+
+
 def _smartart_text(node, archive, relations, result, scope):
     """SmartArt 데이터의 문자·명시 관계만 읽고 시각적 의미는 추정하지 않는다."""
     reference = node.find(".//" + DGM + "relIds")
@@ -203,6 +291,17 @@ def _smartart_text(node, archive, relations, result, scope):
     return output
 
 
+def _picture_fraction(node, slide_size):
+    """그림이 슬라이드 넓이에서 차지하는 비율. 크기를 모르면 1(작다고 보지 않음)."""
+    extent = node.find(P + "spPr/" + A + "xfrm/" + A + "ext")
+    if not slide_size or extent is None:
+        return 1.0
+    try:
+        return int(extent.get("cx")) * int(extent.get("cy")) / (slide_size[0] * slide_size[1])
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _picture_text(node, archive, relations, result, scope, picture_text, slide_size):
     """그림 파일만 꺼내 문자를 읽는다. 읽은 문자는 OCR 표시와 함께 돌려주고 원래 문자는 바꾸지 않는다."""
     blip = node.find(".//" + A + "blip")
@@ -237,6 +336,8 @@ def _picture_text(node, archive, relations, result, scope, picture_text, slide_s
     if found is None:
         result.note("picture_without_readable_text", scope, unread=False)
         return []
+    for code in found.get("warnings", []):
+        result.note(code, scope, unread=False)
     if "failure" in found:
         result.note(found["failure"], scope)
         return []
@@ -245,8 +346,13 @@ def _picture_text(node, archive, relations, result, scope, picture_text, slide_s
     return ["[그림 속 글자 · OCR]\n" + found["text"]]
 
 
+RELATION_NOTES = {"estimated": "diagram_relations_estimated_by_position",
+                  "unresolved": "diagram_relation_endpoints_unresolved",
+                  "review": "pptx_diagram_relations_need_review"}
+
+
 def _shape_text(tree, result, scope, *, notes=False, archive=None, relations=None, picture_text=None,
-                slide_size=None):
+                slide_size=None, relation_slides=None):
     """도형·그룹·명시 연결을 보존한다. XML 순서를 시각적 읽기 순서로 주장하지 않는다."""
     output = []
     table_number = 0
@@ -295,15 +401,20 @@ def _shape_text(tree, result, scope, *, notes=False, archive=None, relations=Non
             if not notes:
                 label = "연결선" if node.tag == P + "cxnSp" else "도형"
                 emit(f"### {label}" + (": " + identity if identity else ""), *_shape_details(node))
-                if node.find(P + "spPr/" + A + "custGeom") is not None:
-                    result.note("custom_shape_geometry_not_read", scope)
+                geometries = node.findall(P + "spPr/" + A + "custGeom")
+                if geometries:
+                    if (len(geometries) != 1 or node.find(P + "spPr/" + A + "prstGeom") is not None
+                            or not _custom_geometry(geometries[0], emit)):
+                        result.note("custom_shape_geometry_not_read", scope)
+                    else:
+                        result.note("custom_shape_path_preserved_visual_meaning_not_verified", scope, unread=False)
             if node.tag == P + "cxnSp":
                 for tag, label in (("stCxn", "시작"), ("endCxn", "끝")):
                     endpoint = node.find(P + "nvCxnSpPr/" + P + "cNvCxnSpPr/" + A + tag)
                     emit(f"연결선 {label} 도형 참조: " + (_attributes(endpoint, ("id", "idx")) or "없음"))
-                    # 파일의 연결 참조가 없거나 깨졌을 때, 슬라이드에서는 아래 관계 정리가 위치로 끝을 찾는다.
-                    if (endpoint is not None or slide_size is None) and identities.get(
-                            endpoint.get("id") if endpoint is not None else None) != 1:
+                    # 파일의 연결 참조가 없거나 깨졌을 때, 슬라이드 크기가 있으면 아래 관계 정리가 위치로 끝을 찾고
+                    # 못 찾으면 AI 해석 후보로 알린다(D-167). 슬라이드 크기가 없을 때만 미독이다.
+                    if slide_size is None and identities.get(endpoint.get("id") if endpoint is not None else None) != 1:
                         result.note("connector_endpoint_not_resolved", scope)
                 for tag in ("headEnd", "tailEnd"):
                     end = node.find(P + "spPr/" + A + "ln/" + A + tag)
@@ -345,20 +456,32 @@ def _shape_text(tree, result, scope, *, notes=False, archive=None, relations=Non
     for node, children in selected:
         visit(node, children)
     if slide_size and not notes:
-        # 연결선이 있으면 상자 사이 관계를 사람이 읽는 문장으로 정리한다(D-160).
+        # 연결선이 있으면 상자 사이 관계를 사람이 읽는 문장으로 정리한다(D-160). 끝을 못 찾은 연결이나 이름 없는
+        # 상자가 많으면 PDF와 같이 붙이지 않고 AI 해석 후보로만 알린다. 글자는 위에서 모두 보존했으므로
+        # 관계를 정하지 못한 것은 미독이 아니다(D-167).
         nodes, lines = relations_view.pptx_shapes(tree, _paragraphs)
-        block, estimated, unresolved = relations_view.relation_lines(nodes, lines, slide_size)
-        if block:
+        block, estimated, unresolved = relations_view.pptx_relation_lines(nodes, lines, slide_size)
+        status = relations_view.review_status(block, unresolved)
+        if status == "added":
             emit("\n".join(block))
-        if estimated:
-            result.note("diagram_relations_estimated_by_position", scope, unread=False)
-        if unresolved and any(line["start_ref"] is None or line["end_ref"] is None for line in lines):
-            result.note("connector_endpoint_not_resolved", scope)
+        found = [kind for kind, present in (("estimated", status == "added" and estimated),
+                 ("unresolved", status == "added" and unresolved), ("review", status == "review")) if present]
+        for kind in found:
+            # 슬라이드마다 경고를 늘리지 않고 PDF처럼 슬라이드 번호를 묶어서 남긴다(D-169).
+            if relation_slides is None:
+                result.note(RELATION_NOTES[kind], scope, unread=False, reserved=kind == "review")
+            else:
+                relation_slides[0][kind].append(relation_slides[1])
     return output
 
 
-def _inherited_content(archive, part, relations, result, scope, visited=None):
-    """공통 문자는 표시 여부를 단정하지 않고 보존하며 그림·그래픽은 미독으로 남긴다."""
+def _inherited_content(archive, part, relations, result, scope, visited=None, *, picture_text=None, slide_size=None):
+    """공통 문자는 표시 여부를 단정하지 않고 보존한다.
+
+    슬라이드 레이아웃·마스터의 그림(p:pic)은 슬라이드 그림과 같은 규칙이다(D-159·D-167). 작은 그림(로고 등)은
+    경고만 남기고, 큰 그림은 그림 파일의 문자를 읽어 덧붙인다. 도형 채우기·배경 그림·표/차트 틀과 노트 마스터의
+    그래픽은 기존처럼 미독이다.
+    """
     visited = set() if visited is None else visited
     output = []
     for kind, target in relations.values():
@@ -374,8 +497,23 @@ def _inherited_content(archive, part, relations, result, scope, visited=None):
         visited.add(target)
         try:
             root = _xml(archive, target)
-            if root.findall(".//" + A + "blip") or root.findall(".//" + P + "graphicFrame"):
+            try:
+                target_relations = _relationships(archive, target)
+            except (KeyError, ValueError, ET.ParseError):
+                target_relations = None   # 공통 문자는 먼저 보존하고, 아래에서 기존처럼 미독으로 알린다.
+            pictures = list(root.iter(P + "pic")) if kind != "notesMaster" and slide_size else []
+            picture_blips = sum(len(picture.findall(".//" + A + "blip")) for picture in pictures)
+            if len(root.findall(".//" + A + "blip")) > picture_blips or root.findall(".//" + P + "graphicFrame"):
                 result.note("layout_or_master_graphics_not_read", scope)
+            picture_output = []
+            for picture in pictures:
+                if picture_text is not None:
+                    picture_output.extend(_picture_text(picture, archive, target_relations or {}, result, scope,
+                                                        picture_text, slide_size))
+                elif _picture_fraction(picture, slide_size) < PICTURE_OCR_MIN_FRACTION:
+                    result.note("small_picture_not_ocr", scope, unread=False)
+                else:
+                    result.note("layout_or_master_graphics_not_read", scope)
             shared_text = []
             for shape in [*root.findall(".//" + P + "sp"), *root.findall(".//" + P + "cxnSp")]:
                 placeholder = shape.find(".//" + P + "ph")
@@ -392,7 +530,13 @@ def _inherited_content(archive, part, relations, result, scope, visited=None):
                 label = {"slideLayout": "슬라이드 레이아웃", "slideMaster": "슬라이드 마스터", "notesMaster": "노트 마스터"}[kind]
                 output.extend([f"### {label} 공통 문자 (표시 여부 미검증)", *shared_text])
                 result.note("inherited_text_and_cached_fields_preserved_display_visibility_not_verified", scope, unread=False)
-            output.extend(_inherited_content(archive, target, _relationships(archive, target), result, scope, visited))
+            if picture_output:
+                label = {"slideLayout": "슬라이드 레이아웃", "slideMaster": "슬라이드 마스터"}[kind]
+                output.extend([f"### {label} 그림 속 글자 (표시 여부 미검증)", *picture_output])
+            if target_relations is None:
+                raise ValueError("Unreadable layout or master relationships")
+            output.extend(_inherited_content(archive, target, target_relations, result, scope, visited,
+                                             picture_text=picture_text, slide_size=slide_size))
         except OutputLimit:
             raise
         except (KeyError, ValueError, ET.ParseError):
@@ -422,6 +566,7 @@ def pptx(path, result, *, picture_text=None):
         if slide_size is not None and min(slide_size) <= 0:
             slide_size = None
         result.result["total_units"] = len(slides)
+        relation_summary = {kind: [] for kind in RELATION_NOTES}
         for index, reference in enumerate(slides[:MAX_SLIDES], 1):
             scope = f"slide {index}"
             try:
@@ -441,7 +586,7 @@ def pptx(path, result, *, picture_text=None):
                     slide_relations = {}
                 text = [f"## 슬라이드 {index}", *_shape_text(
                     tree, result, scope, archive=archive, relations=slide_relations,
-                    picture_text=picture_text, slide_size=slide_size)]
+                    picture_text=picture_text, slide_size=slide_size, relation_slides=(relation_summary, index))]
                 if slide.get("show") == "0":
                     result.note("hidden_slide_included", scope, unread=False)
                 blips = len(slide.findall(".//" + A + "blip"))
@@ -450,7 +595,8 @@ def pptx(path, result, *, picture_text=None):
                     blips -= sum(len(picture.findall(".//" + A + "blip")) for picture in slide.iter(P + "pic"))
                 if blips:
                     result.note("picture_or_shape_fill_content_not_read", scope)
-                text.extend(_inherited_content(archive, part, slide_relations, result, scope))
+                text.extend(_inherited_content(archive, part, slide_relations, result, scope,
+                                               picture_text=picture_text, slide_size=slide_size))
                 for relation, target in slide_relations.values():
                     if relation == "notesSlide":
                         if target is None:
@@ -478,6 +624,10 @@ def pptx(path, result, *, picture_text=None):
                 result.note("slide_or_notes_xml_failed", scope)
         if len(slides) > MAX_SLIDES:
             result.note("slide_limit", f"slides {MAX_SLIDES + 1}-{len(slides)}")
+        for kind, numbers in relation_summary.items():
+            for offset in range(0, len(numbers), 40):
+                result.note(RELATION_NOTES[kind], "slides " + ",".join(map(str, numbers[offset:offset + 40])),
+                            unread=False, reserved=kind == "review")
         result.note("shape_ids_groups_coordinates_and_explicit_connections_preserved_reading_order_and_rendering_not_verified", "PPTX", unread=False)
 
 
@@ -495,15 +645,19 @@ def _libreoffice():
     return next((str(path) for path in candidates if path.is_file()), None)
 
 
-def ppt(path, result, *, picture_text=None):
-    """구형 PPT는 별도 개인 도구가 있을 때만 임시 PPTX로 바꿔 읽는다."""
+@contextmanager
+def libreoffice_converted(path, suffix, convert_to, output_suffix, *, timeout=90):
+    """설치된 LibreOffice로 원본의 임시 사본을 변환한다. (변환 파일 또는 None, 문제 코드 또는 None)을 준다.
+
+    문제 코드는 "missing"·"timeout"·"failed"다. 원본은 바꾸지 않고 임시 폴더는 블록을 나갈 때 지운다.
+    """
     executable = _libreoffice()
     if executable is None:
-        result.note("legacy_ppt_requires_libreoffice_or_pptx", "whole source")
+        yield None, "missing"
         return
-    with tempfile.TemporaryDirectory(prefix="llm-wiki-ppt-") as directory:
+    with tempfile.TemporaryDirectory(prefix="llm-wiki-office-") as directory:
         root = Path(directory)
-        original = root / "source.ppt"
+        original = root / ("source" + suffix)
         shutil.copyfile(path, original)
         profile = root / "profile"
         profile.mkdir()
@@ -515,18 +669,39 @@ def ppt(path, result, *, picture_text=None):
             '</oor:items>', encoding="utf-8")
         output = root / "output"
         output.mkdir()
+        environment = None
+        if sys.platform == "darwin" and "FONTCONFIG_FILE" not in os.environ:
+            # fontconfig를 쓰는 macOS LibreOffice(예: Homebrew)는 설정이 없으면 시스템 글꼴을 못 찾아 한글을
+            # 빈칸으로 그린다. 이번 실행에만 macOS 글꼴 폴더를 알려 준다(D-169). 사용자 설정은 바꾸지 않는다.
+            folders = ("/System/Library/Fonts", "/Library/Fonts", str(Path.home() / "Library/Fonts"))
+            (root / "fonts.conf").write_text(
+                '<?xml version="1.0"?><fontconfig>' + "".join(f"<dir>{escape(folder)}</dir>" for folder in folders)
+                + f"<cachedir>{escape(str(root / 'font-cache'))}</cachedir></fontconfig>", encoding="utf-8")
+            environment = {**os.environ, "FONTCONFIG_FILE": str(root / "fonts.conf")}
         try:
             process = subprocess.run([executable, "-env:UserInstallation=" + profile.as_uri(),
                 "--headless", "--nologo", "--nodefault", "--norestore", "--convert-to",
-                "pptx:Impress MS PowerPoint 2007 XML", "--outdir", str(output), str(original)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90, check=False,
-                **no_window_options())
+                convert_to, "--outdir", str(output), str(original)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=False,
+                env=environment, **no_window_options())
         except subprocess.TimeoutExpired:
-            result.note("legacy_ppt_conversion_timeout", "whole source")
+            yield None, "timeout"
             return
-        converted = output / "source.pptx"
+        converted = output / ("source" + output_suffix)
         if process.returncode != 0 or not converted.is_file():
-            result.note("legacy_ppt_conversion_failed", "whole source")
+            yield None, "failed"
+            return
+        yield converted, None
+
+
+def ppt(path, result, *, picture_text=None):
+    """구형 PPT는 별도 개인 도구가 있을 때만 임시 PPTX로 바꿔 읽는다."""
+    with libreoffice_converted(path, ".ppt", "pptx:Impress MS PowerPoint 2007 XML", ".pptx") as (converted, problem):
+        if problem == "missing":
+            result.note("legacy_ppt_requires_libreoffice_or_pptx", "whole source")
+            return
+        if problem is not None:
+            result.note(f"legacy_ppt_conversion_{problem}", "whole source")
             return
         result.note("legacy_ppt_converted_by_libreoffice_original_unchanged", "tools", unread=False)
         pptx(converted, result, picture_text=picture_text)

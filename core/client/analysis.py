@@ -87,8 +87,11 @@ def _same_job(api, mcp, *, job_id, tenant, user):
         raise AnalysisClientError("api_mcp_job_mismatch")
 
 
-async def _download(http, endpoint, directory, source):
-    """원본 바이트를 검증해 새 파일로 공개한다. 줄바꿈·문자열 정규화는 하지 않는다."""
+async def _download(http, endpoint, directory, source, *, text=True):
+    """원본 바이트를 검증해 새 파일로 공개한다. 줄바꿈·문자열 정규화는 하지 않는다.
+
+    text=False는 PDF·PPTX처럼 문자 원본이 아닌 파일을 받을 때만 쓴다(D-169 쪽 그림).
+    """
     size, digest = 0, sha256()
     expected_size, expected_hash = source.get("size_bytes"), source.get("source_sha256")
     if (type(expected_size) is not int or not 0 <= expected_size <= MAX_ORIGINAL_BYTES
@@ -98,7 +101,7 @@ async def _download(http, endpoint, directory, source):
     descriptor = open_new(temporary)
     try:
         with os.fdopen(descriptor, "wb") as destination:
-            decoder = codecs.getincrementaldecoder("utf-8")("strict")
+            decoder = codecs.getincrementaldecoder("utf-8")("strict") if text else None
             async with http.stream("GET", endpoint) as response:
                 if response.status_code != 200:
                     raise AnalysisClientError("source_download_failed")
@@ -106,10 +109,12 @@ async def _download(http, endpoint, directory, source):
                     size += len(block)
                     if size > expected_size:
                         raise AnalysisClientError("source_hash_mismatch")
-                    decoder.decode(block)
+                    if decoder is not None:
+                        decoder.decode(block)
                     digest.update(block)
                     destination.write(block)
-                decoder.decode(b"", final=True)
+                if decoder is not None:
+                    decoder.decode(b"", final=True)
             if size != expected_size or digest.hexdigest() != expected_hash:
                 raise AnalysisClientError("source_hash_mismatch")
             destination.flush()

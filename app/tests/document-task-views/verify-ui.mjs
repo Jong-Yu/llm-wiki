@@ -474,13 +474,49 @@ try {
     'PASS actual execution history: localized states, explicit actions, query-only uncertainty, busy/error preservation, empty history, keyboard tooltip and navigation',
   );
 
+  await page.goto(
+    `${pathToFileURL(file).href}#/documents?taskId=${'c'.repeat(32)}&view=history`,
+  );
+  await expect(page.getByRole('table')).toContainText('일부 변환');
+  const diagnostics = page.getByRole('list', { name: '변환 시 확인할 내용' });
+  await expect(diagnostics.getByRole('listitem')).toHaveCount(6);
+  await expect(diagnostics).toContainText('연결선의 시작 또는 끝');
+  await expect(diagnostics).toContainText('레이아웃·마스터');
+  await expect(page.getByRole('table')).not.toContainText('pypdf_');
+  await expect(page.getByRole('table')).not.toContainText('adapter_');
+  await expect(page.getByRole('table')).not.toContainText('진단 코드:');
+  await expect(page.getByRole('table')).not.toContainText('중단 원인');
+  await expect(
+    page.getByRole('heading', { name: '변환 내용 확인 필요' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '다시 변환', exact: true }),
+  ).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('[data-action-count]')).toHaveText('0');
+  await page.getByRole('link', { name: '등록할 내용 확인' }).click();
+  await expect(page).toHaveURL(/workflowId=c+&returnTask=c+/);
+  await expect(page.locator('[data-action-count]')).toHaveText('0');
+  await page.goBack();
+  await page.getByRole('button', { name: '등록 진행 열기' }).click();
+  await expect(page.locator('[data-task-detail]')).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: '등록할 내용 확인' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '다시 변환', exact: true }),
+  ).toHaveCount(0);
+  console.log(
+    'PASS VOC separates content warnings from runtime versions without starting another conversion',
+  );
+
   for (const theme of ['light', 'dark']) {
     for (const width of [1280, 720, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await page.evaluate((value) => {
         document.documentElement.dataset.wikiTheme = value;
       }, theme);
-      for (const id of ['a', '8', '9']) {
+      for (const id of ['a', '8', '9', 'c']) {
         await page.goto(
           `${pathToFileURL(file).href}#/documents?taskId=${id.repeat(32)}&view=history`,
         );
@@ -536,7 +572,8 @@ try {
           historyCapture &&
           ((id === 'a' && theme === 'light' && width !== 720) ||
             (id === '9' && width === 1280) ||
-            (id === '8' && theme === 'dark' && width === 320))
+            (id === '8' && theme === 'dark' && width === 320) ||
+            (id === 'c' && width !== 720))
         ) {
           await page.mouse.move(0, 890);
           await page.evaluate(() => {

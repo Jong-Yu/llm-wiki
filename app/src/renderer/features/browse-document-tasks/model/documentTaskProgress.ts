@@ -19,6 +19,7 @@ type ProgressInput = {
   inputReady: boolean;
   conversionKnown: boolean;
   conversion: Conversion | null;
+  conversionContentGap?: boolean;
   format: string;
 };
 type ProgressView = Pick<
@@ -109,7 +110,11 @@ export function buildDocumentProgress(input: ProgressInput): ProgressView {
       : wikiRequested && !wikiSaved
         ? 'wiki'
         : 'ontology';
-  const current = activeState(state);
+  const contentGap =
+    activeStep === 'convert' &&
+    state === 'partial' &&
+    input.conversionContentGap;
+  const current = contentGap ? 'review' : activeState(state);
   const steps: DocumentTaskStep[] = [
     {
       id: 'convert',
@@ -173,7 +178,9 @@ export function buildDocumentProgress(input: ProgressInput): ProgressView {
     ready: `${phase} 대기`,
     running: `${phase} 중`,
     failed: `${activeStep === 'ontology' ? '온톨로지' : phase} 중단`,
-    partial: `${activeStep === 'ontology' ? '온톨로지' : phase} 중단`,
+    partial: contentGap
+      ? '변환 내용 확인 필요'
+      : `${activeStep === 'ontology' ? '온톨로지' : phase} 중단`,
     review: '문자 확인 필요',
     unconfirmed: '저장 결과 확인 필요',
     complete: wikiRequested && ontologyRequested ? '등록 완료' : '저장 완료',

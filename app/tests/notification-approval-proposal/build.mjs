@@ -7,7 +7,9 @@ import { notificationPreview } from './navigationPreview.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, '../..');
-const destination = process.argv[2] ?? resolve(here, 'preview.html');
+const destination =
+  process.argv[2] ??
+  resolve(app, 'test-results/notification-approval-proposal/preview.html');
 const built = await build({
   configFile: false,
   root: here,

@@ -26,6 +26,7 @@ import { RemoteDocumentProgress } from '@renderer/pages/documents/RemoteDocument
 import {
   fixtureAnalysis,
   fixtureCompleteAnalysis,
+  fixturePresentationTask,
   fixtureTask,
 } from './fixtures';
 import '@renderer/shared/theme/tokens.css';
@@ -121,6 +122,7 @@ const variants = [
   buildDocumentTaskView(history),
   buildDocumentTaskView(emptyHistory),
   buildDocumentTaskView(needsReview),
+  buildDocumentTaskView(fixturePresentationTask()),
 ];
 const remote = buildAnalysisProgressView(ontologyDetail);
 
@@ -300,6 +302,11 @@ function Fixture(): JSX.Element {
         <>
           <DocumentTaskDetail
             task={task}
+            textReviewPath={
+              task.id === 'c'.repeat(32)
+                ? `/documents?${new URLSearchParams({ workflowId: 'c'.repeat(32), returnTask: task.id })}`
+                : undefined
+            }
             error={
               parameters.has('error')
                 ? '서버 응답을 확인하지 못했습니다.'

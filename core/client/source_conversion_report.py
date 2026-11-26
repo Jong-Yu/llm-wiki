@@ -9,6 +9,10 @@ import re
 MAX_TEXT = 20 * 1024 * 1024
 MAX_UNITS = 10000
 MAX_UNIT_TEXT = 4 * 1024 * 1024
+# 서버 보고의 경고·미독은 100항목까지다. 마지막 몇 칸은 분석 단계가 읽는 요약(AI 해석 후보 쪽 목록)에 남겨 둔다(D-169).
+MAX_NOTES = 100
+RESERVED_NOTES = 10
+OVERFLOW = "remaining scopes: additional diagnostics exceed the report limit"
 
 
 def attempted_method(format):
@@ -57,15 +61,17 @@ class Conversion:
         self.total_bytes = 0
         self.checkpoint(self.result)
 
-    def note(self, code, scope, *, unread=True):
-        # 진단 상한에 닿으면 추가 미독이 있음을 마지막 항목에 명시한다.
+    def note(self, code, scope, *, unread=True, reserved=False):
+        # 진단 상한에 닿으면 추가 미독이 있음을 표시한다. reserved는 남겨 둔 칸을 쓰는 소수의 요약 항목이다.
         key = "unread_ranges" if unread else "warnings"
         value = f"{scope}: {code}"[:1000]
-        if value not in self.result[key]:
-            if len(self.result[key]) < 99:
-                self.result[key].append(value)
-            elif len(self.result[key]) == 99:
-                self.result[key].append("remaining scopes: additional diagnostics exceed the report limit")
+        items = self.result[key]
+        if value not in items:
+            if reserved:
+                if len(items) < MAX_NOTES:
+                    items.append(value)
+            elif OVERFLOW not in items:
+                items.append(value if len(items) < MAX_NOTES - RESERVED_NOTES - 1 else OVERFLOW)
         if len(self.result["diagnostics"]) < 100:
             self.result["diagnostics"].append({"code": re.sub(r"[^a-zA-Z0-9_.-]", "_", code)[:128],
                                                "scope": scope[:300], "unread": unread})

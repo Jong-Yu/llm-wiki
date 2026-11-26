@@ -256,7 +256,8 @@ def _ocr_fragmented_retry(value, image, engine, language, directory, deadline, n
     # 한국어 가로 문장이 짧은 세로 조각으로 잘못 분할되는 경우만 단일 블록을 비교한다.
     # 표/다단 문서의 읽기 순서를 복원하는 알고리즘은 아니다.
     lines = [line.strip() for line in value[0].splitlines() if line.strip()]
-    if len(lines) < 6 or sum(len(line) <= 3 for line in lines) < len(lines) * .4:
+    # 잘못 나뉜 세로 조각 사이의 정렬 공백을 글자로 세면 가로 문장으로 오인한다.
+    if len(lines) < 6 or sum(len("".join(line.split())) <= 3 for line in lines) < len(lines) * .4:
         return value
     try:
         candidate = _ocr_attempt(image, engine, language, directory, deadline, psm=6)
@@ -327,6 +328,7 @@ def ocr_region_text(image, engine, language):
     if image.width < 16 or image.height < 8:
         return None
     normalized = _white_background(image)
+    warnings = []
     with tempfile.TemporaryDirectory(prefix="wiki-ocr-") as directory:
         deadline = time.monotonic() + 40
         best = _ocr_attempt(normalized, engine, language, directory, deadline)
@@ -335,12 +337,18 @@ def ocr_region_text(image, engine, language):
             candidate = _ocr_attempt(normalized, engine, language, directory, deadline, psm=6)
             if candidate[1] is not None and (best[1] is None or candidate[1] > best[1]):
                 best = candidate
+        # 그림 안 가로 문장을 세로 조각으로 읽은 경우에도 전체 쪽과 같은 재시도 기준을 쓴다.
+        # 정상·고신뢰 결과는 건드리지 않으며, 재시도 실패/내용 급감 때는 첫 결과를 보존한다.
+        elif best[4] == 3 and (best[1] is None or best[1] < 60 or best[3] > best[2] * .3):
+            best = _ocr_fragmented_retry(best, normalized, engine, language, directory, deadline,
+                                        lambda code, **kwargs: warnings.append(code))
         text, score, count, weak, psm = best
         if not text.strip() or count < PDF_IMAGE_TEXT_MIN_CHARS or score is None or score < PDF_IMAGE_TEXT_MIN_CONFIDENCE:
             return None
         text, reread = _reread_hangul_words(best, normalized, engine, language, directory, deadline)
     return {"text": text.strip(), "score": score, "count": count, "weak": weak, "psm": psm,
-            "low_confidence": score < 60 or weak > count * .3, "reread_words": reread}
+            "low_confidence": score < 60 or weak > count * .3, "reread_words": reread,
+            "warnings": warnings}
 
 
 def ocr_image(image, language, *, note=None):
@@ -628,7 +636,9 @@ def _pdf_pages(path, reader, result, ocr, language, selected_page, regions, read
                           ("pdf_diagram_relations_need_review", summary["review"]),
                           ("pdf_diagram_relations_failed", summary["relation_failed"])):
         for offset in range(0, len(numbers), 40):
-            result.note(code, "pages " + ",".join(map(str, numbers[offset:offset + 40])), unread=False)
+            # AI 해석 후보 목록은 분석 단계가 쪽 그림을 붙일 때 읽으므로 상한에 밀리지 않게 남긴다(D-169).
+            result.note(code, "pages " + ",".join(map(str, numbers[offset:offset + 40])), unread=False,
+                        reserved=code == "pdf_diagram_relations_need_review")
     result.note("layout_annotations_images_and_reading_order_not_verified", "PDF", unread=False)
 
 
@@ -653,6 +663,8 @@ def _with_image_text(text, regions, read_region, result, scope, summary, number)
             continue
         if found is None:
             continue
+        for code in found.get("warnings", []):
+            result.note(code, scope, unread=False)
         left, top, width, height = region["box"]
         sections.append(f"[그림 속 글자 {len(sections) + 1} · 쪽 안 위치: 왼쪽 {left}% 위 {top}% "
                         f"크기 {width}%×{height}% · OCR]\n{found['text']}")

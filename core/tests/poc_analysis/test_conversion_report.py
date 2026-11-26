@@ -61,11 +61,25 @@ class ConversionReportTests(TestCase):
         for index in range(105):
             conversion.ocr_note("frame 1", f"read_failure_{index}", unread=True)
         value = conversion.finish()
-        self.assertEqual(len(value["unread_ranges"]), 100)
+        # 마지막 10칸은 AI 해석 후보 목록 같은 요약 항목 몫이다(D-169).
+        self.assertEqual(len(value["unread_ranges"]), 90)
         self.assertEqual(len(value["diagnostics"]), 100)
         self.assertIn("additional diagnostics exceed", value["unread_ranges"][-1])
         self.assertEqual(len(value["ocr_processing"]["frame 1"]), 105)
         self.assertEqual((value["state"], value["complete"]), ("failed", False))
+
+    def test_reserved_summary_notes_survive_a_full_warning_list(self):
+        conversion = Conversion("pdf")
+        for index in range(150):
+            conversion.note(f"small_{index}", f"page {index}", unread=False)
+        for offset in range(0, 15, 1):
+            conversion.note("pdf_diagram_relations_need_review", f"pages {offset + 1}", unread=False, reserved=True)
+        warnings = conversion.result["warnings"]
+        self.assertEqual(len(warnings), 100)
+        self.assertEqual(warnings[89], "remaining scopes: additional diagnostics exceed the report limit")
+        self.assertEqual(warnings[90:], [f"pages {n}: pdf_diagram_relations_need_review" for n in range(1, 11)])
+        conversion.note("late_general", "page 999", unread=False)
+        self.assertNotIn("page 999: late_general", warnings)
 
     def test_worker_interrupt_preserves_units_execution_and_caps_tail_diagnostics(self):
         for code, expected in (("conversion_timeout", "partial"), ("conversion_cancelled", "cancelled"),

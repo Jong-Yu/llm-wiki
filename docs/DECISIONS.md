@@ -8,8 +8,21 @@
 
 | 결정 | 소유 도메인 | 본문 |
 | --- | --- | --- |
+| D-169 | `analysis` | [AI 해석 후보 쪽의 원본 화면을 그래프 추출 호출에 함께 넘기기](domains/analysis/DECISIONS.md#d-169--ai-해석-후보-쪽의-원본-화면을-그래프-추출-호출에-함께-넘기기-2026-11-26) |
 | D-168 | `platform` | [텍스트 오류 보고의 서버 전용 보관](domains/platform/DECISIONS.md#d-168--텍스트-오류-보고의-서버-전용-보관-2026-11-26) |
+| D-167 | `sources` | [PPT 레이아웃 그림과 도식 관계를 PDF와 같은 기준으로](domains/sources/DECISIONS.md#d-167--ppt-레이아웃-그림과-도식-관계를-pdf와-같은-기준으로-2026-11-26) |
 | D-166 | `platform` | [개인 알림 목록에서 삭제와 원천 이력 보존](domains/platform/DECISIONS.md#d-166--개인-알림-목록에서-삭제와-원천-이력-보존-2026-11-26) |
+| D-165 | `platform` | [Office·이미지 원본의 기기 내 미리보기](domains/platform/DECISIONS.md#d-165--office이미지-원본의-기기-내-미리보기-2026-11-25) |
+| D-164 | `analysis` | [큰 등록 본문의 고정 참조와 구간별 누적 분석](domains/analysis/DECISIONS.md#d-164--큰-등록-본문의-고정-참조와-구간별-누적-분석-2026-11-25) |
+| D-163 | `sources` | [변환 보고의 불변 부분 전송과 같은 요청의 저장 재개](domains/sources/DECISIONS.md#d-163--변환-보고의-불변-부분-전송과-같은-요청의-저장-재개-2026-11-25) |
+| D-162 | `sources` | [원보고와 분리한 사용자 입력과 등록 내용 확정](domains/sources/DECISIONS.md#d-162--원보고와-분리한-사용자-입력과-등록-내용-확정-2026-11-25) |
+| D-161 | `sources` | [영문 조각으로 읽힌 한국어 단어만 다시 읽기](domains/sources/DECISIONS.md#d-161--영문-조각으로-읽힌-한국어-단어만-다시-읽기-2026-11-24) |
+| D-158 | `ui` | [온톨로지까지 하나의 문서 등록과 직접 입력·수정](domains/ui/DECISIONS.md#d-158--온톨로지까지-하나의-문서-등록과-직접-입력수정-2026-11-24) |
+| D-160 | `sources` | [도식 관계를 "A → B" 문장으로 덧붙이기](domains/sources/DECISIONS.md#d-160--도식-관계를-a--b-문장으로-덧붙이기-2026-11-24) |
+| D-159 | `sources` | [그림 영역만 OCR해 내장 문자 뒤에 덧붙이기](domains/sources/DECISIONS.md#d-159--그림-영역만-ocr해-내장-문자-뒤에-덧붙이기-2026-11-24) |
+| D-157 | `sources` | [PDF 정상 내장 문자 우선과 작은 그림의 OCR 대체 중단](domains/sources/DECISIONS.md#d-157--pdf-정상-내장-문자-우선과-작은-그림의-ocr-대체-중단-2026-11-24) |
+| D-155 | `sources` | [PPT 도식의 명시 구조와 SmartArt 문자 보존](domains/sources/DECISIONS.md#d-155--ppt-도식의-명시-구조와-smartart-문자-보존-2026-11-24) |
+| D-156 | `sources` | [보류 쪽의 재인식과 불변 문자 보정](domains/sources/DECISIONS.md#d-156--보류-쪽의-재인식과-불변-문자-보정-2026-11-24) |
 | D-154 | `platform` | [서버 알림 이력과 공유 문자 사용 승인](domains/platform/DECISIONS.md#d-154--서버-알림-이력과-공유-문자-사용-승인-2026-11-24) |
 | D-153 | `ui` | [OCR 저신뢰 경고 보존과 기존 문자로 등록 계속](domains/ui/DECISIONS.md#d-153--ocr-저신뢰-경고-보존과-기존-문자로-등록-계속-2026-11-24) |
 | D-131 | `knowledge` | [큰 등록 템플릿의 묶음 작성과 단일 산출물 저장](domains/knowledge/DECISIONS.md#d-131--큰-등록-템플릿의-묶음-작성과-단일-산출물-저장-2026-11-16) |

@@ -6,13 +6,14 @@ import { chromium, expect } from '@playwright/test';
 import axe from 'axe-core';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const destination = resolve(
+const output = resolve(
   here,
-  '../../../.local/diagnostics/2026-11-24-notification-approval-ui',
+  '../../test-results/notification-approval-proposal',
 );
+const destination = process.argv[3] ?? resolve(output, 'verification');
 await mkdir(destination, { recursive: true });
 const base = pathToFileURL(
-  process.argv[2] ?? resolve(here, 'preview.html'),
+  process.argv[2] ?? resolve(output, 'preview.html'),
 ).href;
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -270,11 +271,11 @@ try {
   ).toBeVisible();
   await page.getByRole('link', { name: '알림으로', exact: true }).click();
   await page.getByRole('button', { name: '읽지 않음 1', exact: true }).click();
-  await expect(page.getByText('문서 처리 완료', { exact: true })).toHaveCount(
-    1,
-  );
   await expect(
-    page.getByText('문자 사용 승인 요청', { exact: true }),
+    page.getByText('문서 처리 완료 · Wiki 저장·관계 추출', { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByText('문자 사용 승인 요청 · 30/170쪽', { exact: true }),
   ).toHaveCount(0);
   await page.getByRole('button', { name: '모두 읽음', exact: true }).click();
   await page.getByRole('button', { name: '읽지 않음 0', exact: true }).click();
@@ -287,7 +288,7 @@ try {
   ).toBeVisible();
   await page.getByRole('button', { name: '전체', exact: true }).click();
   await expect(
-    page.getByText('문자 사용 승인 요청', { exact: true }),
+    page.getByText('문자 사용 승인 요청 · 30/170쪽', { exact: true }),
   ).toBeVisible();
   pass('최종 승인→저장→기기 확보→접수→진행→완료와 알림 이력 보존 모의');
 

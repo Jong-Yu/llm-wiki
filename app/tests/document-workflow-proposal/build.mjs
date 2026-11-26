@@ -1,12 +1,14 @@
 import { build } from 'vite';
 import react from '@vitejs/plugin-react';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workflowPreview } from './navigationPreview.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, '../..');
-const destination = process.argv[2] ?? resolve(here, 'preview.html');
+const destination =
+  process.argv[2] ??
+  resolve(app, 'test-results/document-workflow-proposal/preview.html');
 const built = await build({
   configFile: false,
   root: here,
@@ -43,5 +45,6 @@ const css = output
   .map((part) => part.source)
   .join('\n');
 const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none';"><title>문서 처리 UX 비교 시안</title><style>${css}</style></head><body><div id="workflow-preview"></div><script>${scripts.replaceAll('</script', '<\\/script')}</script></body></html>`;
+await mkdir(dirname(destination), { recursive: true });
 await writeFile(destination, html);
 console.log(JSON.stringify({ destination, bytes: Buffer.byteLength(html) }));

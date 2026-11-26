@@ -42,6 +42,35 @@ def _write_new(path, raw):
     write_new(path, raw)
 
 
+# 제공자 한 그림 한도(5 MB)보다 작게 둔다. 그림 수 한도는 호출하는 쪽(page_images)이 정한다.
+MAX_IMAGE_FILE_BYTES = 4 * 1024 * 1024
+MAX_IMAGE_FILES = 100
+
+
+def read_images(paths):
+    """첨부할 그림(PNG·JPEG)을 비공개 파일에서 읽어 형식·hash를 확인한다. 없으면 빈 목록이다."""
+    if paths is None:
+        return []
+    if not isinstance(paths, (list, tuple)) or len(paths) > MAX_IMAGE_FILES:
+        raise AIAdapterError("ai_invalid_input")
+    items = []
+    for value in paths:
+        path = Path(value).absolute()
+        try:
+            raw = read_private(path, MAX_IMAGE_FILE_BYTES)
+        except ClientPlatformError as error:
+            raise AIAdapterError("ai_input_limit" if str(error) == "file_limit" else "ai_invalid_input") from None
+        except OSError as error:
+            raise AIAdapterError("ai_invalid_input") from error
+        media = ("image/png" if raw.startswith(b"\x89PNG\r\n\x1a\n") else
+                 "image/jpeg" if raw.startswith(b"\xff\xd8\xff") else None)
+        if media is None:
+            raise AIAdapterError("ai_invalid_input")
+        items.append({"path": path, "raw": raw, "media_type": media, "sha256": sha256(raw).hexdigest(),
+                      "bytes": len(raw)})
+    return items
+
+
 def _strict_schema(schema):
     # Codex의 구조화 출력은 객체의 모든 키가 명시된 형태를 사용한다.
     # 원본 규약은 수정하지 않고 CLI에 전달할 복사본만 더 엄격하게 만든다.
@@ -358,8 +387,28 @@ class CodexAdapter:
             raise AIAdapterError("ai_cli_incompatible")
         self._question_profile_checked = True
 
+    supports_images = True
+    _image_help = ("exec", "--help")
+    _image_flag = b"--image"
+
+    async def _image_help_output(self, arguments):
+        return await _execute(arguments, directory=None,
+                              environment={name: os.environ[name] for name in _ENVIRONMENT if name in os.environ})
+
+    async def image_input_available(self):
+        """설치된 CLI가 그림 첨부를 받는지 도움말로만 확인한다. 확인하지 못하면 예외 대신 False다(D-169)."""
+        if getattr(self, "_image_input", None) is None:
+            try:
+                await self.preflight()
+                executable, _ = self._capabilities
+                code, output, _ = await self._image_help_output([*executable, *self._image_help])
+                self._image_input = code == 0 and self._image_flag in output
+            except (AIAdapterError, OSError, TimeoutError):
+                self._image_input = False
+        return self._image_input
+
     async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None,
-                  web_search=False, question_profile=False, template_profile=False, stream_answer=False):
+                  web_search=False, question_profile=False, template_profile=False, stream_answer=False, images=None):
         """전체 prompt/schema로 한 번 실행해 {'value': 결과 dict, 'execution': 관측 기록}을 반환한다."""
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
                 or output_schema is not None and not isinstance(output_schema, dict)
@@ -367,8 +416,13 @@ class CodexAdapter:
                 or type(question_profile) is not bool
                 or type(template_profile) is not bool or template_profile and not question_profile
                 or type(stream_answer) is not bool or stream_answer and (not question_profile or template_profile)
-                or question_profile and (self.persist_session or session_id is not None or web_search)):
+                or question_profile and (self.persist_session or session_id is not None or web_search)
+                or images is not None and (session_id is not None or web_search or question_profile)):
             raise AIAdapterError("ai_invalid_input")
+        attached = read_images(images)
+        if any("," in str(item["path"]) for item in attached):
+            # --image 값은 쉼표로 나뉜다. 경로를 잘못 나눠 다른 파일을 붙이지 않도록 거부한다.
+            raise AIAdapterError("ai_unsafe_directory")
         prompt_bytes = prompt.encode("utf-8")
         original_schema = canonical_json_bytes(schema)
         # schema는 원본 규약, output_schema는 CLI가 출력할 수 있게 조립한 별도 형식이다.
@@ -393,7 +447,11 @@ class CodexAdapter:
         _write_new(directory / "source-schema.json", original_schema)
         _write_new(directory / "schema.json", schema_bytes)
         result_path = directory / "result.json"
-        arguments = [*executable, "exec", "--sandbox", "read-only", "-C", str(directory)]
+        arguments = [*executable, "exec"]
+        for item in attached:
+            # 그림은 CLI가 첫 메시지에 붙인다. 모델의 그림 보기 도구(view_image)는 계속 끈다(D-169).
+            arguments.extend(["--image", str(item["path"])])
+        arguments.extend(["--sandbox", "read-only", "-C", str(directory)])
         if session_id is not None:
             arguments.extend(["resume", session_id])
         if not self.persist_session and session_id is None:
@@ -442,12 +500,16 @@ class CodexAdapter:
                                              "provider_effective_settings": "not_reported"}
         if stream_answer:
             metadata["answer_stream"] = {"transport": "app-server", "config_verified": False}
+        if attached:
+            metadata["input_images"] = [{key: item[key] for key in ("media_type", "sha256", "bytes")} for item in attached]
         started = time.monotonic()
         output = stderr = None
         try:
             if question_profile:
                 await self._check_question_profile(executable, environment)
                 profile_metadata["feature_support_checked"] = True
+            if attached and not await self.image_input_available():
+                raise AIAdapterError("ai_cli_incompatible")
             if stream_answer:
                 from .codex_app_server import execute
                 output, stream_metadata = await execute(executable, directory=directory, environment=environment,

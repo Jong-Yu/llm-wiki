@@ -72,6 +72,8 @@ class ObservedAdapter:
                        "prompt_utf8_bytes": len(prompt.encode("utf-8")), "prompt_characters": len(prompt),
                        "schema_utf8_bytes": len(canonical_json_bytes(schema)),
                        "result_json_utf8_bytes": None, "token_estimate": None, "token_usage": None}
+        if kwargs.get("images"):
+            observation["image_count"] = len(kwargs["images"])
         self.calls.append(observation)
         started = self.clock()
         try:

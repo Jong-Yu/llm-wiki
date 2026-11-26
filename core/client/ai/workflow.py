@@ -7,6 +7,7 @@ inputs/assembly에, 저장은 서버의 기존 결과 도구에 맡긴다. 토�
 
 import asyncio
 from hashlib import sha256
+import json
 import os
 import stat
 from uuid import uuid4
@@ -226,6 +227,22 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                     continue
                 if any(assembled["manifest"]["actor"][key] != value for key, value in initial_profile.items()):
                     raise AnalysisClientError("analysis_profile_changed")
+                base_prompt, images = assembled["prompt"], None
+                if (stage == "extract_ontology" and job.get("registration")
+                        and getattr(underlying_adapter, "supports_images", False)):
+                    # 변환이 도식 연결을 정리하지 못한 쪽만 원본 화면 그림을 같은 추출 호출에 붙인다(D-169).
+                    from . import page_images
+                    conversion = json.loads(load_input(fixed, stage_directory)["components"].get(
+                        "data/conversion.json", "{}"))
+                    paths, image_audit = await timings.wait("preparation", page_images.prepare(http, tenant=tenant,
+                        source_ref=source_ref, conversion=conversion, directory=stage_directory / "page-images",
+                        prompt=base_prompt, available=getattr(underlying_adapter, "image_input_available", None)),
+                        operation="page_images", stage=stage)
+                    if paths:
+                        base_prompt = page_images.with_section(base_prompt, image_audit["attached"])
+                        images = paths
+                        image_audit["prompt_sha256"] = sha256(base_prompt.encode("utf-8")).hexdigest()
+                    assembled["assembly"]["page_images"] = image_audit
                 _record(stage_directory / "assembly.json", assembled["assembly"])
                 _record(stage_directory / "pending.json", {"status": "running", "stage": stage,
                                                            "bundle_id": fixed["bundle_id"]})
@@ -234,7 +251,7 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                     basis = fixed_basis(fixed, stage_directory, document) if stage == "extract_ontology" else None
                 target = next(item for item in assembled["manifest"]["dependency"]["documents"]
                               if item["document"] == document)
-                prompt = assembled["prompt"]
+                prompt = base_prompt
                 if hasattr(underlying_adapter, "persist_session"):
                     underlying_adapter.persist_session = stage == "extract_ontology"
                 for repair_number in range(MAX_DRAFT_REPAIRS + 1):
@@ -248,7 +265,8 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                     invocation = attempt_directory / "invocation"
                     result = await timings.wait("ai_initial" if repair_number == 0 else "ai_repair",
                         lease.guard(adapter.run(prompt=prompt, schema=assembled["schema"],
-                            output_schema=assembled["cli_schema"], directory=invocation)),
+                            output_schema=assembled["cli_schema"], directory=invocation,
+                            **({"images": images} if images else {}))),
                         stage=stage, attempt=repair_number)
                     execution = {key: result["execution"].get(key) for key in _EXECUTION_FIELDS}
                     if execution_config_sha256 is not None:
@@ -290,7 +308,7 @@ async def run_analysis(http, client, *, tenant, job_id, run_id, directory, origi
                     if repair_number == MAX_DRAFT_REPAIRS:
                         raise AnalysisClientError("analysis_draft_repair_exhausted")
                     with timings.measure("preparation", operation="repair_prompt", stage=stage):
-                        prompt = repair_prompt(assembled["prompt"], payload, validation, repair_number + 1)
+                        prompt = repair_prompt(base_prompt, payload, validation, repair_number + 1)
                 stage_session = result["execution"] if stage == "extract_ontology" else None
                 if stage == "extract_ontology" and semantic_check and not incomplete:
                     if hasattr(underlying_adapter, "persist_session"):

@@ -1,4 +1,5 @@
 {
   "extends": "../../config/typescript/tsconfig.tools.json",
-  "include": ["*.tsx", "../../src/renderer/env.d.ts"]
+  "include": ["*.tsx", "../../src/renderer/env.d.ts"],
+  "exclude": []
 }

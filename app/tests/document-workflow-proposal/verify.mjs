@@ -5,9 +5,12 @@ import { resolve, dirname } from 'node:path';
 import { chromium, expect } from '@playwright/test';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const destination = resolve(here, 'verification');
+const output = resolve(here, '../../test-results/document-workflow-proposal');
+const destination = process.argv[3] ?? resolve(output, 'verification');
 await mkdir(destination, { recursive: true });
-const base = pathToFileURL(resolve(here, 'preview.html')).href;
+const base = pathToFileURL(
+  process.argv[2] ?? resolve(output, 'preview.html'),
+).href;
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const errors = [],

@@ -15,6 +15,7 @@ import type {
   DocumentTaskView,
 } from './documentTask.types';
 import { buildDocumentProgress } from './documentTaskProgress';
+import { conversionGapExplanation } from './conversionDiagnostics';
 
 /** 상위 페이지가 같은 작업의 처리 세션을 조합할 때 전달하는 읽기 전용 입력입니다. */
 export type DocumentTaskProcessingView = {
@@ -344,22 +345,22 @@ function taskState(
   return 'ready';
 }
 
-/** 사용자 설명에는 알려진 실패만 번역하고 원래 오류 코드는 처리 기록에 보존합니다. */
+/** 별도로 보관된 미변환 구간을 읽어 진단 목록의 누락과 일반 경고를 구별합니다. */
+function unreadRanges(conversion: ConversionView | null): readonly string[] {
+  return conversion && 'reportSummary' in conversion
+    ? (conversion.reportSummary?.unreadRanges ?? [])
+    : (conversion?.report?.unread_ranges ?? []);
+}
+
+/** 실행 실패를 먼저 설명하고 부분 변환에서만 실제 미변환 사유를 안내합니다. */
 function failureExplanation(
   conversion: ConversionView | null,
 ): SourceConversionFailureExplanation | null {
   const codes = conversion?.diagnosticCodes ?? [];
-  const unread =
-    conversion && 'reportSummary' in conversion
-      ? conversion.reportSummary?.unreadRanges
-      : conversion?.report?.unread_ranges;
-  const workerFailed =
-    codes.includes('worker_failed') ||
-    unread?.some((value: string): boolean =>
-      value.endsWith('source: worker_failed'),
-    );
-  return conversionFailureExplanation(
-    workerFailed ? [...codes, 'worker_failed'] : codes,
+  const unread = unreadRanges(conversion);
+  return (
+    conversionFailureExplanation([...codes, ...unread]) ??
+    (conversion?.state === 'partial' ? conversionGapExplanation(unread) : null)
   );
 }
 
@@ -428,10 +429,14 @@ function explanation(
         textReviewScopes(conversion).length > 0
           ? processing.message
           : (failureExplanation(conversion)?.body ??
-            '본문을 완전히 읽지 못했습니다. 이 기록에서는 구체적인 중단 원인을 확인하지 못했습니다. 등록한 원본은 보관되어 있습니다.'),
+            (state === 'partial'
+              ? '원본의 일부를 문자로 변환하지 못했습니다. 등록한 원본과 읽은 내용은 보관되어 있습니다.'
+              : '본문을 완전히 읽지 못했습니다. 이 기록에서는 구체적인 중단 원인을 확인하지 못했습니다. 등록한 원본은 보관되어 있습니다.')),
       next:
         failureExplanation(conversion)?.next ??
-        '실행 기록과 이 기기의 준비 상태를 먼저 확인해 주세요. 다시 변환하면 원본의 처음부터 읽으며 이전 결과는 유지됩니다.',
+        (state === 'partial'
+          ? '실행 기록과 원본을 확인해 주세요. 읽지 못한 범위와 실행 오류를 확인한 뒤 내용을 보완하거나 다시 변환할 수 있습니다.'
+          : '실행 기록과 이 기기의 준비 상태를 먼저 확인해 주세요. 다시 변환하면 원본의 처음부터 읽으며 이전 결과는 유지됩니다.'),
     };
   if (state === 'partial' || state === 'failed')
     return {
@@ -517,6 +522,12 @@ export function buildDocumentTaskView(
     inputReady: converted,
     conversionKnown: true,
     conversion,
+    conversionContentGap:
+      !!conversionGapExplanation(unreadRanges(conversion)) &&
+      !conversionFailureExplanation([
+        ...(conversion?.diagnosticCodes ?? []),
+        ...unreadRanges(conversion),
+      ]),
     format: task.item.format,
   });
   const { state } = stageView;
@@ -646,6 +657,7 @@ export function buildDocumentTaskView(
         codes: [
           ...attempt.diagnosticCodes,
           ...(attempt.reportSummary?.unreadRanges ?? []),
+          ...(attempt.reportSummary?.warnings ?? []),
         ],
       }),
     ),

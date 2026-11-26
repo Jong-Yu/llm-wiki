@@ -80,6 +80,25 @@ def _short(text):
     return line if len(line) <= MAX_LABEL else line[:MAX_LABEL - 1] + "…"
 
 
+def _invisible(node):
+    """테두리가 없고 채우기가 없거나 흰색·배경색인 도형. 흰 바탕 슬라이드에서 보이지 않는다."""
+    properties = node.find(P + "spPr")
+    if properties is None:
+        return False
+    line = properties.find(A + "ln")
+    if line is None or line.find(A + "noFill") is None:
+        return False
+    if properties.find(A + "noFill") is not None:
+        return True
+    fill = properties.find(A + "solidFill")
+    if fill is None:
+        return False
+    scheme, rgb = fill.find(A + "schemeClr"), fill.find(A + "srgbClr")
+    # 밝기 조정(lumMod 등)이 붙은 색은 회색일 수 있어 보이는 도형으로 본다.
+    return (scheme is not None and scheme.get("val") in {"bg1", "lt1"} and not list(scheme)) or (
+        rgb is not None and (rgb.get("val") or "").upper() == "FFFFFF" and not list(rgb))
+
+
 def _is_label_box(node):
     """채우기·테두리 없는 글상자는 연결의 라벨 후보다."""
     properties = node.find(P + "spPr")
@@ -138,7 +157,8 @@ def pptx_shapes(tree, paragraphs):
                 box = _box(xfrm, transform) if xfrm is not None else None
                 if box is not None:
                     nodes.append({"id": ident, "name": name, "text": text.strip(), "box": box,
-                                  "label_box": child.tag == P + "sp" and bool(text.strip()) and _is_label_box(child)})
+                                  "label_box": child.tag == P + "sp" and bool(text.strip()) and _is_label_box(child),
+                                  "invisible": child.tag == P + "sp" and not text.strip() and _invisible(child)})
     walk(tree, Transform())
     return nodes, lines
 
@@ -188,8 +208,8 @@ def relation_lines(nodes, lines, size, *, position_of=None):
     for line in lines:
         ends, how = [], []
         if "nodes" in line:
-            # PDF 트리 선처럼 미리 이어 붙여 끝을 정한 연결.
-            ends, how = list(line["nodes"]), ["position", "position"]
+            # PDF 트리 선·PPTX 이어 붙인 선처럼 미리 끝을 정한 연결. 끝을 정한 방법을 함께 받을 수 있다.
+            ends, how = list(line["nodes"]), list(line.get("how", ("position", "position")))
         for reference, point in (() if "nodes" in line else (
                 (line["start_ref"], line["ends"][0] if line["ends"] else None),
                 (line["end_ref"], line["ends"][1] if line["ends"] else None))):
@@ -219,11 +239,11 @@ def relation_lines(nodes, lines, size, *, position_of=None):
         label, label_estimated = line["text"], False
         if not label and line["ends"]:
             (x0, y0), (x1, y1) = line["ends"]
-            middle = ((x0 + x1) / 2, (y0 + y1) / 2)
-            reach = max(math.hypot(x1 - x0, y1 - y0) * .6, tolerance * 3)
-            near = [(math.dist(middle, ((node["box"][0] + node["box"][2]) / 2, (node["box"][1] + node["box"][3]) / 2)), node)
-                    for node in labels]
-            near = [item for item in near if item[0] <= reach]
+            # 이어 붙인 선은 조각마다의 가운데에서 라벨을 찾는다.
+            spots = line.get("label_points") or [(((x0 + x1) / 2, (y0 + y1) / 2), math.hypot(x1 - x0, y1 - y0))]
+            near = [(math.dist(middle, ((node["box"][0] + node["box"][2]) / 2, (node["box"][1] + node["box"][3]) / 2)),
+                     node, max(length * .6, tolerance * 3)) for middle, length in spots for node in labels]
+            near = [item[:2] for item in near if item[0] <= item[2]]
             if near:
                 label, label_estimated = min(near, key=lambda item: item[0])[1]["text"], True
         directed = line["head"] not in (None, "none") or line["tail"] not in (None, "none")
@@ -277,7 +297,8 @@ def relation_lines(nodes, lines, size, *, position_of=None):
         output.append(f"- {display(start)} {arrow} {display(end)}" + ("".join(" · " + value for value in details)))
     containers = []
     # 글자가 있는 상자만 경계로 본다. 슬라이드 대부분을 덮는 배경 도형은 경계가 아니다.
-    bounds = [node for node in shapes if node["text"] and _area(node["box"]) < page_area * .8]
+    # 설명 글로 이름을 붙인 아이콘(PPTX)은 경계가 아니다.
+    bounds = [node for node in shapes if node["text"] and not node.get("captioned") and _area(node["box"]) < page_area * .8]
     for node in shapes:
         parents = [other for other in bounds if other is not node and _area(other["box"]) >= _area(node["box"]) * 2
                    and other["box"][0] - tolerance <= node["box"][0] and other["box"][1] - tolerance <= node["box"][1]
@@ -292,6 +313,227 @@ def relation_lines(nodes, lines, size, *, position_of=None):
         for parent, children in grouped.values():
             output.append(f"- {display(parent)}: " + ", ".join(display(child) for child in children))
     return output, estimated, unresolved
+
+
+def review_status(block, unresolved, max_review_ratio=.3):
+    """관계 묶음을 본문에 붙일지("added") AI 해석 후보로 남길지("review") 정한다. PDF·PPTX 공통 기준이다.
+
+    끝을 못 찾은 연결과 이름 없는 상자가 각각 연결의 30% 이하일 때만 붙인다.
+    """
+    if not block:
+        return None
+    section = block[1:block.index("### 포함 관계 (위치로 추정)")] if "### 포함 관계 (위치로 추정)" in block else block[1:]
+    edges = [line for line in section if line.startswith("- ")]
+    if not edges:
+        return None
+    unnamed = sum(line.count("이름 없는 도형") for line in edges)
+    if unresolved > len(edges) * max_review_ratio or unnamed > len(edges) * max_review_ratio:
+        return "review"
+    return "added"
+
+
+# --- PPTX: 파일의 연결 참조를 우선하고, 꺾임용 투명 상자·나무 모양 갈래·떨어진 설명 글을 정리한다(D-167). ---
+PPTX_POINT = 12700          # EMU per pt
+WAYPOINT_MAX = .1           # 슬라이드 짧은 변 대비. 이보다 작은 보이지 않는 도형은 꺾인 선을 잇는 점이다.
+CAPTION_GAP = .05           # 슬라이드 짧은 변 대비. 글자 없는 도형과 설명 글 사이 최대 간격.
+
+
+def _within(inner, outer, slack):
+    return (outer[0] - slack <= inner[0] and outer[1] - slack <= inner[1]
+            and inner[2] <= outer[2] + slack and inner[3] <= outer[3] + slack)
+
+
+def _segment_distance(point, ends):
+    (x0, y0), (x1, y1) = ends
+    dx, dy = x1 - x0, y1 - y0
+    if dx == dy == 0:
+        return math.dist(point, (x0, y0))
+    t = max(0.0, min(1.0, ((point[0] - x0) * dx + (point[1] - y0) * dy) / (dx * dx + dy * dy)))
+    return math.dist(point, (x0 + t * dx, y0 + t * dy))
+
+
+def _pptx_caption(node, labels, used, gap):
+    """글자 없는 도형(아이콘·그림·빈 상자)의 바로 아래(없으면 위)에서 가운데가 맞는 글상자.
+
+    아이콘 그림은 투명한 여백이 있어 설명 글과 겹치기도 한다. 글상자의 가운데가 도형 아래쪽(위쪽) 1/4 밖에 있으면
+    겹쳐도 설명 글로 본다.
+    """
+    x0, y0, x1, y1 = node["box"]
+    middle, quarter = (y0 + y1) / 2, (y1 - y0) / 4
+    best = None
+    for label in labels:
+        if id(label) in used:
+            continue
+        lx0, ly0, lx1, ly1 = label["box"]
+        if abs((lx0 + lx1) / 2 - (x0 + x1) / 2) > max(6 * PPTX_POINT, .25 * max(x1 - x0, lx1 - lx0)):
+            continue
+        if (ly0 + ly1) / 2 >= middle + quarter and ly0 <= y1 + gap:
+            rank = (0, max(0, ly0 - y1))
+        elif (ly0 + ly1) / 2 <= middle - quarter and ly1 >= y0 - gap:
+            rank = (1, max(0, y0 - ly1))
+        else:
+            continue
+        if best is None or rank < best[0]:
+            best = (rank, label)
+    return best[1] if best else None
+
+
+def pptx_relation_lines(nodes, lines, size):
+    """PPTX 슬라이드의 관계 문장과 (위치 추정 수, 확인 필요 수). nodes/lines는 pptx_shapes 결과다.
+
+    - 글자 없는 도형은 파일 속 도형 이름("직사각형 16" 같은 자동 이름) 대신 아래·위 설명 글을 이름으로 쓴다.
+    - 글자 없는 도형 안의 글자 없는 도형(아이콘을 이루는 조각)은 바깥 도형으로 본다.
+    - 위아래로 맞붙은 같은 너비의 칸(클래스 제목·속성 칸)은 맨 위 칸 이름의 한 상자로 본다.
+    - 보이지 않는 작은 도형에서 끊긴 선, 다른 선 위에서 끝나는 선은 이어 붙여 양 끝 상자를 찾는다.
+      갈래가 여럿이면 화살촉 없는 쪽 하나를 출발점으로, 모두 화살촉이 없으면 줄기 방향이 하나뿐인 쪽을 뿌리로 본다.
+    """
+    width, height = size
+    short = min(width, height)
+    tolerance, page_area = short * TOLERANCE, width * height
+    labels = [node for node in nodes if node["label_box"]]
+    shapes = [node for node in nodes if not node["label_box"]]
+    for node in shapes:
+        box = node["box"]
+        node["waypoint"] = bool(node.get("invisible")) and max(box[2] - box[0], box[3] - box[1]) <= short * WAYPOINT_MAX
+        if not node["text"]:
+            node["name"] = ""   # 글자 없는 도형의 파일 속 이름은 자동 이름·생성 코드라 표시 이름으로 쓰지 않는다.
+    blank = [node for node in shapes if not node["text"] and not node["waypoint"]]
+    parent = {}
+    for node in blank:
+        outer = [other for other in blank if other is not node and _area(other["box"]) < page_area * .1
+                 and _area(other["box"]) >= _area(node["box"]) and _within(node["box"], other["box"], PPTX_POINT)]
+        if outer:
+            parent[id(node)] = max(outer, key=lambda other: (_area(other["box"]), -shapes.index(other)))
+
+    def root(node):
+        for _ in range(8):
+            if node is None or id(node) not in parent:
+                return node
+            node = parent[id(node)]
+        return node
+    kept = [node for node in shapes if not node["waypoint"] and id(node) not in parent]
+    # 위아래로 맞붙고 좌우 끝이 같은 칸(클래스 도식의 제목·속성 칸)은 맨 위 칸의 상자다(PDF의 칸 합치기와 같다).
+    for node in sorted(kept, key=lambda node: node["box"][1]):
+        above = next((other for other in kept if other is not node and id(other) not in parent
+                      and abs(other["box"][0] - node["box"][0]) <= PPTX_POINT
+                      and abs(other["box"][2] - node["box"][2]) <= PPTX_POINT
+                      and abs(other["box"][3] - node["box"][1]) <= PPTX_POINT), None)
+        if above is not None:
+            top = root(above)
+            parent[id(node)] = top
+            top["box"] = (min(top["box"][0], node["box"][0]), min(top["box"][1], node["box"][1]),
+                          max(top["box"][2], node["box"][2]), max(top["box"][3], node["box"][3]))
+    kept = [node for node in kept if id(node) not in parent]
+    used, owner = set(), {}
+    for node in sorted((node for node in kept if not node["text"]), key=lambda node: -_area(node["box"])):
+        caption = _pptx_caption(node, labels, used, short * CAPTION_GAP)
+        if caption is not None:
+            used.add(id(caption))
+            owner[id(caption)] = node
+            node["text"], node["captioned"] = " ".join(caption["text"].split()), True
+            # 선이 설명 글 쪽에서 시작해도 그 도형에 닿은 것으로 본다.
+            node["box"] = tuple(min(a, b) if index < 2 else max(a, b)
+                                for index, (a, b) in enumerate(zip(node["box"], caption["box"])))
+    by_id = {}
+    for node in shapes + labels:
+        by_id.setdefault(node["id"], []).append(node)
+    # 연결선이 글상자에 붙어 있으면: 설명 글이면 그 아이콘에, 아니면 그 글상자 자체를 상자로 본다.
+    promoted = []
+    for reference in {value for line in lines for value in (line["start_ref"], line["end_ref"]) if value is not None}:
+        matches = by_id.get(reference, [])
+        if len(matches) == 1 and matches[0]["label_box"] and id(matches[0]) not in owner:
+            matches[0]["label_box"] = False
+            promoted.append(matches[0])
+
+    def end_of(reference, point, decoration):
+        if reference is not None:
+            matches = by_id.get(reference, [])
+            node, how = (root(owner.get(id(matches[0]), matches[0])) if len(matches) == 1 else None), "file"
+        elif point is not None:
+            node, how = root(_touching(point, shapes, tolerance, page_area)), "position"
+        else:
+            node, how = None, "none"
+        waypoint = node if node is not None and node.get("waypoint") else None
+        return {"node": None if waypoint else node, "how": how, "waypoint": waypoint, "point": point,
+                "decoration": decoration if decoration not in (None, "none") else None}
+    items = []
+    for line in lines:
+        points = line["ends"] or (None, None)
+        items.append((line, (end_of(line["start_ref"], points[0], line["head"]),
+                             end_of(line["end_ref"], points[1], line["tail"]))))
+    group = list(range(len(items)))
+
+    def find(index):
+        while group[index] != index:
+            group[index] = group[group[index]]
+            index = group[index]
+        return index
+    for index, (line, ends) in enumerate(items):
+        for end in ends:
+            if end["node"] is not None:
+                continue
+            for other, (other_line, other_ends) in enumerate(items):
+                if other == index:
+                    continue
+                joined = (end["waypoint"] is not None and any(item["waypoint"] is end["waypoint"] for item in other_ends)) or (
+                    end["point"] is not None and other_line["ends"] is not None and (
+                        any(item["node"] is None and item["point"] is not None
+                            and math.dist(end["point"], item["point"]) <= 3 * PPTX_POINT for item in other_ends)
+                        or _segment_distance(end["point"], other_line["ends"]) <= 2 * PPTX_POINT))
+                if joined:
+                    group[find(index)] = find(other)
+    members = {}
+    for index in range(len(items)):
+        members.setdefault(find(index), []).append(index)
+    merged = []
+    for indexes in sorted(members.values()):
+        if len(indexes) == 1:
+            line, ends = items[indexes[0]]
+            merged.append({**line, "nodes": tuple(end["node"] for end in ends), "how": [end["how"] for end in ends]})
+            continue
+        pieces = [items[index][0] for index in indexes]
+        terminals = []
+        for index in indexes:
+            line, ends = items[index]
+            upright = line["ends"] is not None and abs(line["ends"][1][0] - line["ends"][0][0]) < abs(
+                line["ends"][1][1] - line["ends"][0][1])
+            for end in ends:
+                if end["node"] is None:
+                    continue
+                same = next((item for item in terminals if item["node"] is end["node"]), None)
+                if same is not None:
+                    same["decoration"] = same["decoration"] or end["decoration"]
+                    continue
+                terminals.append({**end, "upright": upright})
+        base = {"id": pieces[0]["id"], "text": " ".join(piece["text"] for piece in pieces if piece["text"]),
+                "start_ref": None, "end_ref": None, "dash": next((piece["dash"] for piece in pieces if piece["dash"]), None),
+                "label_points": [(((piece["ends"][0][0] + piece["ends"][1][0]) / 2, (piece["ends"][0][1] + piece["ends"][1][1]) / 2),
+                                  math.dist(*piece["ends"])) for piece in pieces if piece["ends"] is not None]}
+
+        def edge(start, end):
+            return {**base, "ends": (start["point"], end["point"]) if start and end and start["point"] and end["point"] else None,
+                    "head": start["decoration"] if start else None, "tail": end["decoration"] if end else None,
+                    "nodes": (start["node"] if start else None, end["node"] if end else None),
+                    "how": [start["how"] if start else "none", end["how"] if end else "none"]}
+        sources = [item for item in terminals if item["decoration"] is None]
+        if len(terminals) == 2:
+            merged.append(edge(*terminals))
+        elif len(terminals) > 2 and len(sources) == 1:
+            merged.extend(edge(sources[0], item) for item in terminals if item is not sources[0])
+        elif len(terminals) > 2 and len(sources) == len(terminals):
+            upright = [item for item in terminals if item["upright"]]
+            flat = [item for item in terminals if not item["upright"]]
+            trunk = upright[0] if len(upright) == 1 else flat[0] if len(flat) == 1 else None
+            if trunk is not None:
+                merged.extend(edge(trunk, item) for item in terminals if item is not trunk)
+            else:
+                merged.extend(edge(item, None) for item in terminals)
+        elif terminals:
+            merged.extend(edge(item, None) for item in terminals)
+        else:
+            merged.append({**edge(None, None), "ends": pieces[0]["ends"]})
+    return relation_lines(kept + promoted + [label for label in labels if id(label) not in used and label["label_box"]],
+                          merged, size)
 
 
 # --- PDF: 저장된 그리기 명령(사각형·선·화살촉)만으로 관계를 추정한다. 모두 "위치로 추정"이다. ---
@@ -720,11 +962,7 @@ def pdf_page_relations(document, index, *, max_review_ratio=.3):
             textpage.close()
     finally:
         page.close()
-    section = block[1:block.index("### 포함 관계 (위치로 추정)")] if "### 포함 관계 (위치로 추정)" in block else block[1:]
-    edges = [line for line in section if line.startswith("- ")]
-    if not edges:
-        return None, None
-    unnamed = sum(line.count("이름 없는 도형") for line in edges)
-    if unresolved > len(edges) * max_review_ratio or unnamed > len(edges) * max_review_ratio:
-        return None, "review"
+    status = review_status(block, unresolved, max_review_ratio)
+    if status != "added":
+        return None, status
     return "[도식 관계 · PDF에는 연결 정보가 없어 선과 상자의 위치로 추정함]\n" + "\n".join(block), "added"

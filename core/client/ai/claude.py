@@ -5,6 +5,7 @@ API 키를 전달하지 않고, bare 모드처럼 OAuth/keychain 로그인을 �
 """
 
 import asyncio
+import base64
 from hashlib import sha256
 import json
 import os
@@ -20,7 +21,8 @@ from jsonschema import Draft202012Validator
 from core.common.json_codec import canonical_json_bytes
 from core.runtime.client_platform import private_directory, is_windows, platform_error_code
 from core.runtime.client_process import cli_command
-from .codex import CodexAdapter, _ENVIRONMENT as _CODEX_ENVIRONMENT, _execute, _object, _web_search_queries, _write_new
+from .codex import (CodexAdapter, _ENVIRONMENT as _CODEX_ENVIRONMENT, _execute, _object, _web_search_queries,
+                    _write_new, read_images)
 from .contracts import AIAdapterError, MAX_PROMPT_BYTES, MAX_RESULT_BYTES, MAX_SCHEMA_BYTES
 
 
@@ -298,25 +300,45 @@ class ClaudeAdapter(CodexAdapter):
             raise AIAdapterError("ai_cli_incompatible")
         self._question_profile_checked = True
 
+    supports_images = True
+    _image_help = ("--help",)
+    _image_flag = b"--input-format"
+
+    async def _image_help_output(self, arguments):
+        return await _execute(arguments, directory=None, environment=environment())
+
     async def run(self, *, prompt, schema, directory, output_schema=None, on_event=None, session_id=None, web_search=False,
-                  question_profile=False, stream_answer=False):
+                  question_profile=False, stream_answer=False, images=None):
         if (not isinstance(prompt, str) or not isinstance(schema, dict)
                 or output_schema is not None and not isinstance(output_schema, dict)
                 or type(web_search) is not bool or web_search and (session_id is not None or self.persist_session)
                 or type(question_profile) is not bool
                 or type(stream_answer) is not bool
                 or stream_answer and not question_profile
-                or question_profile and (session_id is not None or self.persist_session or web_search)):
+                or question_profile and (session_id is not None or self.persist_session or web_search)
+                or images is not None and (session_id is not None or web_search or question_profile)):
             raise AIAdapterError("ai_invalid_input")
         prompt_bytes, original_schema = prompt.encode("utf-8"), canonical_json_bytes(schema)
         effective_schema = schema if output_schema is None else output_schema
         schema_bytes = canonical_json_bytes(effective_schema)
         if len(prompt_bytes) > min(MAX_PROMPT_BYTES, _MAX_STDIN_BYTES) or max(len(schema_bytes), len(original_schema)) > MAX_SCHEMA_BYTES:
             raise AIAdapterError("ai_input_limit")
+        attached = read_images(images)
+        stdin = prompt_bytes
+        if attached:
+            # 그림은 stream-json 사용자 메시지 한 개에 글과 함께 담는다(D-169). 도구 금지·격리 옵션은 그대로다.
+            content = [{"type": "image", "source": {"type": "base64", "media_type": item["media_type"],
+                        "data": base64.b64encode(item["raw"]).decode("ascii")}} for item in attached]
+            content.append({"type": "text", "text": prompt})
+            stdin = json.dumps({"type": "user", "message": {"role": "user", "content": content}},
+                               ensure_ascii=False).encode("utf-8") + b"\n"
+            if len(stdin) > _MAX_STDIN_BYTES:
+                raise AIAdapterError("ai_input_limit")
         env = environment()
         await self.preflight()
         executable, version = self._capabilities
-        arguments = [*executable, "--print", "--output-format", "stream-json", "--verbose", *_ISOLATION,
+        arguments = [*executable, "--print", *(("--input-format", "stream-json") if attached else ()),
+            "--output-format", "stream-json", "--verbose", *_ISOLATION,
             "--tools", "WebSearch" if web_search else "", "--disable-slash-commands", "--no-chrome",
             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disallowedTools", "mcp__*",
             "--permission-mode", "dontAsk", "--permission-prompts", "none", "--json-schema", schema_bytes.decode()]
@@ -365,6 +387,10 @@ class ClaudeAdapter(CodexAdapter):
                 "instructions_argument": "--append-system-prompt", "feature_support_checked": False}
         if stream_answer:
             metadata["answer_stream"] = {"transport": "stream-json", "partial_messages": True}
+        if attached:
+            metadata["input_images"] = [{key: item[key] for key in ("media_type", "sha256", "bytes")} for item in attached]
+            metadata["prompt_transport"] = "stream-json"
+            metadata["stdin_sha256"] = sha256(stdin).hexdigest()
         events, started = _Events(web_search=web_search, stream_answer=stream_answer), time.monotonic()
         callback = on_event if on_event is not None else self.on_event
         try:
@@ -376,8 +402,10 @@ class ClaudeAdapter(CodexAdapter):
                 if code != 0 or b"--include-partial-messages" not in help_output:
                     raise AIAdapterError("ai_cli_incompatible")
                 self._answer_stream_checked = True
+            if attached and not await self.image_input_available():
+                raise AIAdapterError("ai_cli_incompatible")
             code, output, stderr = await _execute(arguments, directory=execution_directory, environment=env,
-                prompt=prompt_bytes, timeout=self.timeout_seconds, on_event=callback or (lambda _: None), event_parser=events)
+                prompt=stdin, timeout=self.timeout_seconds, on_event=callback or (lambda _: None), event_parser=events)
             metadata.update(returncode=code, stdout_sha256=sha256(output).hexdigest(), stderr_sha256=sha256(stderr).hexdigest(),
                             reported_model=events.model, token_usage=events.token_usage)
             if code != 0:

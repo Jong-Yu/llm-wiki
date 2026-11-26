@@ -36,33 +36,18 @@ export function workflowPreview(app) {
         code = `import { proposed } from '${root}/previewStore';\n${code}`;
         code = once(
           code,
-          "path: '/sessions',",
+          "path: '/tasks',",
           "path: proposed ? '/tasks' : '/sessions',",
         );
         code = once(
           code,
-          "label: 'AI 세션',",
+          "label: '작업',",
           "label: proposed ? '작업' : 'AI 세션',",
-        );
-        code = once(
-          code,
-          "routes: ['/sessions', '/sessions/history'],",
-          "routes: ['/sessions', '/sessions/history', '/tasks'],",
-        );
-        code = once(
-          code,
-          "  '/sessions': 'AI 세션',",
-          "  '/tasks': '작업',\n  '/sessions': 'AI 세션',",
         );
         code = once(
           code,
           '  const goBack = (): void => {',
           `  const goBack = (): void => {\n    const previewReturn: unknown = location.state?.workflowReturnTo;\n    if (proposed && typeof previewReturn === 'string' && /^\\/(tasks|documents|source)(\\?|$)/.test(previewReturn)) { void navigate(-1); return; }`,
-        );
-        code = once(
-          code,
-          '  const canGoUp = breadcrumb.length > 1;',
-          "  const canGoUp = breadcrumb.length > 1 || (proposed && typeof location.state?.workflowReturnTo === 'string');",
         );
         return { code, map: null };
       }
@@ -70,31 +55,27 @@ export function workflowPreview(app) {
         code = `import { proposed } from '${root}/previewStore';\nimport { PreviewActivity } from '${root}/PreviewActivity';\n${code}`;
         code = once(
           code,
-          '      <Link\n        to="/sessions"',
-          '      {proposed ? <PreviewActivity /> : <Link\n        to="/sessions"',
-        );
-        code = once(
-          code,
-          '      </Link>\n      {connectionId',
-          '      </Link>}\n      {connectionId',
+          '      {activity ?? (',
+          '      {proposed ? <PreviewActivity /> : (',
         );
         return { code, map: null };
       }
       if (file === nav) {
+        // 제품의 taskId를 시안의 고정 task 식별자에만 맞춥니다.
         code = once(
           code,
-          "    case '/jobs':\n      return `job:${query.get('jobId') ?? ''}`;",
-          "    case '/tasks':\n      return `task:${query.get('task') ?? ''}`;\n    case '/jobs':\n      return `job:${query.get('jobId') ?? ''}`;",
+          "return `task:${query.get('taskId') ?? 'list'}`;",
+          "return `task:${query.get('task') ?? ''}`;",
         );
         code = once(
           code,
-          "  if (pathname === '/jobs' || pathname === '/sessions/history')",
-          "  if (pathname === '/tasks') return '/tasks';\n  if (pathname === '/jobs' || pathname === '/sessions/history')",
+          "return query.get('taskId')",
+          "return query.get('task')",
         );
         code = once(
           code,
-          "    case '/jobs':\n      return [{ label: 'AI 세션', to: '/sessions' }, { label: '분석 작업' }];",
-          "    case '/tasks':\n      return query.get('task') ? [{ label: '작업', to: '/tasks' }, { label: titleOf(`task:${query.get('task')}`) ?? '문서 처리' }] : [{ label: '작업' }];\n    case '/jobs':\n      return [{ label: 'AI 세션', to: '/sessions' }, { label: '분석 작업' }];",
+          "titleOf(`task:${query.get('taskId') ?? ''}`)",
+          "titleOf(`task:${query.get('task') ?? ''}`)",
         );
         return { code, map: null };
       }
@@ -107,13 +88,13 @@ export function workflowPreview(app) {
         );
         code = once(
           code,
-          '                                    진행·오류 보기',
+          '                                      작업 보기',
           "                                    {proposed ? '작업 보기' : '진행·오류 보기'}",
         );
         code = once(
           code,
-          '                                    to={view.progressPath}',
-          "                                    to={view.progressPath}\n                                    state={proposed ? { workflowReturnTo: '/documents' } : undefined}",
+          "state={{ workflowReturnTo: '/documents' }}",
+          "state={proposed ? { workflowReturnTo: '/documents' } : undefined}",
         );
         code = once(
           code,

@@ -121,6 +121,20 @@ class EmbeddedTextTests(unittest.TestCase):
         self.assertEqual(value['unread_ranges'], ['page 1: ' + formats.LOW_CONFIDENCE])
         self.assertFalse(value['complete'])
 
+    def test_picture_recovery_diagnostics_remain_attached_to_each_page(self):
+        recovered = {'text': '배포 생성 화면', 'score': 79.0, 'count': 111, 'weak': 22,
+                     'psm': 6, 'low_confidence': False,
+                     'warnings': ['ocr_single_block_candidate_preferred_reading_order_not_verified']}
+        value, calls, regions = self.convert([(True, 80, False), (True, 80, False)],
+                                            region=lambda image: recovered)
+        self.assertEqual(calls, [])
+        self.assertEqual(len(regions), 1)
+        for index, unit in enumerate(value['units'], 1):
+            self.assertIn(TEXT, unit['content'])
+            self.assertIn(recovered['text'], unit['content'])
+            self.assertIn(f'page {index}: ' + recovered['warnings'][0], value['warnings'])
+        self.assertTrue(value['complete'])
+
     def test_missing_ocr_engine_keeps_embedded_text_and_reports_unread(self):
         def missing(language):
             raise formats.DependencyMissing('tesseract_and_language_data')
@@ -195,6 +209,40 @@ class RegionOcrTests(unittest.TestCase):
     def test_single_block_retry_used_when_auto_layout_misses_boxed_text(self):
         found, calls = self.read({3: ('', None, 0, 0, 3), 6: ('스캔한 쪽 문장입니다', 91.0, 10, 0, 6)})
         self.assertEqual((found['text'], found['psm'], calls), ('스캔한 쪽 문장입니다', 6, [3, 6]))
+
+    def test_fragmented_low_confidence_picture_uses_existing_recovery_thresholds(self):
+        fragmented = '배     포\n생     성\n대     상\n선     박\n이     름\n저     장\n읽은 내용'
+        found, calls = self.read({3: (fragmented, 54.1, 119, 70, 3),
+                                 6: ('배포 생성 대상 선박 이미 사용 중인 이름입니다', 78.9, 111, 22, 6)})
+        self.assertEqual(calls, [3, 6])
+        self.assertEqual(found['psm'], 6)
+        self.assertFalse(found['low_confidence'])
+        self.assertIn('이미 사용 중인 이름입니다', found['text'])
+        self.assertIn('ocr_single_block_candidate_preferred_reading_order_not_verified', found['warnings'])
+
+    def test_fragmented_picture_retains_first_text_when_retry_loses_text_or_has_low_confidence(self):
+        fragmented = '배\n포\n생\n성\n대\n상\n선\n박\n읽은 내용'
+        for candidate in [('너무 짧음', 99.0, 10, 0, 6), ('아직 불확실', 69.0, 120, 5, 6)]:
+            with self.subTest(candidate=candidate):
+                found, calls = self.read({3: (fragmented, 54.1, 119, 70, 3), 6: candidate})
+                self.assertEqual((found['text'], calls), (fragmented, [3, 6]))
+                self.assertTrue(found['low_confidence'])
+                self.assertIn('ocr_fragmented_layout_manual_review_required', found['warnings'])
+
+    def test_picture_segmentation_retry_failure_preserves_read_text(self):
+        from PIL import Image
+        fragmented = '배\n포\n생\n성\n대\n상\n선\n박\n읽은 내용'
+        with patch.object(formats, '_ocr_attempt', side_effect=[
+                (fragmented, 54.1, 119, 70, 3), formats.OcrFailure('ocr_timeout')]):
+            found = formats.ocr_region_text(Image.new('RGB', (200, 100), 'white'), {}, 'kor+eng')
+        self.assertEqual(found['text'], fragmented)
+        self.assertTrue(found['low_confidence'])
+        self.assertIn('ocr_segmentation_retry_failed_original_ocr_retained', found['warnings'])
+
+    def test_confident_picture_with_short_lines_keeps_reading_order_without_retry(self):
+        text = 'A\nB\nC\nD\nE\nF\n이미 읽은 정상 내용'
+        found, calls = self.read({3: (text, 95.0, 20, 0, 3)})
+        self.assertEqual((found['text'], calls), (text, [3]))
 
     def test_whole_page_ocr_retries_single_block_only_when_empty(self):
         from PIL import Image

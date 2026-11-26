@@ -7,8 +7,14 @@ export type SourceConversionFailureExplanation = {
 export function conversionFailureExplanation(
   codes: readonly string[],
 ): SourceConversionFailureExplanation | null {
+  // 진단 목록이 잘렸어도 별도로 보존된 미변환 구간의 오류를 해석합니다.
+  const normalizedCodes = codes.map((code: string): string =>
+    code
+      .replace(/dependency_missing:([a-zA-Z0-9_.-]+)$/, 'dependency_missing_$1')
+      .replace(/^.*: (?=[a-zA-Z0-9_.-]+$)/, ''),
+  );
   const has = (...values: string[]): boolean =>
-    values.some((value: string): boolean => codes.includes(value));
+    values.some((value: string): boolean => normalizedCodes.includes(value));
   if (has('report_save_unconfirmed', 'conversion_receipt_mismatch'))
     return {
       body: '변환 결과가 서버에 저장되었는지 확인하지 못했습니다. 저장 실패로 확정할 수 없습니다.',
@@ -31,7 +37,7 @@ export function conversionFailureExplanation(
     };
   if (
     has('converter_unavailable') ||
-    codes.some((code: string): boolean =>
+    normalizedCodes.some((code: string): boolean =>
       code.startsWith('dependency_missing_'),
     )
   )
@@ -60,6 +66,16 @@ export function conversionFailureExplanation(
     return {
       body: '변환에 사용할 원본이 등록된 판본과 일치하지 않습니다.',
       next: '현재 원본 판본을 확인하고 변환할 대상을 다시 선택해 주세요.',
+    };
+  if (has('parser_failed'))
+    return {
+      body: '원본을 읽는 중 변환 프로그램에서 오류가 발생했습니다. 이미 읽은 내용은 보존되지만 나머지를 읽지 못했습니다.',
+      next: '원본 파일이 정상적으로 열리는지 확인하고 실행 기록을 살펴봐 주세요. 파일에 문제가 있으면 파일 교체를 선택해 주세요.',
+    };
+  if (has('conversion_output_or_archive_limit'))
+    return {
+      body: '변환된 내용 또는 원본 내부 자료가 처리할 수 있는 범위를 넘었습니다.',
+      next: '보관된 내용과 읽지 못한 범위를 확인해 주세요. 같은 원본을 반복 변환해도 이 한도가 달라지지는 않습니다.',
     };
   if (
     has(

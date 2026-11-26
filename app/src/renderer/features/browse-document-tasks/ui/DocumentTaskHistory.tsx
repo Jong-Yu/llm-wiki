@@ -6,6 +6,7 @@ import { Button } from '@renderer/shared/ui/Button';
 import { Icon } from '@renderer/shared/ui/Icon';
 import type { IconName } from '@renderer/shared/ui/Icon';
 import { IconButton } from '@renderer/shared/ui/IconButton';
+import { conversionDiagnosticMessages } from '../model/conversionDiagnostics';
 import type {
   DocumentTaskAction,
   DocumentTaskAttemptView,
@@ -60,9 +61,26 @@ const stepLabels: Record<DocumentTaskStepState, string> = {
 function attemptMessage(attempt: DocumentTaskAttemptView): string {
   const known = conversionFailureExplanation(attempt.codes);
   if (known) return known.body;
+  if (attempt.state === 'partial')
+    return '원본의 일부를 문자로 변환하지 못했습니다. 읽은 내용은 보관되어 있습니다.';
   if (attempt.state === 'failed')
     return '문자 변환이 중단됐습니다. 이 기록에서는 구체적인 중단 원인을 확인하지 못했습니다.';
   return attempt.message || '상세 설명이 기록되지 않았습니다.';
+}
+
+/** 도구 버전과 이미 설명한 경고를 제외하고 해석되지 않은 진단을 보존합니다. */
+function unexplainedCodes(values: readonly string[]): string[] {
+  const normalized = values.map((value: string): string =>
+    value.replace(/^.*: (?=[a-zA-Z0-9_.-]+$)/, ''),
+  );
+  return [...new Set(normalized)].filter(
+    (code: string): boolean =>
+      /^[a-zA-Z0-9_.-]+$/.test(code) &&
+      !/^(?:adapter_|pypdf_|pypdfium2_|openpyxl_|python-docx_|Pillow_|ocr_(?:auto|always|never)_language_|tesseract_v|unit_method_)/.test(
+        code,
+      ) &&
+      conversionDiagnosticMessages([code]).length === 0,
+  );
 }
 
 /** 보존된 변환 시도, 현재 단계와 명시 행동을 나누어 보여 줍니다. 기록 열람은 실행하지 않습니다. */
@@ -83,7 +101,11 @@ export function DocumentTaskHistory({
       (item: DocumentTaskView['results'][number]): boolean => item.current,
     ) ?? task.results[0];
   const action = task.primaryAction;
-  const review = task.textReviewScopes.length > 0;
+  const review =
+    task.textReviewScopes.length > 0 ||
+    (!!textReviewPath &&
+      task.state === 'partial' &&
+      task.steps[0]?.state === 'review');
   const statusIcon: IconName =
     task.state === 'complete'
       ? 'circle-check'
@@ -237,6 +259,8 @@ export function DocumentTaskHistory({
             <tbody>
               {task.attempts.map(
                 (attempt: DocumentTaskAttemptView): JSX.Element => {
+                  const messages = conversionDiagnosticMessages(attempt.codes);
+                  const codes = unexplainedCodes(attempt.codes);
                   const status = attemptStatuses[attempt.state] ?? {
                     label: '상태 확인 필요',
                     icon: 'circle-help',
@@ -266,6 +290,16 @@ export function DocumentTaskHistory({
                       <td data-label="처리 내용">
                         <div>
                           <p>{attemptMessage(attempt)}</p>
+                          {messages.length > 0 && (
+                            <ul
+                              className={styles.diagnostics}
+                              aria-label="변환 시 확인할 내용"
+                            >
+                              {messages.map((message: string): JSX.Element => (
+                                <li key={message}>{message}</li>
+                              ))}
+                            </ul>
+                          )}
                           {attempt.state === 'failed' &&
                             !conversionFailureExplanation(attempt.codes) &&
                             attempt.message && (
@@ -273,16 +307,9 @@ export function DocumentTaskHistory({
                                 기록된 메시지: {attempt.message}
                               </p>
                             )}
-                          {attempt.codes.some((code: string): boolean =>
-                            /^[a-zA-Z0-9_.-]+$/.test(code),
-                          ) && (
+                          {codes.length > 0 && (
                             <p className={styles.diagnostics}>
-                              진단 코드:{' '}
-                              {attempt.codes
-                                .filter((code: string): boolean =>
-                                  /^[a-zA-Z0-9_.-]+$/.test(code),
-                                )
-                                .join(' · ')}
+                              진단 코드: {codes.join(' · ')}
                             </p>
                           )}
                         </div>

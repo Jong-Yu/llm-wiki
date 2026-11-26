@@ -69,7 +69,11 @@ export function DocumentTaskDetail({
     ) ?? task.results[0];
   const action = task.primaryAction;
   const measure = task.measurement;
-  const review = task.textReviewScopes.length > 0;
+  const review =
+    task.textReviewScopes.length > 0 ||
+    (!!textReviewPath &&
+      task.state === 'partial' &&
+      task.steps[0]?.state === 'review');
   return (
     <div
       className={`${styles.root} ${styles.detail}`}
