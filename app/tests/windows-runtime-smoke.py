@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from urllib.parse import quote
 from urllib.request import urlopen
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -107,6 +108,8 @@ def native(runtime, output):
     if sys.platform != "win32" or Path(sys.executable).resolve() != (runtime / "python/python.exe").resolve():
         raise ValueError("bundled_windows_python_required")
     from core.client.office_runtime import find_libreoffice
+    from core.runtime.client_platform import private_directory, platform_error_code, _sid
+    from core.runtime.desktop_bridge import _probe_job, prepare as prepare_private_execution
     from PIL import Image
     import pypdfium2
     import win32api, win32file, win32security, win32job  # noqa: F401
@@ -121,6 +124,59 @@ def native(runtime, output):
     if office != (runtime / "office/program/soffice.exe").resolve():
         raise ValueError("bundled_office_not_selected")
     evidence.update(host_office_absent=True, bundled_office_selected=True)
+
+    def diagnose(name, operation):
+        """합성 경로의 실제 실패 단계만 기록하고 SID·토큰·원시 예외 문구는 공개하지 않는다."""
+        item = {"name": name}
+        try:
+            result = operation()
+            item.update(ok=True, details=result if isinstance(result, dict) else None)
+        except Exception as error:
+            known = platform_error_code(error)
+            if known is None and str(error) in {
+                "invalid_execution_name", "invalid_token_input", "process_probe_failed",
+                "private_file_check_failed", "runtime_probe_cleanup_failed",
+            }:
+                known = str(error)
+            frames = []
+            for frame in traceback.extract_tb(error.__traceback__):
+                path = Path(frame.filename)
+                try:
+                    filename = path.relative_to(runtime).as_posix()
+                except ValueError:
+                    filename = path.name
+                frames.append({"file": filename, "function": frame.name, "line": frame.lineno})
+            item.update(ok=False, error={"code": known or "unclassified_native_boundary_failure",
+                "type": type(error).__name__, "frames": frames,
+                **{field: value for field in ("winerror", "errno")
+                   if isinstance(value := getattr(error, field, None), int)}})
+        evidence.setdefault("diagnostics", []).append(item)
+        write_json(output / "native-result.json", evidence)
+        return item
+
+    def acl_summary(path):
+        """Windows ACL은 주체 이름 대신 현재 사용자·시스템·관리자·기타의 개수로만 표시한다."""
+        security = win32security.GetNamedSecurityInfo(str(path), win32security.SE_FILE_OBJECT,
+            win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION)
+        sid = _sid()
+        dacl = security.GetSecurityDescriptorDacl()
+        allowed = {"current_user": 0, "system": 0, "administrators": 0, "other": 0}
+        roles = {win32security.ConvertSidToStringSid(sid): "current_user",
+                 "S-1-5-18": "system", "S-1-5-32-544": "administrators"}
+        denied = unsupported = 0
+        if dacl is not None:
+            for index in range(dacl.GetAceCount()):
+                ace = dacl.GetAce(index)
+                if ace[0][0] == win32security.ACCESS_ALLOWED_ACE_TYPE:
+                    allowed[roles.get(win32security.ConvertSidToStringSid(ace[2]), "other")] += 1
+                elif ace[0][0] == win32security.ACCESS_DENIED_ACE_TYPE:
+                    denied += 1
+                else:
+                    unsupported += 1
+        control, _ = security.GetSecurityDescriptorControl()
+        return {"owner_matches_current_user": security.GetSecurityDescriptorOwner() == sid,
+                "dacl_present": dacl is not None, "dacl_protected": bool(control & win32security.SE_DACL_PROTECTED),
+                "allowed_aces": allowed, "denied_aces": denied, "unsupported_aces": unsupported}
 
     def command(name, arguments, *, token=None, bridge=False):
         """launch의 stdin을 종료까지 열어 실제 Electron 연결과 같은 수명으로 실행한다."""
@@ -162,8 +218,28 @@ def native(runtime, output):
         if not probe["capabilities"].get("runtime_ready") or probe["capabilities"].get("probe") != "private_file_and_process_tree":
             raise ValueError("native_protection_probe_failed")
         with tempfile.TemporaryDirectory(prefix="wiki-native-smoke-") as scratch:
-            prepared = command("private-prepare", ["prepare", "--root", scratch, "--name", "exec-windows-smoke"],
-                               token=b"synthetic-only-runtime-smoke-token-0000000000")
+            # stdlib 임시 폴더는 관찰만 하고, 앱처럼 존재하지 않는 전용 자식 root를 bridge가 생성한다.
+            diagnose("stdlib-temporary-root-acl", lambda: acl_summary(Path(scratch)))
+            diagnose("stdlib-temporary-root-boundary", lambda: private_directory(Path(scratch)))
+            diagnose("synchronous-job-probe", _probe_job)
+            private_root = Path(scratch) / "private-executions"
+            token = b"synthetic-only-runtime-smoke-token-0000000000"
+            try:
+                prepared = command("private-prepare", ["prepare", "--root", str(private_root), "--name", "exec-windows-smoke"],
+                                   token=token)
+            except Exception:
+                if private_root.exists():
+                    diagnose("failed-private-root-acl", lambda: acl_summary(private_root))
+                # subprocess 계약에서 실패하면 새 합성 경로로 동일 번들의 정확한 Python 실패 지점을 남긴다.
+                diagnose("direct-private-prepare", lambda: prepare_private_execution(
+                    Path(scratch) / "diagnostic-executions", "exec-diagnostic-smoke", token))
+                raise
+            diagnose("created-private-root-acl", lambda: acl_summary(private_root))
+            reused = command("private-prepare-reuse", ["prepare", "--root", str(private_root), "--name", "exec-windows-smoke-reuse"],
+                             token=token)
+            if prepared["directory"] == reused["directory"] or Path(prepared["directory"]).parent != Path(reused["directory"]).parent:
+                raise ValueError("private_root_reuse_mismatch")
+            evidence["private_root_first_and_reused_prepare"] = True
             work = Path(prepared["work_directory"])
             synthetic_presentation(work / "source.pptx")
             original_hash = digest(work / "source.pptx")
