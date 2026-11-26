@@ -1,5 +1,12 @@
 # 실행 환경 작업 기록
 
+## 2026-11-26 — PPT 그림 문자 복구 0.6.5 배포
+
+- 사용자의 운영 서버·Windows 배포 승인에 따라45개 변경을 `39ac71076efa372397e9c7446402fbd0c86a6b38`/`v0.6.5`에 고정하고 [0.6.5 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.5-portable)을 공개했다. PPT 검토 대상 복원·개인 AI 그림 문자 복구·본문/초안 보존·취소를 포함한다. 실제6그림 판독과 보존은 [sources 검증](../sources/HISTORY.md#2026-11-26--저신뢰-pptx-그림-문자-복구와-실제-voc-검증d-170)을 따른다.
+- 서버는 기존 검증 snapshot492파일에 승인된2파일만 반영했고 서버 Python277파일이 고정 commit과 같다. 후보47검사·인계25검사와 같은 공개 주소/터널·local/public API/MCP/VOC6경로의 무인증401을 확인했다. 운영 분석/질문 실행 중 작업은 없었다. 보존 대상1,841파일 중1,840개는 동일하고 알림 DB만 자연 조회에 따라 변경됐다. 별도 사본 대조로 해당 문서의 전체 입력 대기→121/122/124/128/136슬라이드 pending 복원과 사건1개·변경 순번1개만 확인했다. 원본/보고 참조·기존 판단·보정·승인·실행·다른11workflow·원문/히스토리/정책/규약/주소는 보존됐다. 최초 전체 바이트 불일치 결과를 지우지 않고 의도한 파생 변경의 분류 검증을 별도로 남겼다.
+- Python 집중162검사·제품 UI56검사·backend/IPC/보호 초안 회귀와 고정 checkout의 앱 빌드·릴리스70검사를 통과했다. 개인 소스360개·런타임2,996파일·PE0.6.5·아이콘·복구 IPC/최종 슬롯 코드·5초 종료 유예·ZIP/SHA를 확인했고 기존 의존성2,636파일은0.6.4와 같다. ZIP253,765,981바이트·SHA256 `d29fb475c1c141a6c0bd8086a03eb3ea11d9782232e2c9614ea0108c5d539340`.
+- 공개 ZIP/SHA의 인증 없는 전체 다운로드가 로컬 값·GitHub digest와 일치했다. 기존8릴리스/16자산·latest `app-0.4.1-portable`와 설치형 업데이트 피드는 유지했다. 근거는 `.local/releases/0.6.5-voc-recovery/`의 `local-verification-release.json`, `remote-verification.json`, `server-verification.json`이다. 실제 Windows·두PC·Codex 그림 판독·운영 인증 제출·사용자 전체 문서 AI 완료·Mac 설치 교체는 미실행이다.
+
 ## 2026-11-26 — 개인 AI 그림 문자 복구의 IPC·실행 경계
 
 - `notifications:recover-images`는 고정 슬라이드/원본/보고와 현재 권한을 전후 검사하며 후보만 반환한다. 일반 알림 조회의 outbox flush를 쓰지 않아 후보 생성에 서버 쓰기가 섞이지 않는다. 개인 실행기의 보호 요청/토큰 파일, 단일 JSONL 결과·단위 집합·크기/경고 한도·범위 변경·인증 정리를 검증했다.
