@@ -170,6 +170,7 @@ Wiki 상세의 AI 작업에서 실제 지원하는 추출 준비·입력 확인�
 | 화면 | 주소 예 |
 | --- | --- |
 | 문서·원본 목록 / 등록 | `/documents`, `/register` |
+| 문서 휴지통 | `/documents/trash`. 사이드바 하단에서 진입하며 공통 상단 탐색으로 목록 검색·선택 위치에 복귀 |
 | 문서 처리 작업 목록 / 상세 | `/tasks?q=…&status=…`, `/tasks?taskId=…` |
 | 템플릿 목록 / 등록 / 상세·편집 | `/templates`, `/templates?mode=register`, `/templates?templateId=…`와 `mode=edit`. 대상·모드별 초안 보존 |
 | 등록 템플릿으로 질문 시작 | `/chat?templateId=…` → 현재 채팅의 템플릿 선택만 적용하고 대화 주소로 정규화. 자동 전송 없음 |
