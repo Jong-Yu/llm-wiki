@@ -1,5 +1,14 @@
 # 실행 환경 작업 기록
 
+## 2026-11-26 — 등록 재개·원본 미리보기 0.6.6 공개
+
+- [0.6.6 Windows 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.6-portable)을 정식 공개했다. 제품 커밋 `52c3a82`/`v0.6.6`, Windows 검사 보정 커밋 `18f25f2`다. ZIP579,774,578바이트, SHA256 `275b1054c1214c75a5fe61aeb30de0d34e8ab47475d095fbc498c9ae51d7efa2`.
+- [Windows2022 실제 실행](https://github.com/Jong-Yu/llm-wiki/actions/runs/45779875623)에서 공개 ZIP 전체SHA·런타임17,693파일을 확인하고 보호 폴더 신규/재사용·Windows Job·번들Office·숨김2번을 포함한3장 PNG와 번호/문자 보존을 검증했다. Electron UI나 실제 계정 AI 호출 검증을 뜻하지 않는다. 사용자 원문은 전송하지 않았다.
+- 첫 Windows 실행은 시험의 stdlib 임시 폴더 owner가 현재사용자와 다르고 다른 ACE가 있어 보호 검사에서 거부됐다. 제품과 같은 새 자식 경로를 보호 실행기가 만들도록 시험을 고치자 최초·재사용 모두 통과했다. 제품 코드·배포ZIP·ACL 보호를 바꾸지 않았다. 최초 실패 산출물도 보존했다.
+- Mac에서 실제 VOC170장·문제5장의 PNG,121장 원본/고정문자 동시 표시·확대를 확인했다. 서버 업무코드/API 변경이 없어 재시작·운영자료 쓰기를 하지 않았고 기존 주소의 인증 경계4개를 확인했다. 공개 ZIP/SHA의 인증 없는 전체 다운로드와 기존9릴리스·18자산·latest 보존을 확인했다.
+- 증거: `.local/releases/0.6.6-registration-preview/`의 `local-verification-release.json`, `regression.json`, `windows-native/`, `windows-action.json`, `server-compatibility.json`, `remote-verification.json`. 실제 두PC·사용자 기기의 Electron 전체등록과 개인AI 호출은 남는다.
+
+
 ## 2026-11-26 — 등록 재개와 Windows 원본 미리보기 수정
 
 - Windows 보호 실행기의 허용 목록에 미리보기·그림 복구 등 기존 앱 CLI가 빠져 실행 전 거부되던 결함을 수정했다. 앱 자식 환경에 Program Files 경로를 전달하고 공통 Office 탐색기가 배포본의 렌더러를 우선한다. 공식 LibreOffice Portable26.2.4를 해시로 고정해 DLL·필터·라이선스와 함께 번들한다([D-171](DECISIONS.md#d-171--windows-배포본에-원본-렌더러-포함-2026-11-26)).
