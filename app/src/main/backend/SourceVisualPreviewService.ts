@@ -57,6 +57,8 @@ const messages: Record<string, string> = {
     '이 PC에서는 구형 PPT 미리보기를 지원하지 않습니다. 원본을 열어 확인하거나 PPTX 파일로 다시 등록해 주세요.',
   office_preview_failed:
     'Office 원본을 표시하지 못했습니다. 원본 파일을 열어 확인해 주세요.',
+  preview_page_count_mismatch:
+    '원본 슬라이드 수와 미리보기 결과가 달라 표시하지 못했습니다.',
   preview_page_not_found: '해당 원본 페이지를 찾을 수 없습니다.',
   preview_document_too_complex:
     '이 원본은 미리보기 처리 범위를 초과했습니다. 원본 파일을 열어 확인해 주세요.',

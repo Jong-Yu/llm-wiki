@@ -324,7 +324,12 @@ export async function registerConnectionHandlers(
     recovery,
     conversion,
   );
-  registerAnalysisExecutionHandlers(getWindow, rendererLocation, analysis);
+  registerAnalysisExecutionHandlers(
+    getWindow,
+    rendererLocation,
+    analysis,
+    notifications.execute.bind(notifications),
+  );
   registerResultDraftHandlers(
     getWindow,
     rendererLocation,

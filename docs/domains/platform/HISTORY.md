@@ -1,5 +1,13 @@
 # 실행 환경 작업 기록
 
+## 2026-11-26 — 등록 재개와 Windows 원본 미리보기 수정
+
+- Windows 보호 실행기의 허용 목록에 미리보기·그림 복구 등 기존 앱 CLI가 빠져 실행 전 거부되던 결함을 수정했다. 앱 자식 환경에 Program Files 경로를 전달하고 공통 Office 탐색기가 배포본의 렌더러를 우선한다. 공식 LibreOffice Portable26.2.4를 해시로 고정해 DLL·필터·라이선스와 함께 번들한다([D-171](DECISIONS.md#d-171--windows-배포본에-원본-렌더러-포함-2026-11-26)).
+- 미리보기에 숨김 슬라이드 내보내기·슬라이드 수 일치 검사·macOS 한글 글꼴 설정을 적용했다. 실제 VOC PPTX170장과 문제5장 PNG를 만들었고 원본SHA는 동일했다. 121장 원본PNG와 고정 보고 문자를 제품 화면에서 나란히 표시·확대했다. 화면의 인증·통신은 로컬 재생이며 운영 등록 성공으로 간주하지 않는다.
+- 실제 Office 포함 Python50개, 번들7개, 배포70개, 미리보기 서비스6개·화면6개, IPC8개와 앱 전체 build/type/lint/format/token 검사를 통과했다. 격리 backend 전체와 서버 claim/lease4개도 통과했다. Windows 번들17,693파일과 Office14,696파일을 manifest로 확인했다. 이 시점의 Windows 실제 배포 ZIP 검사는 후속 GitHub Actions 실행 전이다.
+- 증거: `.local/diagnostics/source-preview-render-eolkae_c/verification.json`, `.local/diagnostics/2026-11-26-registration-preview/`, `.local/diagnostics/2026-11-26-office-bundle/verification.json`, `.local/releases/0.6.6-registration-preview/regression.json`. 운영 원문·Wiki·이력·승인 기록을 변경하지 않았다.
+
+
 ## 2026-11-26 — PPT 그림 문자 복구 0.6.5 배포
 
 - 사용자의 운영 서버·Windows 배포 승인에 따라45개 변경을 `39ac71076efa372397e9c7446402fbd0c86a6b38`/`v0.6.5`에 고정하고 [0.6.5 포터블](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/app-0.6.5-portable)을 공개했다. PPT 검토 대상 복원·개인 AI 그림 문자 복구·본문/초안 보존·취소를 포함한다. 실제6그림 판독과 보존은 [sources 검증](../sources/HISTORY.md#2026-11-26--저신뢰-pptx-그림-문자-복구와-실제-voc-검증d-170)을 따른다.

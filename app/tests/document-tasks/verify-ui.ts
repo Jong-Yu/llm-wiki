@@ -409,7 +409,7 @@ async function verify(): Promise<void> {
     );
     const reviewEffects = await effects();
     await until(
-      "[...document.querySelectorAll('a')].some(a=>a.textContent.trim()==='문자 검토와 승인' && a.getAttribute('href').includes('workflowId=') && a.getBoundingClientRect().width>0)",
+      "[...document.querySelectorAll('a')].some(a=>a.textContent.trim()==='내용 확인' && a.getAttribute('href').includes('/documents?workflowId=') && a.getBoundingClientRect().width>0)",
     );
     assert.equal(
       await js(
@@ -490,7 +490,7 @@ async function verify(): Promise<void> {
       "document.querySelector('[data-active=true] [data-task-id] a').click()",
     );
     await until(
-      "[...document.querySelectorAll('a')].some(a=>a.textContent.trim()==='문자 검토와 승인' && a.getAttribute('href').includes('workflowId=') && a.getBoundingClientRect().width>0)",
+      "[...document.querySelectorAll('a')].some(a=>a.textContent.trim()==='내용 확인' && a.getAttribute('href').includes('/documents?workflowId=') && a.getBoundingClientRect().width>0)",
     );
     assert.equal(
       await js(

@@ -1,0 +1,43 @@
+name: Windows portable runtime smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Public portable release tag (for example app-0.6.6-portable)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bundled-runtime:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Verify the released ZIP and run its bundled runtime
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: >-
+          python -B app/tests/windows-runtime-smoke.py
+          --release-tag "$env:RELEASE_TAG"
+          --work-dir "$env:RUNNER_TEMP\wiki-runtime-smoke"
+          --output "$env:GITHUB_WORKSPACE\artifacts\windows-runtime-smoke"
+      - name: Keep synthetic verification results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-runtime-smoke-${{ github.run_id }}
+          path: |
+            artifacts/windows-runtime-smoke/*.json
+            artifacts/windows-runtime-smoke/*.png
+          if-no-files-found: error
+          retention-days: 14

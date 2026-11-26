@@ -442,8 +442,8 @@ export function ImportDocumentProgress({
             )}
             {needsPageApproval && (
               <p>
-                경고 쪽을 원본과 대조하고 문자 사용을 승인해 주세요. 모든 쪽
-                확인과 최종 승인이 서버에 저장된 뒤 문서 저장과 관계 추출을
+                등록할 내용을 원본과 대조해 확인·수정한 뒤 ‘이 내용으로 등록
+                계속’을 선택해 주세요. 현재 내용으로 문서 저장과 관계 추출을
                 이어갑니다. 원래 경고는 처리 결과에도 남습니다.
               </p>
             )}
@@ -470,11 +470,11 @@ export function ImportDocumentProgress({
               className={`${styles.button} ${styles.primary}`}
               to={
                 conversion?.reference
-                  ? `/tasks?${new URLSearchParams({ workflowId: conversion.reference.conversionId })}`
-                  : '/notifications'
+                  ? `/documents?${new URLSearchParams({ workflowId: conversion.reference.conversionId })}`
+                  : '/documents'
               }
             >
-              문자 검토와 승인
+              내용 확인
             </Link>
           )}
           {actions

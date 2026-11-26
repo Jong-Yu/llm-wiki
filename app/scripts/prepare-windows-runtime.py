@@ -1,4 +1,4 @@
-"""해시로 고정한 Windows Python·OCR와 개인 소스를 새 설치용 폴더에 조립한다."""
+"""해시로 고정한 Windows Python·OCR·Office와 개인 소스를 새 설치용 폴더에 조립한다."""
 
 import argparse
 import hashlib
@@ -173,6 +173,67 @@ def extract_ocr(source, destination, seven_zip, temporary):
         raise ValueError('ocr_license_missing')
 
 
+def extract_office(source, destination, seven_zip, temporary):
+    """공식 포터블의 Office 트리만 펼치며 설치 프로그램·시스템 설정을 실행하지 않는다."""
+    listing = subprocess.run([str(seven_zip), 'l', '-slt', '-ba', str(source)],
+                             check=True, capture_output=True, text=True).stdout
+    expected = {}
+    total = 0
+    for block in listing.split('\n\n'):
+        fields = dict(line.split(' = ', 1) for line in block.splitlines() if ' = ' in line)
+        name = fields.get('Path', '').replace('\\', '/')
+        if not name.startswith('App/libreoffice/'):
+            continue
+        relative = safe_relative(name)
+        if 'Symbolic Link' in fields or 'Hard Link' in fields:
+            raise ValueError('office_archive_link')
+        if fields.get('Folder') == '+':
+            continue
+        key = relative.as_posix().casefold()
+        if key in expected:
+            raise ValueError('duplicate_office_archive_path')
+        # NSIS의 일부 생성 문자열 파일은 목록에 크기가 없다. 추출 뒤 실제 크기로 제한한다.
+        size = int(fields['Size']) if fields.get('Size') else None
+        if size is not None and size < 0:
+            raise ValueError('invalid_office_archive_size')
+        total += size or 0
+        expected[key] = (relative, size)
+    if not expected or len(expected) > 50000 or total > 2 * 1024 ** 3:
+        raise ValueError('unexpected_office_archive')
+    subprocess.run([str(seven_zip), 'x', '-y', '-bd', str(source),
+                    'App/libreoffice/*', '-o' + str(temporary)],
+                   check=True, capture_output=True)
+    root = temporary / 'App/libreoffice'
+    files = {}
+    for path in temporary.rglob('*'):
+        if path.is_symlink():
+            raise ValueError('office_archive_link')
+        if path.is_dir():
+            continue
+        normal_file(path)
+        relative = path.relative_to(temporary)
+        files[relative.as_posix().casefold()] = path
+    if set(files) != set(expected):
+        raise ValueError('unexpected_office_layout')
+    if sum(path.stat().st_size for path in files.values()) > 2 * 1024 ** 3:
+        raise ValueError('unexpected_office_archive')
+    for key, (_, size) in expected.items():
+        if size is not None and files[key].stat().st_size != size:
+            raise ValueError('office_file_size_mismatch')
+    # 실행에 필요한 전체 필터/공유 자료와 원배포의 라이선스를 함께 보존한다.
+    for name in ('program/soffice.exe', 'program/soffice.bin', 'program/mergedlo.dll',
+                 'program/sal3.dll', 'program/vcruntime140.dll', 'program/vcruntime140_1.dll',
+                 'program/msvcp140.dll'):
+        validate_pe(root / name)
+    for name in ('program/bootstrap.ini', 'program/fundamental.ini',
+                 'program/version.ini', 'share/registry/main.xcd', 'license.txt',
+                 'LICENSE.html', 'NOTICE', 'CREDITS.fodt'):
+        normal_file(root / name)
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError('office_output_exists')
+    root.rename(destination)
+
+
 def validate_pe(path):
     """다른 OS/CPU 바이너리를 이름만 바꾸어 넣지 않도록 PE x64를 확인한다."""
     with path.open('rb') as stream:
@@ -191,6 +252,11 @@ def validate_lock(lock, project):
         raise ValueError('requirements_lock_changed')
     if not re.fullmatch(r'3\.13\.\d+', lock['python']['version']):
         raise ValueError('unsupported_embedded_python')
+    office = lock.get('office', {})
+    if (office.get('format') != 'libreoffice-portable-nsis'
+            or not re.fullmatch(r'\d+\.\d+\.\d+', office.get('version', ''))
+            or urlparse(office.get('source_url', '')).scheme != 'https'):
+        raise ValueError('invalid_office_lock')
     names = set()
     for asset in lock['wheels']:
         filename = asset['filename']
@@ -256,7 +322,7 @@ def prepare(lock_path, cache, output, seven_zip, *, project=PROJECT):
     lock = json.loads(lock_path.read_text())
     validate_lock(lock, project)
     sources = source_files(project)
-    assets = [lock['python'], lock['ocr'], *lock['traineddata'], *lock['wheels']]
+    assets = [lock['python'], lock['ocr'], lock['office'], *lock['traineddata'], *lock['wheels']]
     downloads = {asset['filename']: fetch(asset, cache) for asset in assets}
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.windows-runtime-', dir=output.parent) as scratch:
@@ -274,6 +340,8 @@ def prepare(lock_path, cache, output, seven_zip, *, project=PROJECT):
         (python / 'python313._pth').write_text('python313.zip\n.\nLib/site-packages\n..\nimport site\n')
         extract_ocr(downloads[lock['ocr']['filename']], staging / 'ocr', seven_zip,
                     Path(scratch) / 'ocr-installer')
+        extract_office(downloads[lock['office']['filename']], staging / 'office', seven_zip,
+                       Path(scratch) / 'office-archive')
         for asset in lock['traineddata']:
             shutil.copyfile(downloads[asset['filename']], staging / 'ocr/tessdata' / asset['filename'])
         for path in ('python/python.exe', 'python/python313.dll', 'ocr/tesseract.exe'):
@@ -287,9 +355,12 @@ def prepare(lock_path, cache, output, seven_zip, *, project=PROJECT):
         notice = ('LLM Wiki Windows personal runtime\n\n'
                   f"CPython {lock['python']['version']}: python/LICENSE.txt\n"
                   f"Tesseract {lock['ocr']['version']}: ocr/doc/LICENSE and documentation\n"
+                  f"LibreOffice {lock['office']['version']}: office/license.txt, office/LICENSE.html, office/NOTICE\n"
+                  f"LibreOffice unmodified source: {lock['office']['source_url']}\n"
+                  f"LibreOffice portable distribution: {lock['office']['url']}\n"
                   'Tesseract language data: ocr/tessdata/LICENSE\n'
                   'Python package licenses: python/Lib/site-packages/*.dist-info/\n\n'
-                  'This application-private runtime does not modify the system Python or PATH.\n'
+                  'This application-private runtime does not install Office or modify the system Python or PATH.\n'
                   'No account credentials, user documents, history or server are included.\n'
                   'Install Codex CLI or Claude Code separately and sign in with your own account.\n'
                   'Configure the server address and authentication in the application.\n'
@@ -297,6 +368,8 @@ def prepare(lock_path, cache, output, seven_zip, *, project=PROJECT):
         (staging / 'THIRD_PARTY_NOTICES.txt').write_text(notice, encoding='utf-8')
         manifest = {'schema_version': 1, 'platform': 'win32', 'arch': 'x64',
                     'python_version': lock['python']['version'], 'ocr_version': lock['ocr']['version'],
+                    'office_version': lock['office']['version'],
+                    'office_source_url': lock['office']['source_url'],
                     'requirements_sha256': lock['requirements_sha256'],
                     'lock_sha256': sha256(lock_path), 'ai_cli_bundled': False,
                     'windows_execution_verified': False,
@@ -309,6 +382,7 @@ def prepare(lock_path, cache, output, seven_zip, *, project=PROJECT):
         staging.rename(output)
     return {'output': str(output), 'file_count': len(manifest['files']),
             'python': lock['python']['version'], 'ocr': lock['ocr']['version'],
+            'office': lock['office']['version'],
             'windows_execution_verified': False}
 
 

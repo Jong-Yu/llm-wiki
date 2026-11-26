@@ -13,6 +13,14 @@
     "url": "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/tesseract-ocr-w64-setup-5.5.3.20260724.exe",
     "sha256": "bee9e3434bd94fd65387d9be28cd467a41f61b1275383b55b0f59a1331270ae4"
   },
+  "office": {
+    "version": "26.2.4",
+    "format": "libreoffice-portable-nsis",
+    "filename": "LibreOfficePortable_26.2.4_MultilingualStandard.paf.exe",
+    "url": "https://download.documentfoundation.org/libreoffice/portable/26.2.4/LibreOfficePortable_26.2.4_MultilingualStandard.paf.exe",
+    "sha256": "4bde93374aef4409243505b20d16561a4628ac7591457dd01fc6e1ccf571ba65",
+    "source_url": "https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.4.2/src/"
+  },
   "traineddata": [
     {
       "filename": "eng.traineddata",

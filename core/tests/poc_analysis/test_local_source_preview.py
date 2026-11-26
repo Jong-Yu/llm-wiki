@@ -19,6 +19,7 @@ from docx import Document
 from openpyxl import Workbook
 from pypdf import PdfReader
 
+from core.client.office_runtime import find_libreoffice, office_environment
 from tools.source_preview_cli import PreviewError, network_guard, office_binary, prepare, render, sanitize_package
 
 
@@ -96,8 +97,56 @@ class LocalSourcePreviewTest(unittest.TestCase):
         binary = programs / "LibreOffice/program/soffice.exe"
         binary.parent.mkdir(parents=True)
         binary.write_bytes(b"isolated discovery fixture")
-        with patch("tools.source_preview_cli.sys.platform", "win32"), patch("tools.source_preview_cli.shutil.which", return_value=None), patch.dict(os.environ, {"PROGRAMFILES": str(programs)}, clear=True):
+        for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "LOCALAPPDATA", "ProgramFiles", "ProgramW6432"):
+            with self.subTest(name=name), patch("tools.source_preview_cli.sys.platform", "win32"), patch("core.client.office_runtime.shutil.which", return_value=None), patch.dict(os.environ, {name: str(programs)}, clear=True):
+                self.assertEqual(office_binary(), str(binary))
+
+    def test_bundled_office_is_used_without_system_installation_or_path(self):
+        from core.client import source_conversion_presentation as presentation
+        binary = self.root / "office/program/soffice.exe"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"isolated bundled discovery fixture")
+        module = self.root / "core/client/office_runtime.py"
+        with patch("core.client.office_runtime.__file__", str(module)), patch("tools.source_preview_cli.sys.platform", "win32"), patch("core.client.office_runtime.shutil.which", return_value=None), patch.dict(os.environ, {}, clear=True):
             self.assertEqual(office_binary(), str(binary))
+            self.assertEqual(presentation._libreoffice(), str(binary))
+        # 시스템 PATH에 별도 Office가 있어도 검증된 앱 번들이 우선한다.
+        with patch("core.client.office_runtime.shutil.which", return_value="other-office"):
+            self.assertEqual(find_libreoffice(platform="win32", runtime_root=self.root), str(binary))
+
+    def test_mac_font_environment_is_private_and_keeps_explicit_configuration(self):
+        with patch.dict(os.environ, {}, clear=True):
+            environment = office_environment(self.root, platform="darwin")
+            config = Path(environment["FONTCONFIG_FILE"])
+            self.assertEqual(config.parent, self.root)
+            self.assertIn("/System/Library/Fonts", config.read_text())
+            self.assertNotIn("FONTCONFIG_FILE", os.environ)
+        custom = self.root / "explicit"
+        custom.mkdir()
+        with patch.dict(os.environ, {"FONTCONFIG_FILE": "existing-fonts.conf"}, clear=True):
+            self.assertEqual(office_environment(custom, platform="darwin")["FONTCONFIG_FILE"], "existing-fonts.conf")
+        self.assertFalse((custom / "fonts.conf").exists())
+
+    def test_pptx_page_count_mismatch_is_not_shown_as_another_slide(self):
+        from pypdf import PdfWriter
+        source = self.root / "source.pptx"
+        namespace = "http://schemas.openxmlformats.org/presentationml/2006/main"
+        with ZipFile(source, "w") as package:
+            package.writestr("ppt/presentation.xml", f'<p:presentation xmlns:p="{namespace}"><p:sldIdLst><p:sldId id="1"/><p:sldId id="2"/></p:sldIdLst></p:presentation>')
+        original = source.read_bytes()
+
+        def export(command, **_kwargs):
+            self.assertIn('pdf:impress_pdf_Export:{"ExportHiddenSlides":{"type":"boolean","value":"true"}}', command)
+            writer = PdfWriter()
+            writer.add_blank_page(width=100, height=100)
+            with (self.root / "rendered/preview.pdf").open("wb") as output:
+                writer.write(output)
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch("tools.source_preview_cli.office_binary", return_value="fixture-office"), patch("tools.source_preview_cli.subprocess.run", side_effect=export):
+            with self.assertRaisesRegex(PreviewError, "preview_page_count_mismatch"):
+                prepare(self.root, "pptx")
+        self.assertEqual(source.read_bytes(), original)
 
     @unittest.skipUnless(os.environ.get("WIKI_TEST_OFFICE_PREVIEW") == "1", "실제 LibreOffice 검증은 명시 환경에서 실행")
     def test_real_docx_xlsx_static_layout_and_external_http_hit_zero(self):
@@ -152,6 +201,34 @@ class LocalSourcePreviewTest(unittest.TestCase):
             profile = (work / "profile/user/registrymodifications.xcu").read_text()
             self.assertIn('DisableMacrosExecution', profile)
         self.assertEqual(hits, [])
+
+    @unittest.skipUnless(os.environ.get("WIKI_TEST_OFFICE_PREVIEW") == "1", "실제 LibreOffice 검증은 명시 환경에서 실행")
+    def test_real_pptx_hidden_slides_keep_original_numbers(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("PPTX 합성 fixture 생성용 기존 node 없음")
+        repository = Path(__file__).resolve().parents[3]
+        source = self.root / "source.pptx"
+        script = "const pptxgen=require('./app/node_modules/pptxgenjs'); const doc=new pptxgen(); for (const text of ['VISIBLE FIRST','HIDDEN SECOND','VISIBLE THIRD']) {const slide=doc.addSlide();slide.addText(text,{x:1,y:1,w:8,h:1});} doc.writeFile({fileName:process.argv[1]});"
+        subprocess.run([node, "-e", script, str(source)], cwd=repository, check=True, capture_output=True, timeout=20)
+        from lxml import etree
+        with ZipFile(source) as package:
+            entries = {name: package.read(name) for name in package.namelist()}
+        hidden = etree.fromstring(entries["ppt/slides/slide2.xml"])
+        hidden.set("show", "0")
+        entries["ppt/slides/slide2.xml"] = etree.tostring(hidden)
+        with ZipFile(source, "w") as package:
+            for name, content in entries.items():
+                package.writestr(name, content)
+        original = source.read_bytes()
+        self.assertEqual(prepare(self.root, "pptx")["pageCount"], 3)
+        pages = PdfReader(self.root / "preview.pdf").pages
+        self.assertIn("HIDDEN SECOND", pages[1].extract_text())
+        self.assertIn("VISIBLE THIRD", pages[2].extract_text())
+        render(self.root, "pptx", 2)
+        with Image.open(self.root / "page.png") as image:
+            self.assertGreater(image.width, 0)
+        self.assertEqual(source.read_bytes(), original)
 
     @unittest.skipUnless(os.environ.get("WIKI_TEST_OFFICE_PREVIEW") == "1", "실제 LibreOffice 검증은 명시 환경에서 실행")
     def test_real_pptx_and_guarded_legacy_capability(self):

@@ -120,6 +120,9 @@ export async function verifyNotifications(
   let registrations = 0,
     executions = 0;
   let running = false;
+  let inspectedDetail = detail;
+  let claimRequired = true;
+  const executionRequests: AnalysisExecuteRequest[] = [];
   let preserveLarge = true;
   const analysis = {
     inspectRuntime: async (): Promise<string[]> => [],
@@ -139,15 +142,19 @@ export async function verifyNotifications(
       ok: true;
       data: {
         detail: AnalysisDetail;
-        mode: 'start' | null;
+        mode: 'start' | 'resume' | null;
         blockers: string[];
         checkedAt: string;
       };
     }> => ({
       ok: true,
       data: {
-        detail,
-        mode: running ? null : 'start',
+        detail: inspectedDetail,
+        mode: running
+          ? null
+          : inspectedDetail.job.state === 'awaiting_cli'
+            ? 'start'
+            : 'resume',
         blockers: running ? ['이미 실행 중'] : [],
         checkedAt: now,
       },
@@ -156,9 +163,13 @@ export async function verifyNotifications(
       request: AnalysisExecuteRequest,
     ): Promise<{ ok: true; data: AnalysisDetail }> => {
       executions += 1;
+      executionRequests.push(request);
       running = true;
-      assert.equal(request.executionClaimId, workflow.execution?.claim_id);
-      return { ok: true, data: detail };
+      assert.equal(
+        request.executionClaimId,
+        claimRequired ? workflow.execution?.claim_id : undefined,
+      );
+      return { ok: true, data: inspectedDetail };
     },
   };
   const create = (): NotificationService =>
@@ -485,6 +496,177 @@ export async function verifyNotifications(
     assert.equal(executions, 2);
     assert.equal(registrations, 1);
     assert.equal(workflow.execution?.claim_id, hex('7'));
+    const resumedWorkflow = structuredClone(workflow);
+    /** 로컬 작업 복원과 다른 화면의 일반 execute가 같은 서버 등록 기록으로 이어지는지 검사합니다. */
+    function prepareResume(
+      deviceId: string = device.deviceId,
+    ): AnalysisExecuteRequest {
+      running = false;
+      workflow = structuredClone(resumedWorkflow);
+      workflow.state = 'stopped';
+      assert.ok(workflow.execution && workflow.target_document);
+      workflow.execution.device_id = deviceId;
+      inspectedDetail = {
+        ...detail,
+        job: {
+          ...detail.job,
+          actor: { ...detail.job.actor, ...actor },
+          user_id: actor.user_id,
+          tenant: actor.tenant,
+          request_id: workflow.resume_request_id,
+          source_ref: { ...detail.job.source_ref, ...source },
+          targets: [
+            { ...detail.job.targets[0]!, document: workflow.target_document },
+          ],
+          registration: {
+            mode: 'preserve',
+            title: workflow.title,
+            conversion_ref: workflow.conversion_ref,
+          },
+        },
+      };
+      return {
+        connectionId: context.active.connectionId,
+        jobId: detail.job.job_id,
+        expectedJobRevision: detail.job.job_revision,
+        mode: detail.job.state === 'awaiting_cli' ? 'start' : 'resume',
+      };
+    }
+    const approvalsBeforeResume = posted.filter((item): boolean =>
+      item.path.endsWith('/approve'),
+    ).length;
+    let directResume = prepareResume();
+    let resumed = await service.execute(directResume);
+    assert.ok(
+      resumed.ok,
+      'same PC direct execute must obtain the reviewed registration claim internally',
+    );
+    assert.equal(
+      executionRequests.at(-1)?.executionClaimId,
+      workflow.execution?.claim_id,
+    );
+    assert.deepEqual(
+      resumed.data.receipts,
+      detail.receipts,
+      'saved Wiki receipts must survive the resume',
+    );
+    directResume = prepareResume(hex('9'));
+    resumed = await create().execute(directResume);
+    assert.ok(
+      resumed.ok,
+      'an expired other-device registration must resume without PC selection',
+    );
+    assert.equal(workflow.execution?.device_id, device.deviceId);
+    // 실제 장애와 같이 등록은 연결됐지만 CLI claim이 소비되기 전에 멈춘 상태입니다.
+    directResume = prepareResume();
+    inspectedDetail.job = {
+      ...inspectedDetail.job,
+      state: 'awaiting_cli',
+      run_id: null,
+      reported_status: null,
+      lease_status: 'none',
+    };
+    directResume.mode = 'start';
+    assert.ok(
+      (await create().execute(directResume)).ok,
+      'stopped linked registration with no consumed CLI claim must start from the existing job',
+    );
+    for (const stage of ['claim', 'registration'] as const) {
+      directResume = prepareResume();
+      const oldEntry = (
+        await readProcessJournal(recovery, context, 'notification-executions')
+      ).find((entry): boolean => entry.key === workflow.workflow_id);
+      assert.ok(oldEntry);
+      await writeProcessJournal(
+        recovery,
+        context,
+        'notification-executions',
+        workflow.workflow_id,
+        {
+          workflowId: workflow.workflow_id,
+          requestId: hex('8'),
+          expectedRevision: workflow.revision,
+          stage,
+          reclaim: false,
+          priorClaimId: null,
+        },
+        oldEntry.revision,
+      );
+      const claimsBefore = posted.filter((item): boolean =>
+        item.path.endsWith('/claim'),
+      ).length;
+      assert.ok(
+        (await create().execute(directResume)).ok,
+        `stopped ${stage} journal must obtain a fresh claim`,
+      );
+      assert.equal(
+        posted.filter((item): boolean => item.path.endsWith('/claim')).length,
+        claimsBefore + 1,
+      );
+      assert.equal(
+        posted.filter((item): boolean => item.path.endsWith('/claim')).at(-1)
+          ?.body.reclaim,
+        true,
+      );
+    }
+    directResume = prepareResume();
+    const executionsBeforeDuplicate = executions;
+    const duplicate = await Promise.all([
+      service.execute(directResume),
+      service.execute(directResume),
+    ]);
+    assert.equal(duplicate.filter((result): boolean => result.ok).length, 1);
+    assert.equal(executions, executionsBeforeDuplicate + 1);
+    directResume = prepareResume(hex('9'));
+    running = true;
+    const executionsBeforeBlocked = executions;
+    let blocked = await service.execute(directResume);
+    assert.ok(
+      !blocked.ok && blocked.error.code === 'analysis_execution_blocked',
+    );
+    assert.equal(
+      executions,
+      executionsBeforeBlocked,
+      'active lease must never be taken over',
+    );
+    for (const changedField of ['user_id', 'tenant'] as const) {
+      directResume = prepareResume();
+      inspectedDetail.job[changedField] = 'different';
+      blocked = await service.execute(directResume);
+      assert.ok(
+        !blocked.ok && blocked.error.code === 'registration_job_changed',
+      );
+    }
+    directResume = prepareResume();
+    inspectedDetail.job.actor = {
+      ...inspectedDetail.job.actor,
+      profile_id: 'different',
+    };
+    blocked = await service.execute(directResume);
+    assert.ok(!blocked.ok && blocked.error.code === 'registration_job_changed');
+    directResume = prepareResume();
+    workflow.approval = null;
+    blocked = await service.execute(directResume);
+    assert.ok(!blocked.ok && blocked.error.code === 'content_review_required');
+    assert.equal(
+      posted.filter((item): boolean => item.path.endsWith('/approve')).length,
+      approvalsBeforeResume,
+    );
+    assert.equal(registrations, 1, 'resume must retain the original job');
+    directResume = prepareResume();
+    const requestsBeforePlain = posted.length;
+    inspectedDetail.job.registration = null;
+    claimRequired = false;
+    assert.ok(
+      (await service.execute(directResume)).ok,
+      'ordinary personal analysis keeps its direct execution path',
+    );
+    assert.equal(posted.length, requestsBeforePlain);
+    claimRequired = true;
+    inspectedDetail = detail;
+    console.log(
+      'PASS public execute resumes reviewed registrations on the same or expired device, recovers unconsumed/stale claims, preserves saved receipts, blocks duplicate/active/foreign work, and keeps ordinary analysis unchanged',
+    );
     const runtimeRoot = join(root, 'notification-runtime');
     await mkdir(join(runtimeRoot, 'tools'), { recursive: true });
     const argvPath = join(runtimeRoot, 'executed.json');

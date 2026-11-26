@@ -8,13 +8,13 @@ import os
 from pathlib import Path
 import posixpath
 from io import BytesIO
-import shutil
 import subprocess
 import sys
 from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.parse import unquote
 
 from core.runtime.client_process import no_window_options
+from core.client.office_runtime import find_libreoffice, office_environment
 
 MAX_EDGE = 1600
 MAX_PNG = 8 * 1024 * 1024
@@ -27,18 +27,10 @@ class PreviewError(Exception):
 
 
 def office_binary() -> str:
-    """기존 설치만 찾으며 설치·다운로드를 수행하지 않는다."""
-    candidates = [shutil.which("soffice"), shutil.which("libreoffice")]
-    if sys.platform == "darwin":
-        # Homebrew의 셸 wrapper보다 설치 앱의 실제 실행 파일을 우선한다.
-        candidates.insert(0, "/Applications/LibreOffice.app/Contents/MacOS/soffice")
-    elif sys.platform == "win32":
-        for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            if os.environ.get(name):
-                candidates.append(str(Path(os.environ[name]) / "LibreOffice/program/soffice.exe"))
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return str(Path(candidate).resolve())
+    """앱 번들 또는 기존 설치를 찾으며 설치·다운로드를 수행하지 않는다."""
+    binary = find_libreoffice(platform=sys.platform)
+    if binary:
+        return binary
     raise PreviewError("office_preview_unavailable")
 
 
@@ -165,6 +157,15 @@ def prepare(work: Path, format: str) -> dict:
     if format != "ppt":
         input_file = work / ("preview." + format)
         limited = sanitize_package(source, input_file)
+    expected_slides = None
+    if format == "pptx":
+        from lxml import etree
+        with ZipFile(input_file) as package:
+            root = etree.fromstring(package.read("ppt/presentation.xml"),
+                                    etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False))
+        expected_slides = len(root.findall("{*}sldIdLst/{*}sldId"))
+        if expected_slides < 1:
+            raise PreviewError("preview_document_invalid")
     profile = work / "profile"
     user = profile / "user"
     user.mkdir(parents=True, mode=0o700)
@@ -184,12 +185,15 @@ def prepare(work: Path, format: str) -> dict:
     output.mkdir(mode=0o700)
     temporary = work / "temporary"
     temporary.mkdir(mode=0o700)
+    # 숨김 슬라이드도 포함해야 원본 슬라이드 번호와 화면의 위치가 일치한다.
+    export = ('pdf:impress_pdf_Export:{"ExportHiddenSlides":{"type":"boolean","value":"true"}}'
+              if format == "pptx" else "pdf")
     result = subprocess.run(
         [*guard, binary, "-env:UserInstallation=" + profile.as_uri(), "--headless", "--nologo",
-         "--nodefault", "--norestore", "--convert-to", "pdf", "--outdir", str(output), str(input_file)],
+         "--nodefault", "--norestore", "--convert-to", export, "--outdir", str(output), str(input_file)],
         # 시간 제한·취소는 main의 같은 프로세스 그룹/Windows Job이 자식까지 회수한다.
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-        env={**os.environ, "SAL_DISABLE_OPENCL": "1", "SAL_USE_VCLPLUGIN": "svp",
+        env={**office_environment(work), "SAL_DISABLE_OPENCL": "1", "SAL_USE_VCLPLUGIN": "svp",
              "TMPDIR": str(temporary), "TEMP": str(temporary), "TMP": str(temporary),
              "XDG_CACHE_HOME": str(work / "cache")},
         **no_window_options())
@@ -202,6 +206,8 @@ def prepare(work: Path, format: str) -> dict:
         count = len(document)
     if not 1 <= count <= 100000:
         raise PreviewError("preview_document_too_complex")
+    if expected_slides is not None and count != expected_slides:
+        raise PreviewError("preview_page_count_mismatch")
     return {"pageCount": count, "kind": "office", "limited": limited or format == "ppt"}
 
 

@@ -8,6 +8,7 @@ import {
 import type {
   AnalysisDetailResult,
   AnalysisExecutionInspectionResult,
+  AnalysisExecuteRequest,
 } from '@contracts/analysis.contract';
 import type { AnalysisService } from '@main/backend/AnalysisService';
 import { isAppSender } from './isAppSender';
@@ -19,6 +20,7 @@ export function registerAnalysisExecutionHandlers(
   getWindow: () => BrowserWindow | null,
   rendererLocation: string,
   analysis: AnalysisService,
+  execute: (request: AnalysisExecuteRequest) => Promise<AnalysisDetailResult>,
 ): void {
   /** 허용 창·정확한 인자 수와 계약을 확인하고 내부 예외 원문을 공개하지 않습니다. */
   function register(
@@ -70,7 +72,7 @@ export function registerAnalysisExecutionHandlers(
   register(
     ANALYSIS_CHANNELS.execute,
     (value: unknown): Promise<AnalysisDetailResult> =>
-      analysis.execute(analysisExecuteRequestSchema.parse(value)),
+      execute(analysisExecuteRequestSchema.parse(value)),
   );
   register(
     ANALYSIS_CHANNELS.stopLocal,

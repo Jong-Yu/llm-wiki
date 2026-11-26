@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { NotificationContentReader } from './NotificationContentReader';
 import {
@@ -43,7 +43,11 @@ import type { SourceConversionRun } from '@contracts/sourceConversion.contract';
 import type { DocumentTask } from '@contracts/documentTasks.contract';
 import type { AnalysisContext, ConnectionService } from './ConnectionService';
 import type { AnalysisService } from './AnalysisService';
-import type { AnalysisJob } from '@contracts/analysis.contract';
+import type {
+  AnalysisJob,
+  AnalysisExecuteRequest,
+  AnalysisDetailResult,
+} from '@contracts/analysis.contract';
 import type { NotificationDevice } from './notificationDevice';
 import {
   apiFailure,
@@ -265,7 +269,7 @@ export class NotificationService {
       return claimId
         ? apiFailure(
             'execution_claim_invalid',
-            '이 작업의 실행 승인 식별자가 아닙니다.',
+            '문서 등록의 실행 정보가 현재 작업과 일치하지 않습니다.',
           )
         : null;
     const result = await this.#api(
@@ -292,9 +296,115 @@ export class NotificationService {
     )
       return apiFailure(
         'execution_claim_invalid',
-        '승인한 작업과 현재 PC의 실행 소유권을 다시 확인해 주세요.',
+        '문서 등록의 진행 기록이 변경되었습니다. 현재 문서에서 등록을 다시 이어 주세요.',
       );
     return null;
+  }
+
+  /** 모든 화면의 등록 재개를 같은 서버 실행권 경로로 연결하고 일반 분석은 그대로 실행합니다. */
+  async execute(
+    request: AnalysisExecuteRequest,
+  ): Promise<AnalysisDetailResult> {
+    const finish = this.#starts.begin(
+      `execute:${request.connectionId}:${request.jobId}`,
+    );
+    if (!finish)
+      return apiFailure(
+        'execution_busy',
+        '문서 등록을 이어서 처리하고 있습니다.',
+      );
+    try {
+      const context = await this.#connection.analysisContext(
+        request.connectionId,
+        true,
+      );
+      if ('ok' in context) return context;
+      const inspected = await this.#analysis.inspectExecution(request);
+      if (!inspected.ok) return inspected;
+      const { job } = inspected.data.detail;
+      if (
+        job.job_id !== request.jobId ||
+        job.job_revision !== request.expectedJobRevision ||
+        (job.state === 'awaiting_cli' ? 'start' : 'resume') !== request.mode
+      )
+        return apiFailure(
+          'conflict',
+          '문서의 진행 상태가 변경되었습니다. 최신 상태를 확인해 주세요.',
+        );
+      if (!inspected.data.mode)
+        return apiFailure(
+          'analysis_execution_blocked',
+          inspected.data.blockers.join(' '),
+        );
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      const reference = job.registration?.conversion_ref;
+      if (!reference || request.executionClaimId)
+        return this.#analysis.execute(request, context);
+      const session = {
+        connectionId: request.connectionId,
+        expectedScope: {
+          userId: context.active.userId,
+          tenant: context.selection.tenant,
+          profileId: context.selection.profile,
+          policyRevision: context.active.policyRevision,
+          ...(context.active.accessRevision
+            ? { accessRevision: context.active.accessRevision }
+            : {}),
+        },
+        workflowId: reference.conversion_id,
+      };
+      const detail = await this.read(session);
+      if (!detail.ok)
+        return detail.error.code === 'not_found'
+          ? this.#analysis.execute(request, context)
+          : detail;
+      const workflow = detail.data.workflow;
+      if (!workflow.pages.length)
+        return this.#analysis.execute(request, context);
+      if (!workflow.approval)
+        return apiFailure(
+          'content_review_required',
+          '등록할 내용을 확인한 뒤 문서 등록을 계속해 주세요.',
+        );
+      if (
+        workflow.workflow_id !== reference.conversion_id ||
+        workflow.conversion_ref?.conversion_id !== reference.conversion_id ||
+        workflow.conversion_ref.conversion_revision !==
+          reference.conversion_revision ||
+        workflow.source_ref.source_id !== job.source_ref.source_id ||
+        workflow.source_ref.source_version !== job.source_ref.source_version ||
+        workflow.source_ref.source_sha256 !== job.source_ref.source_sha256 ||
+        workflow.source_ref.registration_revision !==
+          job.source_ref.registration_revision ||
+        workflow.execution?.job_id !== job.job_id ||
+        workflow.resume_request_id !== job.request_id ||
+        job.targets.length !== 1 ||
+        workflow.target_document !== job.targets[0]?.document ||
+        job.tenant !== context.selection.tenant ||
+        job.user_id !== context.active.userId ||
+        job.actor.profile_id !== context.selection.profile
+      )
+        return apiFailure(
+          'registration_job_changed',
+          '등록할 내용과 문서의 진행 기록이 일치하지 않습니다. 현재 상태를 확인해 주세요.',
+        );
+      const continued = await this.continue({
+        ...session,
+        requestId: randomUUID().replaceAll('-', ''),
+        expectedRevision: workflow.revision,
+      });
+      if (!continued.ok) return continued;
+      if (continued.data.jobId !== job.job_id)
+        return apiFailure(
+          'registration_job_changed',
+          '문서 등록의 재개 결과를 확인하지 못했습니다. 저장 상태를 확인해 주세요.',
+        );
+      const current = await this.#analysis.inspectExecution(request);
+      if (!this.#connection.isAnalysisCurrent(context)) return changed();
+      return current.ok ? { ok: true, data: current.data.detail } : current;
+    } finally {
+      finish();
+    }
   }
 
   /** 화면에 고정된 주체·작업 공간을 쓰기 직전에도 검증합니다. */
@@ -335,9 +445,9 @@ export class NotificationService {
     if (!result.ok) {
       const messages: Record<string, string> = {
         correction_basis_changed:
-          '수정된 문자를 다시 확인한 뒤 승인해 주세요. 구버전 앱이라면 새 버전으로 열어 주세요.',
+          '수정된 내용이 바뀌었습니다. 최신 내용을 확인한 뒤 등록을 계속해 주세요.',
         approval_basis_changed:
-          '승인한 수정본과 현재 처리 기준이 다릅니다. 최신 검토 기록을 다시 확인해 주세요.',
+          '등록할 내용과 현재 처리 기준이 다릅니다. 최신 내용을 확인해 주세요.',
         page_approval_required:
           '확인 전이거나 보류한 쪽이 남아 있습니다. 해당 쪽을 다시 인식하거나 직접 수정한 뒤 문자 사용을 확인해 주세요.',
       };
@@ -789,7 +899,7 @@ export class NotificationService {
     if (!finish)
       return apiFailure(
         'approval_busy',
-        '같은 승인의 저장 결과를 확인하고 있습니다.',
+        '같은 내용의 저장 결과를 확인하고 있습니다.',
       );
     try {
       const context = await this.#context(request, true);
@@ -872,7 +982,7 @@ export class NotificationService {
       )
         return apiFailure(
           'approval_unconfirmed',
-          '승인 영수증이 요청과 일치하는지 다시 조회해 주세요.',
+          '내용 저장 결과를 확인하지 못했습니다. 현재 문서의 상태를 다시 확인해 주세요.',
         );
       await removeProcessJournal(this.#recovery, context, entry);
       return { ok: true, data };
@@ -899,7 +1009,7 @@ export class NotificationService {
       workflow.execution.device_id !== this.#device.deviceId
     )
       blockers.push(
-        `${workflow.execution.device_name}에서 이어서 처리 중입니다.`,
+        '이 문서의 등록이 진행 중입니다. 처리 상태를 확인하고 있습니다.',
       );
     if (['running', 'complete'].includes(workflow.state))
       blockers.push(
@@ -950,7 +1060,7 @@ export class NotificationService {
       )
         return apiFailure(
           'approval_required',
-          '확인할 쪽과 저장할 문서를 승인한 뒤 이어서 처리해 주세요.',
+          '등록할 내용과 저장할 문서를 확인한 뒤 이어서 처리해 주세요.',
         );
       if (
         !['failed', 'stopped'].includes(workflow.state) &&
@@ -959,7 +1069,7 @@ export class NotificationService {
       )
         return apiFailure(
           'execution_owned',
-          '다른 PC가 이 작업을 이어서 처리하고 있습니다.',
+          '이 문서의 등록이 진행 중입니다. 처리 상태를 확인하고 있습니다.',
         );
       const blockers = await this.#analysis.inspectRuntime();
       if (blockers.length)
@@ -990,10 +1100,15 @@ export class NotificationService {
         reclaim: false,
         priorClaimId: null,
       };
+      const pendingReclaim =
+        previous?.stage === 'claim' &&
+        previous.reclaim &&
+        previous.priorClaimId === workflow.execution?.claim_id;
       if (
         workflow.execution &&
+        !pendingReclaim &&
         (previous?.stage === 'started' ||
-          (!previous && ['failed', 'stopped'].includes(workflow.state)))
+          ['failed', 'stopped'].includes(workflow.state))
       ) {
         if (workflow.execution.job_id) {
           const observed = await this.#analysis.inspectExecution({
@@ -1041,7 +1156,7 @@ export class NotificationService {
         if (!previous && workflow.revision !== request.expectedRevision)
           return apiFailure(
             'conflict',
-            '승인 상태가 변경되었습니다. 다시 확인해 주세요.',
+            '등록 내용이 변경되었습니다. 현재 내용을 확인해 주세요.',
           );
         if (!entry)
           entry = await writeProcessJournal(
@@ -1077,7 +1192,7 @@ export class NotificationService {
       if (!execution?.claim_id || execution.device_id !== this.#device.deviceId)
         return apiFailure(
           'execution_owned',
-          '실행 기기를 확인하지 못했습니다.',
+          '문서 등록의 진행 상태가 변경되었습니다. 현재 상태를 확인해 주세요.',
         );
       if (!this.#connection.isAnalysisCurrent(context)) return changed();
       let jobId = execution.job_id;
@@ -1085,7 +1200,7 @@ export class NotificationService {
         if (!workflow.target_document || !workflow.conversion_ref)
           return apiFailure(
             'approval_required',
-            '승인한 원본과 저장 문서를 확인해 주세요.',
+            '등록할 원본과 저장 문서를 확인해 주세요.',
           );
         entry = await writeProcessJournal(
           this.#recovery,

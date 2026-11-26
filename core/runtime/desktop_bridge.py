@@ -21,7 +21,12 @@ import uuid
 from .client_platform import ClientPlatformError, private_directory, read_private, write_new, is_windows
 from .client_process import WindowsJob, process_arguments, spawn_options, stop_windows, start_owned_process
 
-MODULES = frozenset({"tools.analysis_cli", "tools.question_cli", "tools.source_conversion_cli", "tools.proposal_cli"})
+# Electron이 사용하는 고정 진입점만 허용하며 사용자 입력으로 모듈을 추가하지 않는다.
+MODULES = frozenset({
+    "tools.analysis_cli", "tools.question_cli", "tools.source_conversion_cli", "tools.proposal_cli",
+    "tools.source_preview_cli", "tools.source_image_recovery_cli", "tools.attach_file_cli",
+    "tools.search_terms_cli", "tools.web_search_cli", "tools.comparison_cli",
+})
 CANCEL = b'{"type":"cancel"}\n'
 
 

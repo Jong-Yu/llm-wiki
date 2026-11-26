@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { SourceVisualPreviewService } from '../../src/main/backend/SourceVisualPreviewService';
+import { personalEnvironment } from '../../src/main/backend/personalProcess';
 import type {
   AnalysisContext,
   ConnectionService,
@@ -16,6 +17,23 @@ import { sourceVisualPreviewRequestSchema } from '@contracts/sourceVisualPreview
 import type { SourceVisualPreviewRequest } from '@contracts/sourceVisualPreviews.contract';
 
 const projectRoot = resolve(process.cwd(), '..');
+// Windows의 일반 설치 경로는 자식 실행기에 전달하되 임의 비밀 환경은 제외합니다.
+for (const name of ['ProgramFiles', 'PROGRAMFILES(X86)', 'ProgramW6432']) {
+  const previous = process.env[name];
+  process.env[name] = 'C:\\Program Files';
+  try {
+    assert.equal(personalEnvironment()[name], 'C:\\Program Files');
+  } finally {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  }
+}
+process.env.WIKI_PREVIEW_TEST_SECRET = 'must-not-cross-process-boundary';
+try {
+  assert.equal(personalEnvironment().WIKI_PREVIEW_TEST_SECRET, undefined);
+} finally {
+  delete process.env.WIKI_PREVIEW_TEST_SECRET;
+}
 const python = join(projectRoot, '.venv/bin/python');
 const root = await mkdtemp('/private/tmp/wiki-source-preview-test-');
 const generated = spawnSync(python, [

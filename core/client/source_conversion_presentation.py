@@ -16,11 +16,11 @@ import sys
 import tempfile
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET
-from xml.sax.saxutils import escape
 from zipfile import BadZipFile, ZipFile
 
 from core.runtime.client_process import no_window_options
 from . import source_conversion_relations as relations_view
+from .office_runtime import find_libreoffice, office_environment
 from .source_conversion_report import MAX_TEXT, OutputLimit
 
 P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
@@ -656,17 +656,8 @@ def pptx(path, result, *, picture_text=None, selected_slides=None, literal_text_
 
 
 def _libreoffice():
-    """PATH 및 운영체제의 일반 설치 위치만 확인하며 설치를 실행하지 않는다."""
-    executable = shutil.which("soffice") or shutil.which("libreoffice")
-    if executable:
-        return executable
-    candidates = [Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")]
-    if os.name == "nt":
-        for key in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
-            root = os.environ.get(key)
-            if root:
-                candidates.append(Path(root) / "LibreOffice/program/soffice.exe")
-    return next((str(path) for path in candidates if path.is_file()), None)
+    """미리보기와 같은 앱 번들·기존 설치를 사용하며 설치를 실행하지 않는다."""
+    return find_libreoffice(platform="win32" if os.name == "nt" else sys.platform, environment=os.environ)
 
 
 @contextmanager
@@ -693,15 +684,7 @@ def libreoffice_converted(path, suffix, convert_to, output_suffix, *, timeout=90
             '</oor:items>', encoding="utf-8")
         output = root / "output"
         output.mkdir()
-        environment = None
-        if sys.platform == "darwin" and "FONTCONFIG_FILE" not in os.environ:
-            # fontconfig를 쓰는 macOS LibreOffice(예: Homebrew)는 설정이 없으면 시스템 글꼴을 못 찾아 한글을
-            # 빈칸으로 그린다. 이번 실행에만 macOS 글꼴 폴더를 알려 준다(D-169). 사용자 설정은 바꾸지 않는다.
-            folders = ("/System/Library/Fonts", "/Library/Fonts", str(Path.home() / "Library/Fonts"))
-            (root / "fonts.conf").write_text(
-                '<?xml version="1.0"?><fontconfig>' + "".join(f"<dir>{escape(folder)}</dir>" for folder in folders)
-                + f"<cachedir>{escape(str(root / 'font-cache'))}</cachedir></fontconfig>", encoding="utf-8")
-            environment = {**os.environ, "FONTCONFIG_FILE": str(root / "fonts.conf")}
+        environment = office_environment(root)
         try:
             process = subprocess.run([executable, "-env:UserInstallation=" + profile.as_uri(),
                 "--headless", "--nologo", "--nodefault", "--norestore", "--convert-to",

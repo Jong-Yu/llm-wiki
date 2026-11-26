@@ -41,8 +41,10 @@ const bundle = await build({
         export { createIpcRegistrar } from '@main/ipc/registerIpcHandlers';
         export { registerNotificationHandlers } from '@main/ipc/registerNotificationHandlers';
         export { registerRegistrationDraftHandlers } from '@main/ipc/registerRegistrationDraftHandlers';
+        export { registerAnalysisExecutionHandlers } from '@main/ipc/registerAnalysisExecutionHandlers';
         export { NOTIFICATION_CHANNELS } from '@contracts/notifications.contract';
         export { REGISTRATION_DRAFT_CHANNELS } from '@contracts/registrationDrafts.contract';
+        export { ANALYSIS_CHANNELS } from '@contracts/analysis.contract';
       `;
       },
     },
@@ -316,4 +318,46 @@ await test('zero-argument connection-style operations keep count and failure sem
       message: '앱 요청의 입력을 확인해 주세요.',
     },
   });
+});
+
+await test('every public analysis execute uses registration routing after sender and request validation', async () => {
+  product.handlers.clear();
+  const executed = [];
+  const analysis = {
+    execute: () =>
+      assert.fail('public execute must not bypass registration routing'),
+    inspectExecution: async () => notificationFailure,
+    stopLocal: async () => notificationFailure,
+  };
+  product.registerAnalysisExecutionHandlers(
+    () => window,
+    renderer,
+    analysis,
+    async (request) => {
+      executed.push(request);
+      return notificationFailure;
+    },
+  );
+  const execute = product.handlers.get(product.ANALYSIS_CHANNELS.execute);
+  const request = {
+    connectionId: 'fixture',
+    jobId: 'a'.repeat(32),
+    expectedJobRevision: 'b'.repeat(64),
+    mode: 'resume',
+  };
+  assert.deepEqual(await execute(event, request), notificationFailure);
+  assert.deepEqual(executed, [request]);
+  assert.equal(
+    (await execute({ ...event, sender: {} }, request)).error.code,
+    'forbidden',
+  );
+  assert.equal(
+    (await execute(event, { ...request, jobId: 'bad' })).error.code,
+    'invalid_request',
+  );
+  assert.equal(
+    (await execute(event, request, request)).error.code,
+    'invalid_request',
+  );
+  assert.equal(executed.length, 1);
 });

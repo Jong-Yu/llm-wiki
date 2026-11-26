@@ -67,7 +67,7 @@ Wiki 상세는 본문·원본·이력·AI 작업 탭을 주소에 반영합니�
 
 등록 원본은 별도 상세 페이지에서 판본별 미리보기·내려받기와 파생 Wiki·작업 링크를 제공합니다. 실제 파일 API에서 선택한 판본의 크기·SHA-256을 확인합니다. 지원 형식은 MD/TXT/PDF/XLSX/DOCX/PPTX/PPT와 PNG/JPG/JPEG/GIF/WebP/BMP/TIF/TIFF이며 최대20MiB입니다. Markdown은 서식으로, 텍스트와1MiB 초과 Markdown은 원문 텍스트로 표시합니다. 바이너리 원본은 원본 파일과 변환 보고를 분리해 열람합니다. 없는 과거 판본을 최신 판본으로 대신 열지 않습니다. 원본 조회는 분석을 시작하지 않습니다.
 
-등록 내용 확인 화면은 PDF·이미지와 DOCX/XLSX/PPTX 원본을 편집 내용 옆에 표시합니다. Office 미리보기에는 PC에 설치된 LibreOffice가 필요합니다. 표시용 사본의 외부 연결·실행 개체를 제거하므로 원본 앱과 글꼴·배치가 다를 수 있고, XLSX는 인쇄 페이지 기준입니다. 구형 PPT는 필요한 격리를 지원하지 않는 환경에서 원본 열기 또는 PPTX로 저장한 파일을 사용합니다. 렌더는 PC에서 수행하며 원본 파일은 변경하지 않습니다.
+등록 내용 확인 화면은 PDF·이미지와 DOCX/XLSX/PPTX 원본을 편집 내용 옆에 표시합니다. 0.6.6부터 Windows 배포본은 원본 렌더러를 포함하므로 Office 미리보기용 LibreOffice를 따로 설치하지 않아도 됩니다. 외부 실행 환경을 사용하는 macOS/Linux에서는 기존 LibreOffice를 사용합니다. 표시용 사본의 외부 연결·실행 개체를 제거하므로 원본 앱과 글꼴·배치가 다를 수 있고, XLSX는 인쇄 페이지 기준입니다. 구형 PPT는 필요한 격리를 지원하지 않는 환경에서 원본 열기 또는 PPTX로 저장한 파일을 사용합니다. 렌더는 PC에서 수행하며 원본 파일은 변경하지 않습니다.
 
 문서 목록 각 행의 **삭제** 아이콘은 확인 후 해당 원본 또는 Wiki만 휴지통으로 옮깁니다. 사이드바 하단 **휴지통**에서 별도 화면을 열어 **복원**할 수 있습니다. 원본 삭제는 파생 Wiki를 함께 삭제하지 않습니다. Wiki 삭제는 새 검색·질문 근거에서 제외하지만 기존 이력과 과거 답변은 보존합니다. 다른 사용자의 수정과 충돌하면 목록을 새로 고쳐 대상을 다시 선택합니다.
 
@@ -161,7 +161,7 @@ node app/scripts/build-design-tokens.mjs --check
 
 앱 시작과 진단에서 기본 명령 `codex`/`claude`에 한해 설치 위치를 탐지합니다. Claude는 사용자 홈의 `.local/bin`을 먼저 확인하고 절대 PATH 디렉터리, macOS Homebrew 또는 Windows 사용자 npm/WinGet 위치를 확인합니다. Windows의 native `claude.exe`도 PATH 등록 전부터 찾으며 Codex의 기존 Mac 번들 우선순위는 유지합니다. 파일·POSIX 실행 권한을 검사하고 빈/상대 PATH는 제외합니다. 직접 고른 경로는 자동으로 바꾸지 않으며 명시 재검색이 성공했을 때만 초안의 경로를 교체합니다. 재검색 실패 시 기존 경로를 유지하며 저장·다음 앱 시작 적용 규칙도 동일합니다.
 
-기본 실행 설정은 `WIKI_CLIENT_ROOT`·`WIKI_PYTHON`이며 개발 실행에서는 프로젝트 `.venv`를 찾습니다. 이전 `WIKI_ANALYSIS_PROJECT_ROOT`·`WIKI_CLIENT_PYTHON`·`WIKI_ANALYSIS_PYTHON`도 시작 때 정규화합니다. 저장된 앱 설정이 있으면 그 설정을 사용합니다. 선택한 Tesseract 디렉터리는 실행 PATH에, 언어 데이터 폴더는 `TESSDATA_PREFIX`에 반영합니다. Windows x64 설치 파일은 개인 실행기·Python·필수 패키지·한국어/영어 OCR을 포함하고 처음 시작할 때 자동 선택합니다. Codex·Claude Code는 포함하지 않습니다. macOS/Linux 패키지는 기존 외부 실행 환경을 사용합니다.
+기본 실행 설정은 `WIKI_CLIENT_ROOT`·`WIKI_PYTHON`이며 개발 실행에서는 프로젝트 `.venv`를 찾습니다. 이전 `WIKI_ANALYSIS_PROJECT_ROOT`·`WIKI_CLIENT_PYTHON`·`WIKI_ANALYSIS_PYTHON`도 시작 때 정규화합니다. 저장된 앱 설정이 있으면 그 설정을 사용합니다. 선택한 Tesseract 디렉터리는 실행 PATH에, 언어 데이터 폴더는 `TESSDATA_PREFIX`에 반영합니다. Windows x64 배포본은 개인 실행기·Python·필수 패키지·한국어/영어 OCR·Office 원본 렌더러를 포함하고 처음 시작할 때 자동 선택합니다. Codex·Claude Code는 포함하지 않습니다. macOS/Linux 패키지는 기존 외부 실행 환경을 사용합니다.
 
 Windows 앱의 **AI 호출 확인**이 실패할 때는 [Claude 진단 v2 ZIP](https://github.com/Jong-Yu/llm-wiki-releases/releases/tag/claude-windows-diagnostic-v2)을 내려받아 안의 `diagnose-claude-windows.cmd`와 `claude_call_diagnostic.py`를 현재 쓰는 `LLM Wiki.exe` 옆에 함께 풉니다. 같은 이름의 이전 진단 파일만 교체하고 CMD 파일을 더블클릭합니다. 소스에서는 `scripts/diagnose-claude-windows.cmd`와 `../tools/claude_call_diagnostic.py`입니다. 저장된 앱 설정의 실행기로 같은 고정 연결 질문을 한 번 호출하고 새 `claude-connection-report*.txt`를 열어 줍니다. 보고서의 `protocol`은 `claude-call-diagnostic-v2`입니다.
 
@@ -218,7 +218,7 @@ npm run package:portable      # 현재 OS의 포터블 ZIP
 
 Windows는 **설치 EXE 하나만 옮깁니다.** 설치 후 서버 주소·인증 정보를 설정하고 사용할 AI CLI를 직접 설치·로그인합니다. 개인 실행기 ZIP이나 시스템 Python·Tesseract 설치는 필요하지 않습니다. `resources/personal-runtime`에 앱 전용 Python 3.13.17, 고정 패키지 40개, Tesseract 5.5.3과 한국어·영어 데이터를 둡니다. 기존에 저장한 외부 실행 경로가 있으면 그 설정을 유지합니다. 단, 저장된 경로가 다른 앱 사본(이전 포터블 등)에 들어 있던 실행기이면 이 앱의 실행기로 바꿔 저장합니다([D-144](../docs/domains/platform/DECISIONS.md#d-144--이전-앱-사본의-실행기-경로를-현재-앱-실행기로-바꾸기-2026-11-22)).
 
-`scripts/package-desktop.mjs`는 Windows 빌드마다 새 임시 폴더에서 실행기를 준비하고 asar 밖의 리소스로 포함합니다. `config/windows-runtime.lock.json`의 HTTPS URL·SHA256과 현재 `requirements.lock`을 대조하며 원문·위키·토큰·개인 설정을 포함하지 않습니다. Python·Tesseract·언어 데이터·wheel의 라이선스를 보존합니다. 최초 빌드는 해당 배포 서버에 접근해야 합니다. 일반 패키징의 재사용 캐시는 프로젝트 `.local/build-cache/windows-runtime/`에 보관하며, 릴리스 명령은 별도 임시 캐시를 사용한 뒤 정리합니다. 빌드용 Python은 프로젝트 `.venv`, 시스템 Python 순서로 찾고 `WIKI_BUILD_PYTHON`으로 실행 파일을 지정할 수 있습니다. NSIS 추출을 지원하는 7-Zip은 electron-builder 도구를 사용하며 필요한 경우 `WIKI_BUILD_7ZIP`으로 지정합니다. 대상 PC에서 pip나 별도 설치 프로그램을 실행하지 않습니다. Python 배포 방식은 [공식 embeddable 안내](https://docs.python.org/3/using/windows.html#the-embeddable-package)를 따릅니다.
+`scripts/package-desktop.mjs`는 Windows 빌드마다 새 임시 폴더에서 실행기를 준비하고 asar 밖의 리소스로 포함합니다. `config/windows-runtime.lock.json`의 HTTPS URL·SHA256과 현재 `requirements.lock`을 대조하며 원문·위키·토큰·개인 설정을 포함하지 않습니다. Python·Tesseract·언어 데이터·LibreOffice·wheel의 라이선스와 LibreOffice 원본 소스 배포 주소를 보존합니다. 최초 빌드는 해당 배포 서버에 접근해야 합니다. 일반 패키징의 재사용 캐시는 프로젝트 `.local/build-cache/windows-runtime/`에 보관하며, 릴리스 명령은 별도 임시 캐시를 사용한 뒤 정리합니다. 빌드용 Python은 프로젝트 `.venv`, 시스템 Python 순서로 찾고 `WIKI_BUILD_PYTHON`으로 실행 파일을 지정할 수 있습니다. NSIS 추출을 지원하는 7-Zip은 electron-builder 도구를 사용하며 필요한 경우 `WIKI_BUILD_7ZIP`으로 지정합니다. 대상 PC에서 pip나 별도 설치 프로그램을 실행하지 않습니다. Python 배포 방식은 [공식 embeddable 안내](https://docs.python.org/3/using/windows.html#the-embeddable-package)를 따릅니다.
 
 현재 `llm-wiki-personal-runtime-0.1.1.zip`은 core/tools Python 소스, 규약 조립에 필요한 의미 지침 한 파일과 고정 requirements를 포함합니다. 압축을 풀고 `python3 -m tools.setup_runtime --role personal`을 실행한 뒤 앱에서 폴더와 `.venv` Python을 선택합니다. Windows는 `py -3.12 -m tools.setup_runtime --role personal`을 사용합니다. 원문·위키·히스토리·토큰·개인 설정·테스트·`.venv`는 포함하지 않습니다. 이 ZIP은 Python/OCR/계정의 설치 완료를 뜻하지 않습니다.
 
